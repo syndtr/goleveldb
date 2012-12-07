@@ -35,6 +35,8 @@ func Hash(data []byte, seed uint32) uint32 {
 
 	rest := buf.Bytes()
 	switch len(rest) {
+	default:
+		panic("not reached")
 	case 3:
 		h += uint32(rest[2]) << 16
 		fallthrough
@@ -45,8 +47,7 @@ func Hash(data []byte, seed uint32) uint32 {
 		h += uint32(rest[0])
 		h *= m
 		h ^= (h >> r)
-	default:
-		panic("not reached")
+	case 0:
 	}
 
 	return h
