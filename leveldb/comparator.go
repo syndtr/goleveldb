@@ -15,7 +15,7 @@ package leveldb
 
 import "bytes"
 
-type Comparator interface {
+type BasicComparator interface {
 	// Three-way comparison.
 	//
 	// Returns value:
@@ -23,6 +23,10 @@ type Comparator interface {
 	//   == 0 iff "a" == "b",
 	//   > 0 iff "a" > "b"
 	Compare(a, b []byte) int
+}
+
+type Comparator interface {
+	BasicComparator
 
 	// The name of the comparator.  Used to check for comparator
 	// mismatches (i.e., a DB created with one comparator is
