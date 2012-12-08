@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
@@ -19,7 +19,6 @@ import (
 	"encoding/binary"
 	"sort"
 	"leveldb"
-// 	"fmt"
 )
 
 const maxInt = int(^uint(0) >> 1)
@@ -107,10 +106,8 @@ func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error
 }
 
 type block struct {
-	buf          []byte
+	buf, rbuf    []byte
 
-	br, rr       *bytes.Reader
-	
 	restartLen   int
 	restartStart int
 }
@@ -137,12 +134,10 @@ func newBlock(buf []byte) (b *block, err error) {
 		err = leveldb.NewCorruptionError("bad restart offset in block")
 		return
 	}
-	rr := bytes.NewReader(buf[restartStart:len(buf)-4])
 
 	b = &block{
 		buf:          buf,
-		br:           br,
-		rr:           rr,
+		rbuf:         buf[restartStart:len(buf)-4],
 		restartLen:   int(restartLen),
 		restartStart: restartStart,
 	}
@@ -163,54 +158,8 @@ func (b *block) NewIterator(cmp leveldb.Comparator) leveldb.Iterator {
 		return &leveldb.EmptyIterator{}
 	}
 
-	return &blockIterator{b: b, cmp: cmp}
-}
-
-func (b *block) getRestartOffset(idx int) (offset int, err error) {
-	if idx >= b.restartLen {
-		panic("out of range")
-	}
-
-	_, err = b.rr.Seek(int64(idx) * 4, 0)
-	if err != nil {
-		return
-	}
-	var tmp uint32
-	err = binary.Read(b.rr, binary.LittleEndian, &tmp)
-	offset = int(tmp)
-	return
-}
-
-func (b *block) getRestartRange(idx int) (r *restartRange, err error) {
-	var start, end int
-	start, err = b.getRestartOffset(idx)
-	if err != nil {
-		return
-	}
-	if start >= b.restartStart {
-		goto corrupt
-	}
-
-	if idx + 1 < b.restartLen {
-		end, err = b.getRestartOffset(idx + 1)
-		if err != nil {
-			return
-		}
-		if end >= b.restartStart {
-			goto corrupt
-		}
-	} else {
-		end = b.restartStart
-	}
-
-	if start < end {
-		r = &restartRange{raw: b.buf[start:end]}
-		r.buf = bytes.NewBuffer(r.raw)
-		return
-	}
-
-corrupt:
-	return nil, leveldb.NewCorruptionError("bad restart range in block")
+	i := &blockIterator{b: b, cmp: cmp, rd: bytes.NewReader(b.rbuf)}
+	return i
 }
 
 type keyVal struct {
@@ -347,13 +296,13 @@ func (r *restartRange) Value() []byte {
 }
 
 type blockIterator struct {
-	b   *block
-	cmp leveldb.Comparator 
+	b    *block
+	cmp   leveldb.Comparator
 
-	err error
-	ri  int           // restart index
-	rr  *restartRange // restart range
-	
+	err   error
+	ri    int           // restart index
+	rr    *restartRange // restart range
+	rd    *bytes.Reader // restart reader
 }
 
 func (i *blockIterator) First() bool {
@@ -373,33 +322,34 @@ func (i *blockIterator) Seek(key []byte) (r bool) {
 		return false
 	}
 
-	// catch panic raised by binary search
-// 	defer func() {
-// 		if x := recover(); x != i {
-// 			panic(x)
-// 		}
-// 	}()
+	func() {
+		// catch panic raised by binary search
+		defer func() {
+			if x := recover(); x != i {
+				panic(x)
+			}
+		}()
 
-	// binary search in restart array to find the last
-	// restart point with a 'key' < 'target'
-	i.ri = sort.Search(i.b.restartLen, func(x int) bool {
-		rr, err := i.b.getRestartRange(x)
-		if err != nil {
-			i.err = err
-			panic(i)
-		}
-		err = rr.Next()
-		if err != nil {
-			i.err = err
-			panic(i)
-		}
-		return i.cmp.Compare(rr.Key(), key) > 0
-	})
+		// binary search in restart array to find the last
+		// restart point with a 'key' < 'target'
+		i.ri = sort.Search(i.b.restartLen, func(x int) bool {
+			rr, err := i.getRestartRange(x)
+			if err != nil {
+				i.err = err
+				panic(i)
+			}
+			err = rr.Next()
+			if err != nil {
+				i.err = err
+				panic(i)
+			}
+			return i.cmp.Compare(rr.Key(), key) > 0
+		})
+	}()
 
 	if i.ri > 0 {
 		i.ri--
 	}
-	
 
 	i.rr = nil
 
@@ -491,6 +441,54 @@ func (i *blockIterator) Value() []byte {
 
 func (i *blockIterator) Error() error { return i.err }
 
+
+func (i *blockIterator) getRestartOffset(idx int) (offset int, err error) {
+	if idx >= i.b.restartLen {
+		panic("out of range")
+	}
+
+	_, err = i.rd.Seek(int64(idx) * 4, 0)
+	if err != nil {
+		return
+	}
+	var tmp uint32
+	err = binary.Read(i.rd, binary.LittleEndian, &tmp)
+	offset = int(tmp)
+	return
+}
+
+func (i *blockIterator) getRestartRange(idx int) (r *restartRange, err error) {
+	var start, end int
+	start, err = i.getRestartOffset(idx)
+	if err != nil {
+		return
+	}
+	if start >= i.b.restartStart {
+		goto corrupt
+	}
+
+	if idx + 1 < i.b.restartLen {
+		end, err = i.getRestartOffset(idx + 1)
+		if err != nil {
+			return
+		}
+		if end >= i.b.restartStart {
+			goto corrupt
+		}
+	} else {
+		end = i.b.restartStart
+	}
+
+	if start < end {
+		r = &restartRange{raw: i.b.buf[start:end]}
+		r.buf = bytes.NewBuffer(r.raw)
+		return
+	}
+
+corrupt:
+	return nil, leveldb.NewCorruptionError("bad restart range in block")
+}
+
 func (i *blockIterator) setRestartRange() {
-	i.rr, i.err = i.b.getRestartRange(i.ri)
+	i.rr, i.err = i.getRestartRange(i.ri)
 }
