@@ -107,6 +107,7 @@ type Constructor interface {
 	Add(key, value []byte) error
 	Finish() (int, error)
 	NewIterator() leveldb.Iterator
+	CustomTest(h *Harness)
 }
 
 type BlockConstructor struct {
@@ -137,6 +138,8 @@ func (t *BlockConstructor) Finish() (size int, err error) {
 func (t *BlockConstructor) NewIterator() leveldb.Iterator {
 	return t.br.NewIterator(leveldb.DefaultComparator)
 }
+
+func (t *BlockConstructor) CustomTest(h *Harness) {}
 
 type TableConstructor struct {
 	b  *bytes.Buffer
@@ -172,13 +175,31 @@ func (t *TableConstructor) Finish() (size int, err error) {
 	}
 	o := &leveldb.Options{
 		BlockRestartInterval: 3,
+		FilterPolicy:         leveldb.NewBloomFilter(10),
 	}
-	t.tr, err = NewTable(r, o)
+	t.tr, err = NewTable(r, o, 0)
 	return
 }
 
 func (t *TableConstructor) NewIterator() leveldb.Iterator {
 	return t.tr.NewIterator(&leveldb.ReadOptions{})
+}
+
+func (t *TableConstructor) CustomTest(h *Harness) {
+	ro := &leveldb.ReadOptions{}
+	for i := range h.keys {
+		rkey, rval, err := t.tr.Get(h.keys[i], ro)
+		if err != nil {
+			h.t.Errorf("table: CustomTest: Get: error '%v'", err)
+			continue
+		}
+		if !bytes.Equal(rkey, h.keys[i]) {
+			h.t.Error("table: CustomTest: Get: key are invalid, ", rkey, "!=", h.keys[i])
+		}
+		if !bytes.Equal(rval, h.values[i]) {
+			h.t.Error("table: CustomTest: Get: value are invalid, ", rval, "!=", h.values[i])
+		}
+	}
 }
 
 type Harness struct {
@@ -224,6 +245,7 @@ func (h *Harness) Test(name string, c Constructor) {
 	h.t.Log("final size of the", name, "is:", size, "bytes")
 
 	h.testSimpleScan(c)
+	c.CustomTest(h)
 }
 
 func (h *Harness) testSimpleScan(c Constructor) {
@@ -390,7 +412,7 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		size: int64(w.b.Len()),
 	}
 
-	tr, err := NewTable(r, o)
+	tr, err := NewTable(r, o, 0)
 	if err != nil {
 		t.Fatal("error when creating table reader instance:", err.Error())
 	}
