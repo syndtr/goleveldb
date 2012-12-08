@@ -13,6 +13,8 @@
  
 package leveldb
 
+import "sync"
+
 // Database flag
 type OptionsFlag uint
 
@@ -43,6 +45,8 @@ const (
 
 // Database options
 type Options struct {
+	mu sync.Mutex
+
 	// Comparator used to define the order of keys in the table.
 	// Default: a comparator that uses lexicographic byte-wise ordering
 	//
@@ -160,8 +164,13 @@ func (o *Options) GetMaxOpenFiles() int {
 }
 
 func (o *Options) GetBlockCache() Cache {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	if o == nil {
 		return nil
+	}
+	if o.BlockCache == nil {
+		o.BlockCache = NewLRUCache(8 << 20, nil)
 	}
 	return o.BlockCache
 }
