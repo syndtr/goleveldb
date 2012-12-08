@@ -65,7 +65,7 @@ func TestBlock(t *testing.T) {
 	for i := 1; i < len(cases)+1; i++ {
 		for j := 0; j < i; j++ {
 			if !iter.Next() {
-				t.Error("early eof")
+				t.Error("early eof, err: '%v'", iter.Error())
 			}
 			if !bytes.Equal(iter.Key(), iter.Value()) {
 				t.Error("key and value are not equal, ", iter.Key(), "!=", iter.Value())
@@ -77,7 +77,7 @@ func TestBlock(t *testing.T) {
 
 		for j := i; j > 0; j-- {
 			if !iter.Prev() && j > 1 {
-				t.Error("early eof")
+				t.Error("early eof, err: '%v'", iter.Error())
 			}
 			if j > 1 {
 				if !bytes.Equal(iter.Key(), iter.Value()) {
@@ -100,7 +100,7 @@ func TestBlock(t *testing.T) {
 		nc := cases[len(cases)-i:]
 		for j := i; j > 0; j-- {
 			if !iter.Prev() {
-				t.Error("early eof")
+				t.Errorf("early eof, err: '%v'", iter.Error())
 			}
 			if !bytes.Equal(iter.Key(), iter.Value()) {
 				t.Error("key and value are not equal, ", iter.Key(), "!=", iter.Value())
@@ -112,7 +112,7 @@ func TestBlock(t *testing.T) {
 
 		for j := 0; j < i; j++ {
 			if !iter.Next() && j < i-1 {
-				t.Error("early eof")
+				t.Errorf("early eof, err: '%v'", iter.Error())
 			}
 			if j < i-1 {
 				if !bytes.Equal(iter.Key(), iter.Value()) {
@@ -127,7 +127,7 @@ func TestBlock(t *testing.T) {
 
 	for i := 0; i < len(cases); i++ {
 		if !iter.Seek([]byte(cases[i])) {
-			t.Errorf("key '%s' is not found", cases[i])
+			t.Errorf("key '%s' is not found, err: '%v'", cases[i], iter.Error())
 		}
 		if !bytes.Equal(iter.Key(), iter.Value()) {
 			t.Error("key and value are not equal, ", iter.Key(), "!=", iter.Value())
