@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 type Cache interface {
@@ -20,19 +20,19 @@ type Cache interface {
 	// Return a cache object that corresponds to the mapping.
 	// The caller must call obj.Release() when the returned mapping is no
 	// longer needed.
-	Insert(key, value []byte, charge int) CacheObject
+	Set(key []byte, value interface{}, charge int) CacheObject
 
-	// If the cache has no mapping for "key", returns nil.
+	// If the cache has no mapping for "key", returns nil, false.
 	//
 	// Else return a cache object that corresponds to the mapping.
 	// The caller must call obj.Release() when the returned mapping is no
 	// longer needed.
-	Lookup(key []byte) CacheObject
+	Get(key []byte) (ret CacheObject, ok bool)
 
-	// If the cache contains entry for key, erase it.  Note that the
+	// If the cache contains entry for key, delete it.  Note that the
 	// underlying entry will be kept around until all existing handles
 	// to it have been released.
-	Erase(key []byte)
+	Delete(key []byte)
 
 	// Return a new numeric id.  May be used by multiple clients who are
 	// sharing the same cache to partition the key space.  Typically the
@@ -42,13 +42,11 @@ type Cache interface {
 }
 
 type CacheObject interface {
-	// Release the cache object.
+	// Release the cache object. 
 	// REQUIRES: handle must not have been released yet.
-	// REQUIRES: handle must have been returned by a method on *this.
 	Release()
 
 	// Return the value hold by cache object.
 	// REQUIRES: handle must not have been released yet.
-	// REQUIRES: handle must have been returned by a method on *this.
-	Value() []byte
+	Value() interface{}
 }
