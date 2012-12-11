@@ -13,6 +13,10 @@
  
 package leveldb
 
+var (
+	ErrNotFound = errors.New("not found")
+)
+
 type ErrInvalid string
 
 func (e ErrInvalid) Error() string {

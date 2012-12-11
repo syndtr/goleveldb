@@ -92,6 +92,9 @@ func (t *Table) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, er
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	if !index_iter.Seek(key) {
 		err = index_iter.Error()
+		if err == nil {
+			err = leveldb.ErrNotFound
+		}
 		return
 	}
 
@@ -105,6 +108,9 @@ func (t *Table) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, er
 		iter, err = t.getBlock(handle, o)
 		if !iter.Seek(key) {
 			err = iter.Error()
+			if err == nil {
+				err = leveldb.ErrNotFound
+			}
 			return
 		}
 		rkey, rvalue = iter.Key(), iter.Value()
