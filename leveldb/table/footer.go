@@ -61,7 +61,7 @@ func readFooter(r leveldb.Reader) (metaHandle, indexHandle *blockHandle, err err
 	if err != nil {
 		return
 	} else if fi.Size() < int64(footerSize) {
-		err = leveldb.NewInvalidArgumentError("file is too short to be an sstable")
+		err = leveldb.ErrInvalid("file is too short to be an sstable")
 		return
 	}
 
@@ -73,7 +73,7 @@ func readFooter(r leveldb.Reader) (metaHandle, indexHandle *blockHandle, err err
 	}
 	
 	if bytes.Compare(buf[handlesSize:], magicBytes) != 0 {
-		err = leveldb.NewInvalidArgumentError("not an sstable (bad magic number)")
+		err = leveldb.ErrInvalid("not an sstable (bad magic number)")
 		return
 	}
 

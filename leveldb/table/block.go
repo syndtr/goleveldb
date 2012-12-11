@@ -34,7 +34,7 @@ func (p *blockHandle) DecodeFrom(b []byte) (int, error) {
 		p.Size, m = binary.Uvarint(b[n:])
 	}
 	if n <= 0 || m <= 0 {
-		return 0, leveldb.NewCorruptionError("bad block handle")
+		return 0, leveldb.ErrCorrupt("bad block handle")
 	}
 	return n+m, nil
 }
@@ -89,7 +89,7 @@ func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error
 		crc := leveldb.NewCRC32C()
 		crc.Write(raw)
 		if crc.Sum32() != sum {
-			err = leveldb.NewCorruptionError("block checksum mismatch")
+			err = leveldb.ErrCorrupt("block checksum mismatch")
 			return
 		}
 	}
@@ -114,7 +114,7 @@ type block struct {
 
 func newBlock(buf []byte) (b *block, err error) {
 	if len(buf) < 8 {
-		err = leveldb.NewCorruptionError("block to short")
+		err = leveldb.ErrCorrupt("block to short")
 		return
 	}
 
@@ -131,7 +131,7 @@ func newBlock(buf []byte) (b *block, err error) {
 	// Calculate restart start offset
 	restartStart := len(buf) - (1 + int(restartLen)) * 4
 	if restartStart > len(buf) - 4 {
-		err = leveldb.NewCorruptionError("bad restart offset in block")
+		err = leveldb.ErrCorrupt("bad restart offset in block")
 		return
 	}
 
@@ -228,7 +228,7 @@ func (r *restartRange) Next() (err error) {
 	return
 
 corrupt:
-	return leveldb.NewCorruptionError("bad entry in block")
+	return leveldb.ErrCorrupt("bad entry in block")
 }
 
 func (r *restartRange) Prev() (err error) {
@@ -486,7 +486,7 @@ func (i *blockIterator) getRestartRange(idx int) (r *restartRange, err error) {
 	}
 
 corrupt:
-	return nil, leveldb.NewCorruptionError("bad restart range in block")
+	return nil, leveldb.ErrCorrupt("bad restart range in block")
 }
 
 func (i *blockIterator) setRestartRange() {

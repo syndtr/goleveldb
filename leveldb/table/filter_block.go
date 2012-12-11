@@ -95,7 +95,7 @@ type filterBlock struct {
 
 func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, err error) {
 	if len(buf) < 5 {
-		err = leveldb.NewCorruptionError("filter block to short")
+		err = leveldb.ErrCorrupt("filter block to short")
 		return
 	}
 
@@ -107,7 +107,7 @@ func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, er
 		return
 	}
 	if offsetsStart > uint32(len(buf)) - 5 {
-		err = leveldb.NewCorruptionError("bad restart offset in filter block")
+		err = leveldb.ErrCorrupt("bad restart offset in filter block")
 		return
 	}
 
