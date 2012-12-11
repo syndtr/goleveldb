@@ -171,13 +171,13 @@ func (t *TableConstructor) Finish() (size int, err error) {
 	r := &reader{
 		r:    bytes.NewReader(t.b.Bytes()),
 		name: "table",
-		size: int64(t.b.Len()),
+		size: int64(size),
 	}
 	o := &leveldb.Options{
 		BlockRestartInterval: 3,
 		FilterPolicy:         leveldb.NewBloomFilter(10),
 	}
-	t.tr, err = NewTable(r, o, 0)
+	t.tr, err = NewTable(r, uint64(size), o, 0)
 	return
 }
 
@@ -406,13 +406,14 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 	if err := tb.Finish(); err != nil {
 		t.Fatal("error when finalizing table:", err.Error())
 	}
+	size := w.b.Len()
 	r := &reader{
 		r:    bytes.NewReader(w.b.Bytes()),
 		name: "table",
-		size: int64(w.b.Len()),
+		size: int64(size),
 	}
 
-	tr, err := NewTable(r, o, 0)
+	tr, err := NewTable(r, uint64(size), o, 0)
 	if err != nil {
 		t.Fatal("error when creating table reader instance:", err.Error())
 	}

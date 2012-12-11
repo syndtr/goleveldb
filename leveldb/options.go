@@ -58,10 +58,6 @@ type Options struct {
 	// Specify the database flag.
 	Flag OptionsFlag
 
-	// Use the specified object to interact with the environment,
-	// e.g. to read/write files
-	Env Env
-
 	// Amount of data to build up in memory (backed by an unsorted log
 	// on disk) before converting to a sorted on-disk file.
 	//
@@ -140,13 +136,6 @@ func (o *Options) HasFlag(flag OptionsFlag) bool  {
 		return false
 	}
 	return (o.Flag | flag) != 0
-}
-
-func (o *Options) GetEnv() Env {
-	if o == nil || o.Env == nil {
-		return DefaultEnv
-	}
-	return o.Env
 }
 
 func (o *Options) GetWriteBuffer() int {

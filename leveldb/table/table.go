@@ -33,9 +33,9 @@ type Table struct {
 	cacheId uint64
 }
 
-func NewTable(r leveldb.Reader, o *leveldb.Options, cacheId uint64) (t *Table, err error) {
+func NewTable(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Table, err error) {
 	var metaHandle, indexHandle *blockHandle
-	metaHandle, indexHandle, err = readFooter(r)
+	metaHandle, indexHandle, err = readFooter(r, size)
 	if err != nil {
 		return
 	}

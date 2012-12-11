@@ -15,7 +15,6 @@ package table
 
 import (
 	"io"
-	"os"
 	"bytes"
 	"encoding/binary"
 	"leveldb"
@@ -55,19 +54,15 @@ func writeFooter(w io.Writer, metaHandle, indexHandle *blockHandle) (n int, err 
 	return len(buf) + len(magicBytes), nil
 }
 
-func readFooter(r leveldb.Reader) (metaHandle, indexHandle *blockHandle, err error) {
-	var fi os.FileInfo
-	fi, err = r.Stat()
-	if err != nil {
-		return
-	} else if fi.Size() < int64(footerSize) {
+func readFooter(r leveldb.Reader, size uint64) (metaHandle, indexHandle *blockHandle, err error) {
+	if size < uint64(footerSize) {
 		err = leveldb.ErrInvalid("file is too short to be an sstable")
 		return
 	}
 
 	var n int
 	buf := make([]byte, footerSize)
-	n, err = r.ReadAt(buf, fi.Size() - int64(footerSize))
+	n, err = r.ReadAt(buf, int64(size) - footerSize)
 	if err != nil {
 		return
 	}
