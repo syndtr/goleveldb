@@ -10,13 +10,13 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
-	"testing"
 	"bytes"
 	"leveldb"
+	"testing"
 )
 
 var cases = []string{

@@ -14,11 +14,11 @@
 package table
 
 import (
-	"testing"
-	"leveldb"
 	"bytes"
+	"leveldb"
 	"math/rand"
 	"os"
+	"testing"
 	"time"
 )
 
@@ -52,7 +52,7 @@ func (w *writer) Sync() error {
 }
 
 type reader struct {
-	r *bytes.Reader
+	r    *bytes.Reader
 	name string
 	size int64
 }
@@ -252,7 +252,8 @@ func (h *Harness) testSimpleScan(c Constructor) {
 	iter := c.NewIterator()
 	var first, last bool
 
-first:	for i := range h.keys {
+first:
+	for i := range h.keys {
 		if !iter.Next() {
 			h.t.Error("SimpleScan: Forward: unxepected eof")
 		}
@@ -281,11 +282,12 @@ first:	for i := range h.keys {
 		goto first
 	}
 
-last:	if iter.Next() {
+last:
+	if iter.Next() {
 		h.t.Error("SimpleScan: Forward: expecting eof")
 	}
 
-	for i := len(h.keys)-1; i >= 0; i-- {
+	for i := len(h.keys) - 1; i >= 0; i-- {
 		if !iter.Prev() {
 			h.t.Error("SimpleScan: Backward: unxepected eof")
 		}
@@ -418,15 +420,14 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		t.Fatal("error when creating table reader instance:", err.Error())
 	}
 
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k0")),   0,      0)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k01a")), 0,      0)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k02")),  0,      0)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k03")),  0,      0)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k04")),  10000,  11000)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k0")), 0, 0)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k01a")), 0, 0)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k02")), 0, 0)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k03")), 0, 0)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k04")), 10000, 11000)
 	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k04a")), 210000, 211000)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k05")),  210000, 211000)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k06")),  510000, 511000)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k07")),  510000, 511000)
-	offsetBetween(t, tr.ApproximateOffsetOf([]byte("xyz")),  610000, 612000)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k05")), 210000, 211000)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k06")), 510000, 511000)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("k07")), 510000, 511000)
+	offsetBetween(t, tr.ApproximateOffsetOf([]byte("xyz")), 610000, 612000)
 }
-

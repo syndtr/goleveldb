@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 import (
@@ -28,9 +28,9 @@ func Hash(data []byte, seed uint32) uint32 {
 	for buf.Len() >= 4 {
 		var w uint32
 		binary.Read(buf, binary.LittleEndian, &w)
-		h += w;
-		h *= m;
-		h ^= (h >> 16);
+		h += w
+		h *= m
+		h ^= (h >> 16)
 	}
 
 	rest := buf.Bytes()

@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 type Iterator interface {
@@ -61,14 +61,14 @@ type EmptyIterator struct {
 	Err error
 }
 
-func (*EmptyIterator) First() bool { return false }
-func (*EmptyIterator) Last() bool { return false }
+func (*EmptyIterator) First() bool          { return false }
+func (*EmptyIterator) Last() bool           { return false }
 func (*EmptyIterator) Seek(key []byte) bool { return false }
-func (*EmptyIterator) Next() bool { return false }
-func (*EmptyIterator) Prev() bool { return false }
-func (*EmptyIterator) Key() []byte { return nil }
-func (*EmptyIterator) Value() []byte { return nil }
-func (i *EmptyIterator) Error() error { return i.Err }
+func (*EmptyIterator) Next() bool           { return false }
+func (*EmptyIterator) Prev() bool           { return false }
+func (*EmptyIterator) Key() []byte          { return nil }
+func (*EmptyIterator) Value() []byte        { return nil }
+func (i *EmptyIterator) Error() error       { return i.Err }
 
 type TwoLevelIterator struct {
 	getter IteratorGetter

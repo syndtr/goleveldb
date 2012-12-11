@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 import "bytes"
@@ -72,10 +72,14 @@ func (BytewiseComparator) Name() string {
 
 func (BytewiseComparator) FindShortestSeparator(a, b []byte) []byte {
 	i, n := 0, len(a)
-	if n > len(b) { n = len(b) }
-	for i < n && a[i] == b[i] { i++ }
+	if n > len(b) {
+		n = len(b)
+	}
+	for i < n && a[i] == b[i] {
+		i++
+	}
 
-	if (i >= n) {
+	if i >= n {
 		// Do not shorten if one string is a prefix of the other
 	} else if c := a[i]; c < 0xff && c+1 < b[i] {
 		r := make([]byte, i+1)
@@ -90,7 +94,7 @@ func (BytewiseComparator) FindShortSuccessor(b []byte) []byte {
 	var res []byte
 	for _, c := range b {
 		if c != 0xff {
-			res = append(res, c + 1)
+			res = append(res, c+1)
 			return res
 		}
 		res = append(res, c)

@@ -14,11 +14,11 @@
 package table
 
 import (
-	"io"
 	"bytes"
 	"encoding/binary"
-	"sort"
+	"io"
 	"leveldb"
+	"sort"
 )
 
 const maxInt = int(^uint(0) >> 1)
@@ -36,11 +36,11 @@ func (p *blockHandle) DecodeFrom(b []byte) (int, error) {
 	if n <= 0 || m <= 0 {
 		return 0, leveldb.ErrCorrupt("bad block handle")
 	}
-	return n+m, nil
+	return n + m, nil
 }
 
 func (p *blockHandle) Encode() []byte {
-	b := make([]byte, binary.MaxVarintLen64 * 2)
+	b := make([]byte, binary.MaxVarintLen64*2)
 	n := binary.PutUvarint(b, p.Offset)
 	m := binary.PutUvarint(b[n:], p.Size)
 	return b[:n+m]
@@ -49,7 +49,7 @@ func (p *blockHandle) Encode() []byte {
 func (p *blockHandle) EncodeTo(b []byte) int {
 	n := binary.PutUvarint(b, p.Offset)
 	m := binary.PutUvarint(b[n:], p.Size)
-	return n+m
+	return n + m
 }
 
 func readFullAt(r io.ReaderAt, buf []byte, off int64) (n int, err error) {
@@ -69,7 +69,7 @@ func readFullAt(r io.ReaderAt, buf []byte, off int64) (n int, err error) {
 }
 
 func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
-	raw := make([]byte, p.Size + 5)
+	raw := make([]byte, p.Size+5)
 	_, err = readFullAt(r, raw, int64(p.Offset))
 	if err != nil {
 		return
@@ -97,7 +97,7 @@ func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error
 	compression := leveldb.Compression(raw[len(raw)-1])
 	b = raw[:len(raw)-1]
 
-	switch (compression) {
+	switch compression {
 	case leveldb.SnappyCompression:
 		compression = leveldb.NoCompression
 	}
@@ -106,7 +106,7 @@ func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error
 }
 
 type block struct {
-	buf, rbuf    []byte
+	buf, rbuf []byte
 
 	restartLen   int
 	restartStart int
@@ -122,22 +122,22 @@ func newBlock(buf []byte) (b *block, err error) {
 
 	// Decode restart len
 	var restartLen uint32
-	br.Seek(int64(len(buf)) - 4, 0)
+	br.Seek(int64(len(buf))-4, 0)
 	err = binary.Read(br, binary.LittleEndian, &restartLen)
 	if err != nil {
 		return
 	}
 
 	// Calculate restart start offset
-	restartStart := len(buf) - (1 + int(restartLen)) * 4
-	if restartStart > len(buf) - 4 {
+	restartStart := len(buf) - (1+int(restartLen))*4
+	if restartStart > len(buf)-4 {
 		err = leveldb.ErrCorrupt("bad restart offset in block")
 		return
 	}
 
 	b = &block{
 		buf:          buf,
-		rbuf:         buf[restartStart:len(buf)-4],
+		rbuf:         buf[restartStart : len(buf)-4],
 		restartLen:   int(restartLen),
 		restartStart: restartStart,
 	}
@@ -167,11 +167,11 @@ type keyVal struct {
 }
 
 type restartRange struct {
-	raw    []byte
-	buf    *bytes.Buffer
+	raw []byte
+	buf *bytes.Buffer
 
-	kv     keyVal
-	pos    int
+	kv  keyVal
+	pos int
 
 	cached bool
 	cache  []keyVal
@@ -183,7 +183,7 @@ func (r *restartRange) Next() (err error) {
 		r.pos++
 		return
 	}
-	
+
 	if r.buf.Len() == 0 {
 		return io.EOF
 	}
@@ -204,7 +204,7 @@ func (r *restartRange) Next() (err error) {
 	if err != nil {
 		goto corrupt
 	}
-	if nonShared + valueLen > uint64(r.buf.Len()) {
+	if nonShared+valueLen > uint64(r.buf.Len()) {
 		goto corrupt
 	}
 
@@ -218,7 +218,7 @@ func (r *restartRange) Next() (err error) {
 		r.kv.key = nkey
 	} else {
 		pkey := r.kv.key[:shared]
-		key := make([]byte, shared + nonShared)
+		key := make([]byte, shared+nonShared)
 		copy(key, pkey)
 		copy(key[shared:], nkey)
 		r.kv.key = key
@@ -296,13 +296,13 @@ func (r *restartRange) Value() []byte {
 }
 
 type blockIterator struct {
-	b    *block
-	cmp   leveldb.Comparator
+	b   *block
+	cmp leveldb.Comparator
 
-	err   error
-	ri    int           // restart index
-	rr    *restartRange // restart range
-	rd    *bytes.Reader // restart reader
+	err error
+	ri  int           // restart index
+	rr  *restartRange // restart range
+	rd  *bytes.Reader // restart reader
 }
 
 func (i *blockIterator) First() bool {
@@ -441,13 +441,12 @@ func (i *blockIterator) Value() []byte {
 
 func (i *blockIterator) Error() error { return i.err }
 
-
 func (i *blockIterator) getRestartOffset(idx int) (offset int, err error) {
 	if idx >= i.b.restartLen {
 		panic("out of range")
 	}
 
-	_, err = i.rd.Seek(int64(idx) * 4, 0)
+	_, err = i.rd.Seek(int64(idx)*4, 0)
 	if err != nil {
 		return
 	}
@@ -467,7 +466,7 @@ func (i *blockIterator) getRestartRange(idx int) (r *restartRange, err error) {
 		goto corrupt
 	}
 
-	if idx + 1 < i.b.restartLen {
+	if idx+1 < i.b.restartLen {
 		end, err = i.getRestartOffset(idx + 1)
 		if err != nil {
 			return

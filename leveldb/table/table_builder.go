@@ -10,12 +10,12 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
-	"io"
 	"encoding/binary"
+	"io"
 	"leveldb"
 )
 
@@ -25,19 +25,19 @@ type Writer interface {
 }
 
 type TableBuilder struct {
-	w             Writer
-	o             *leveldb.Options
+	w Writer
+	o *leveldb.Options
 
-	dataBlock     *blockBuilder
-	indexBlock    *blockBuilder
-	filterBlock   *filterBlockBuilder
-	
+	dataBlock   *blockBuilder
+	indexBlock  *blockBuilder
+	filterBlock *filterBlockBuilder
+
 	n, offset     int
 	lastKey       []byte
 	pendingIndex  bool
 	pendingHandle *blockHandle
 
-	closed        bool
+	closed bool
 }
 
 func NewTableBuilder(w Writer, o *leveldb.Options) *TableBuilder {
@@ -94,7 +94,6 @@ func (t *TableBuilder) Flush() (err error) {
 
 	if t.pendingIndex {
 		return
-// 		panic("has pending index")
 	}
 
 	err = t.write(t.dataBlock.Finish(), t.pendingHandle, false)
@@ -188,7 +187,7 @@ func (t *TableBuilder) write(buf []byte, handle *blockHandle, raw bool) (err err
 	if !raw {
 		compression = t.o.GetCompressionType()
 	}
-	switch (compression) {
+	switch compression {
 	case leveldb.SnappyCompression:
 		compression = leveldb.NoCompression
 	}

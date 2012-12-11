@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
@@ -26,7 +26,7 @@ var (
 )
 
 type filterBlockBuilder struct {
-	policy  leveldb.FilterPolicy
+	policy leveldb.FilterPolicy
 
 	buf     *bytes.Buffer
 	keys    [][]byte
@@ -83,14 +83,14 @@ func (b *filterBlockBuilder) generateFilter() {
 }
 
 type filterBlock struct {
-	policy      leveldb.FilterPolicy
-	buf         []byte
+	policy leveldb.FilterPolicy
+	buf    []byte
 
 	baseLg       uint
 	offsetsStart uint32
 	length       uint
 
-	or           *bytes.Reader // offset reader
+	or *bytes.Reader // offset reader
 }
 
 func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, err error) {
@@ -106,7 +106,7 @@ func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, er
 	if err != nil {
 		return
 	}
-	if offsetsStart > uint32(len(buf)) - 5 {
+	if offsetsStart > uint32(len(buf))-5 {
 		err = leveldb.ErrCorrupt("bad restart offset in filter block")
 		return
 	}
@@ -117,7 +117,7 @@ func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, er
 		baseLg:       uint(buf[len(buf)-1]),
 		offsetsStart: offsetsStart,
 		length:       (uint(len(buf)) - 5 - uint(offsetsStart)) / 4,
-		or:           bytes.NewReader(buf[offsetsStart:len(buf)-1]),
+		or:           bytes.NewReader(buf[offsetsStart : len(buf)-1]),
 	}
 	return
 }
@@ -135,7 +135,7 @@ func (b *filterBlock) KeyMayMatch(offset uint, key []byte) bool {
 	idx := offset >> b.baseLg
 	if idx < b.length {
 		var start, end uint32
-		b.or.Seek(int64(idx) * 4, 0)
+		b.or.Seek(int64(idx)*4, 0)
 		binary.Read(b.or, binary.LittleEndian, &start)
 		binary.Read(b.or, binary.LittleEndian, &end)
 		if start <= end && end <= b.offsetsStart {

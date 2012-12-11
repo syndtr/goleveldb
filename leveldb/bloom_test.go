@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 import (
@@ -124,7 +124,7 @@ func TestBloomFilter_VaryingLengths(t *testing.T) {
 
 		var rate float32
 		for i := 0; i < 10000; i++ {
-			if h.AssertNum(uint32(i + 1000000000), true, true) {
+			if h.AssertNum(uint32(i+1000000000), true, true) {
 				rate++
 			}
 		}
@@ -139,7 +139,7 @@ func TestBloomFilter_VaryingLengths(t *testing.T) {
 		}
 	}
 	t.Logf("false positive rate: %d good, %d mediocre", good, mediocre)
-	if mediocre > good / 5 {
+	if mediocre > good/5 {
 		t.Error("mediocre false positive rate is more than expected")
 	}
 }

@@ -14,8 +14,8 @@
 package leveldb
 
 import (
-	"sync"
 	"bytes"
+	"sync"
 )
 
 func lruHash(data []byte) uint32 {
@@ -25,7 +25,7 @@ func lruHash(data []byte) uint32 {
 type LRUCache struct {
 	sync.Mutex
 
-	hash     func([]byte)uint32
+	hash     func([]byte) uint32
 	root     lruElem
 	table    map[uint32]*lruElem
 	capacity int
@@ -33,7 +33,7 @@ type LRUCache struct {
 	id       uint64
 }
 
-func NewLRUCache(capacity int, hash func([]byte)uint32) Cache {
+func NewLRUCache(capacity int, hash func([]byte) uint32) Cache {
 	c := &LRUCache{hash: lruHash, capacity: capacity}
 	if hash != nil {
 		c.hash = hash
@@ -77,7 +77,7 @@ func (c *LRUCache) Get(key []byte) (ret CacheObject, ok bool) {
 	e.mRemove()
 	e.mInsert(&c.root)
 
-	return e.makeObject(), true 
+	return e.makeObject(), true
 }
 
 func (c *LRUCache) Delete(key []byte) {
@@ -151,10 +151,10 @@ func (c *LRUCache) evict() {
 }
 
 type lruElem struct {
-	lru    *LRUCache
+	lru *LRUCache
 
 	mNext, mPrev *lruElem
-	tNext  *lruElem
+	tNext        *lruElem
 
 	key    []byte
 	value  interface{}
@@ -201,7 +201,8 @@ func (p *lruElem) evict() {
 				lru.table[hash] = p.tNext
 			}
 		} else {
-			for ; x.tNext == p; x = x.tNext {}
+			for ; x.tNext == p; x = x.tNext {
+			}
 			x.tNext = p.tNext
 		}
 		lru.size -= p.charge
@@ -226,4 +227,3 @@ func (p *lruObject) Release() {
 	}
 	p.e.lru.Unlock()
 }
-

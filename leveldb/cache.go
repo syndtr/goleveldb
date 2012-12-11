@@ -42,7 +42,7 @@ type Cache interface {
 }
 
 type CacheObject interface {
-	// Release the cache object. 
+	// Release the cache object.
 	// REQUIRES: handle must not have been released yet.
 	Release()
 

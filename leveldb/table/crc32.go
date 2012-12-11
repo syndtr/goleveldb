@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
@@ -33,7 +33,7 @@ var crcMaskDelta uint32 = 0xa282ead8
 // somewhere (e.g., in files) should be masked before being stored.
 func MaskCRC32(crc uint32) uint32 {
 	// Rotate right by 15 bits and add a constant.
-	return ((crc >> 15) | (crc << 17)) + crcMaskDelta;
+	return ((crc >> 15) | (crc << 17)) + crcMaskDelta
 }
 
 // Return the crc whose masked representation is masked_crc.

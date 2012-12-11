@@ -10,13 +10,13 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package table
 
 import (
-	"io"
 	"bytes"
 	"encoding/binary"
+	"io"
 	"leveldb"
 )
 
@@ -24,6 +24,7 @@ import (
 //    echo http://code.google.com/p/leveldb/ | sha1sum
 // and taking the leading 64 bits.
 const magic uint64 = 0xdb4775248b80fb57
+
 var magicBytes []byte
 
 const (
@@ -34,13 +35,13 @@ const (
 
 func init() {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, uint32(magic & 0xffffffff))
-	binary.Write(buf, binary.LittleEndian, uint32(magic >> 32))
+	binary.Write(buf, binary.LittleEndian, uint32(magic&0xffffffff))
+	binary.Write(buf, binary.LittleEndian, uint32(magic>>32))
 	magicBytes = buf.Bytes()
 }
 
 func writeFooter(w io.Writer, metaHandle, indexHandle *blockHandle) (n int, err error) {
-	buf := make([]byte, binary.MaxVarintLen64 * 2 * 2)
+	buf := make([]byte, binary.MaxVarintLen64*2*2)
 	i := metaHandle.EncodeTo(buf)
 	indexHandle.EncodeTo(buf[i:])
 	_, err = w.Write(buf)
@@ -62,11 +63,11 @@ func readFooter(r leveldb.Reader, size uint64) (metaHandle, indexHandle *blockHa
 
 	var n int
 	buf := make([]byte, footerSize)
-	n, err = r.ReadAt(buf, int64(size) - footerSize)
+	n, err = r.ReadAt(buf, int64(size)-footerSize)
 	if err != nil {
 		return
 	}
-	
+
 	if bytes.Compare(buf[handlesSize:], magicBytes) != 0 {
 		err = leveldb.ErrInvalid("not an sstable (bad magic number)")
 		return

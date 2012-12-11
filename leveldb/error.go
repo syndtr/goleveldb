@@ -10,8 +10,10 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
+
+import "errors"
 
 var (
 	ErrNotFound = errors.New("not found")

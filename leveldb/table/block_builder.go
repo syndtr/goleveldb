@@ -20,13 +20,13 @@ import (
 )
 
 type blockBuilder struct {
-	o *leveldb.Options
+	o                    *leveldb.Options
 	blockRestartInterval int
 
-	buf *bytes.Buffer
+	buf      *bytes.Buffer
 	restarts []uint32
-	lastKey []byte
-	counter int
+	lastKey  []byte
+	counter  int
 }
 
 func newBlockBuilder(o *leveldb.Options, blockRestartInterval int) *blockBuilder {
@@ -50,7 +50,9 @@ func (b *blockBuilder) Add(key, value []byte) {
 	shared := 0
 	if b.counter < b.getBlockRestartInterval() {
 		n := len(b.lastKey)
-		if n > len(key) { n = len(key) }
+		if n > len(key) {
+			n = len(key)
+		}
 		for shared < n && b.lastKey[shared] == key[shared] {
 			shared++
 		}
@@ -64,7 +66,7 @@ func (b *blockBuilder) Add(key, value []byte) {
 	var tmp = make([]byte, binary.MaxVarintLen32)
 	n = binary.PutUvarint(tmp, uint64(shared))
 	b.buf.Write(tmp[:n])
-	n = binary.PutUvarint(tmp, uint64(len(key) - shared))
+	n = binary.PutUvarint(tmp, uint64(len(key)-shared))
 	b.buf.Write(tmp[:n])
 	n = binary.PutUvarint(tmp, uint64(len(value)))
 	b.buf.Write(tmp[:n])
@@ -78,7 +80,7 @@ func (b *blockBuilder) Add(key, value []byte) {
 }
 
 func (b *blockBuilder) Len() int {
-	return b.buf.Len() + len(b.restarts) * 4 + 4
+	return b.buf.Len() + len(b.restarts)*4 + 4
 }
 
 func (b *blockBuilder) Finish() []byte {

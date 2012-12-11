@@ -16,9 +16,9 @@ package leveldb
 import "testing"
 
 var cases = []struct {
-	name   string
-	ftype  FileType
-	num    uint64
+	name  string
+	ftype FileType
+	num   uint64
 }{
 	{"100.log", TypeLog, 100},
 	{"0.log", TypeLog, 0},

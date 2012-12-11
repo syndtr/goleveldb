@@ -14,11 +14,11 @@
 package leveldb
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
-	"fmt"
 	"path"
-	"bytes"
 )
 
 type FileType uint32
@@ -57,7 +57,7 @@ type File interface {
 
 	// Rename to given number and type.
 	Rename(number uint64, t FileType) error
-	
+
 	// Return true if the file is exist.
 	Exist() bool
 
@@ -127,7 +127,7 @@ func (d *StdDescriptor) GetFiles(t FileType) (r []File) {
 	}
 	p := &stdFile{desc: d}
 	for _, name := range names {
-		if p.parse(name) && (p.t & t) != 0 {
+		if p.parse(name) && (p.t&t) != 0 {
 			r = append(r, p)
 			p = &stdFile{desc: d}
 		}
@@ -174,7 +174,7 @@ func (d *StdDescriptor) SetMainManifest(f File) (err error) {
 		return
 	}
 	return os.Rename(pthTmp, pth)
-	
+
 }
 
 func (d *StdDescriptor) Close() {

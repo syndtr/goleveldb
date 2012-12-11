@@ -16,18 +16,18 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
-	"runtime"
 	"leveldb"
+	"runtime"
 )
 
 type Table struct {
-	r       leveldb.Reader
-	o       *leveldb.Options
+	r leveldb.Reader
+	o *leveldb.Options
 
-	meta    *block
-	index   *block
+	meta  *block
+	index *block
 
-	filter  *filterBlock
+	filter *filterBlock
 
 	dataEnd uint64
 	cacheId uint64

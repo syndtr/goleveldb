@@ -10,7 +10,7 @@
 //   Use of this source code is governed by a BSD-style license that can be
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
- 
+
 package leveldb
 
 import "sync"
@@ -24,7 +24,7 @@ const (
 
 	// If set, an error is raised if the database already exists.
 	OFErrorIfExist
-	
+
 	// If set, the implementation will do aggressive checking of the
 	// data it is processing and will stop early if it detects any
 	// errors.  This may have unforeseen ramifications: for example, a
@@ -131,7 +131,7 @@ func (o *Options) GetComparator() Comparator {
 	return o.Comparator
 }
 
-func (o *Options) HasFlag(flag OptionsFlag) bool  {
+func (o *Options) HasFlag(flag OptionsFlag) bool {
 	if o == nil {
 		return false
 	}
@@ -140,7 +140,7 @@ func (o *Options) HasFlag(flag OptionsFlag) bool  {
 
 func (o *Options) GetWriteBuffer() int {
 	if o == nil || o.WriteBuffer <= 0 {
-		return 4<<20
+		return 4 << 20
 	}
 	return o.WriteBuffer
 }
@@ -159,7 +159,7 @@ func (o *Options) GetBlockCache() Cache {
 		return nil
 	}
 	if o.BlockCache == nil {
-		o.BlockCache = NewLRUCache(8 << 20, nil)
+		o.BlockCache = NewLRUCache(8<<20, nil)
 	}
 	return o.BlockCache
 }
@@ -171,7 +171,7 @@ func (o *Options) GetBlockSize() int {
 	return o.BlockSize
 }
 
-func (o *Options) GetBlockRestartInterval() int{
+func (o *Options) GetBlockRestartInterval() int {
 	if o == nil || o.BlockRestartInterval <= 0 {
 		return 16
 	}
@@ -219,7 +219,7 @@ type ReadOptions struct {
 	Snapshot Snapshot
 }
 
-func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool  {
+func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
 	if o == nil {
 		return false
 	}
@@ -260,7 +260,7 @@ type WriteOptions struct {
 	Flag WriteOptionsFlag
 }
 
-func (o *WriteOptions) HasFlag(flag WriteOptionsFlag) bool  {
+func (o *WriteOptions) HasFlag(flag WriteOptionsFlag) bool {
 	if o == nil {
 		return false
 	}
