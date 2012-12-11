@@ -20,7 +20,7 @@ import (
 	"runtime"
 )
 
-type Table struct {
+type Reader struct {
 	r leveldb.Reader
 	o *leveldb.Options
 
@@ -33,7 +33,7 @@ type Table struct {
 	cacheId uint64
 }
 
-func NewTable(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Table, err error) {
+func NewReader(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Reader, err error) {
 	var metaHandle, indexHandle *blockHandle
 	metaHandle, indexHandle, err = readFooter(r, size)
 	if err != nil {
@@ -72,7 +72,7 @@ func NewTable(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64)
 		}
 	}
 
-	t = &Table{
+	t = &Reader{
 		r:       r,
 		o:       o,
 		index:   index,
@@ -83,12 +83,12 @@ func NewTable(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64)
 	return
 }
 
-func (t *Table) NewIterator(o *leveldb.ReadOptions) leveldb.Iterator {
+func (t *Reader) NewIterator(o *leveldb.ReadOptions) leveldb.Iterator {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	return leveldb.NewTwoLevelIterator(index_iter, &blockGetter{t: t, o: o})
 }
 
-func (t *Table) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
+func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	if !index_iter.Seek(key) {
 		err = index_iter.Error()
@@ -118,7 +118,7 @@ func (t *Table) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, er
 	return
 }
 
-func (t *Table) ApproximateOffsetOf(key []byte) uint64 {
+func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	if index_iter.Seek(key) {
 		handle := new(blockHandle)
@@ -130,7 +130,7 @@ func (t *Table) ApproximateOffsetOf(key []byte) uint64 {
 	return t.dataEnd
 }
 
-func (t *Table) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
+func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
 	var b *block
 	newBlock := func() {
 		b, err = newBlockFromHandle(handle, t.r, o.HasFlag(leveldb.RFVerifyChecksums))
@@ -175,7 +175,7 @@ func (t *Table) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter leve
 }
 
 type blockGetter struct {
-	t *Table
+	t *Reader
 	o *leveldb.ReadOptions
 }
 

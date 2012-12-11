@@ -143,8 +143,8 @@ func (t *BlockConstructor) CustomTest(h *Harness) {}
 
 type TableConstructor struct {
 	b  *bytes.Buffer
-	tb *TableBuilder
-	tr *Table
+	tb *Builder
+	tr *Reader
 }
 
 func (t *TableConstructor) Init() error {
@@ -153,7 +153,7 @@ func (t *TableConstructor) Init() error {
 		BlockSize:            512,
 		BlockRestartInterval: 3,
 	}
-	t.tb = NewTableBuilder(&writer{b: t.b}, o)
+	t.tb = NewBuilder(&writer{b: t.b}, o)
 	return nil
 }
 
@@ -177,7 +177,7 @@ func (t *TableConstructor) Finish() (size int, err error) {
 		BlockRestartInterval: 3,
 		FilterPolicy:         leveldb.NewBloomFilter(10),
 	}
-	t.tr, err = NewTable(r, uint64(size), o, 0)
+	t.tr, err = NewReader(r, uint64(size), o, 0)
 	return
 }
 
@@ -397,7 +397,7 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		BlockSize:       1024,
 		CompressionType: leveldb.NoCompression,
 	}
-	tb := NewTableBuilder(w, new(leveldb.Options))
+	tb := NewBuilder(w, new(leveldb.Options))
 	tb.Add([]byte("k01"), []byte("hello"))
 	tb.Add([]byte("k02"), []byte("hello2"))
 	tb.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
@@ -415,7 +415,7 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		size: int64(size),
 	}
 
-	tr, err := NewTable(r, uint64(size), o, 0)
+	tr, err := NewReader(r, uint64(size), o, 0)
 	if err != nil {
 		t.Fatal("error when creating table reader instance:", err.Error())
 	}

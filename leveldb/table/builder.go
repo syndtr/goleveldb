@@ -24,7 +24,7 @@ type Writer interface {
 	leveldb.Syncer
 }
 
-type TableBuilder struct {
+type Builder struct {
 	w Writer
 	o *leveldb.Options
 
@@ -40,8 +40,8 @@ type TableBuilder struct {
 	closed bool
 }
 
-func NewTableBuilder(w Writer, o *leveldb.Options) *TableBuilder {
-	t := &TableBuilder{w: w}
+func NewBuilder(w Writer, o *leveldb.Options) *Builder {
+	t := &Builder{w: w}
 	// Copy options
 	t.o = new(leveldb.Options)
 	*t.o = *o
@@ -57,7 +57,7 @@ func NewTableBuilder(w Writer, o *leveldb.Options) *TableBuilder {
 	return t
 }
 
-func (t *TableBuilder) Add(key, value []byte) (err error) {
+func (t *Builder) Add(key, value []byte) (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -87,7 +87,7 @@ func (t *TableBuilder) Add(key, value []byte) (err error) {
 	return
 }
 
-func (t *TableBuilder) Flush() (err error) {
+func (t *Builder) Flush() (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -115,7 +115,7 @@ func (t *TableBuilder) Flush() (err error) {
 	return
 }
 
-func (t *TableBuilder) Finish() (err error) {
+func (t *Builder) Finish() (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -174,15 +174,15 @@ func (t *TableBuilder) Finish() (err error) {
 	return
 }
 
-func (t *TableBuilder) NumEntries() int {
+func (t *Builder) NumEntries() int {
 	return t.n
 }
 
-func (t *TableBuilder) FileSize() int {
+func (t *Builder) FileSize() int {
 	return t.offset
 }
 
-func (t *TableBuilder) write(buf []byte, handle *blockHandle, raw bool) (err error) {
+func (t *Builder) write(buf []byte, handle *blockHandle, raw bool) (err error) {
 	compression := leveldb.NoCompression
 	if !raw {
 		compression = t.o.GetCompressionType()
