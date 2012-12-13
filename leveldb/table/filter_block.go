@@ -94,18 +94,13 @@ type filterBlock struct {
 }
 
 func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, err error) {
+	// 4 bytes for offset start and 1 byte for baseLg
 	if len(buf) < 5 {
 		err = leveldb.ErrCorrupt("filter block to short")
 		return
 	}
 
-	r := bytes.NewReader(buf)
-	r.Seek(-5, 2)
-	var offsetsStart uint32
-	err = binary.Read(r, binary.LittleEndian, &offsetsStart)
-	if err != nil {
-		return
-	}
+	offsetsStart := binary.LittleEndian.Uint32(buf[len(buf)-5:])
 	if offsetsStart > uint32(len(buf))-5 {
 		err = leveldb.ErrCorrupt("bad restart offset in filter block")
 		return

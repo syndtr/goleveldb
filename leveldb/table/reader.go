@@ -14,7 +14,6 @@
 package table
 
 import (
-	"bytes"
 	"encoding/binary"
 	"leveldb"
 	"runtime"
@@ -139,11 +138,9 @@ func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter lev
 	var cacheObj leveldb.CacheObject
 	cache := t.o.GetBlockCache()
 	if cache != nil {
-		buf := new(bytes.Buffer)
-		buf.Grow(16)
-		binary.Write(buf, binary.LittleEndian, t.cacheId)
-		binary.Write(buf, binary.LittleEndian, handle.Offset)
-		cacheKey := buf.Bytes()
+		cacheKey := make([]byte, 16)
+		binary.LittleEndian.PutUint64(cacheKey, t.cacheId)
+		binary.LittleEndian.PutUint64(cacheKey[8:], handle.Offset)
 
 		var ok bool
 		cacheObj, ok = cache.Get(cacheKey)

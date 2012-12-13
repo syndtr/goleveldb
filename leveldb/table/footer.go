@@ -34,10 +34,9 @@ const (
 )
 
 func init() {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, uint32(magic&0xffffffff))
-	binary.Write(buf, binary.LittleEndian, uint32(magic>>32))
-	magicBytes = buf.Bytes()
+	magicBytes = make([]byte, magicSize)
+	binary.LittleEndian.PutUint32(magicBytes, uint32(magic&0xffffffff))
+	binary.LittleEndian.PutUint32(magicBytes[4:], uint32(magic>>32))
 }
 
 func writeFooter(w io.Writer, metaHandle, indexHandle *blockHandle) (n int, err error) {

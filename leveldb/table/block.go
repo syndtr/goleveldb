@@ -79,12 +79,7 @@ func (p *blockHandle) ReadAll(r io.ReaderAt, checksum bool) (b []byte, err error
 	raw = raw[:len(raw)-4]
 
 	if checksum {
-		var sum uint32
-		bb := bytes.NewBuffer(crcb)
-		err = binary.Read(bb, binary.LittleEndian, &sum)
-		if err != nil {
-			return
-		}
+		sum := binary.LittleEndian.Uint32(crcb)
 		sum = leveldb.UnmaskCRC32(sum)
 		crc := leveldb.NewCRC32C()
 		crc.Write(raw)
@@ -118,15 +113,8 @@ func newBlock(buf []byte) (b *block, err error) {
 		return
 	}
 
-	br := bytes.NewReader(buf)
-
 	// Decode restart len
-	var restartLen uint32
-	br.Seek(int64(len(buf))-4, 0)
-	err = binary.Read(br, binary.LittleEndian, &restartLen)
-	if err != nil {
-		return
-	}
+	restartLen := binary.LittleEndian.Uint32(buf[len(buf)-4:])
 
 	// Calculate restart start offset
 	restartStart := len(buf) - (1+int(restartLen))*4

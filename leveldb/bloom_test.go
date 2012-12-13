@@ -36,9 +36,9 @@ func (h *Harness) Add(key []byte) {
 }
 
 func (h *Harness) AddNum(key uint32) {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, key)
-	h.Add(buf.Bytes())
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, key)
+	h.Add(buf)
 }
 
 func (h *Harness) Build() {
