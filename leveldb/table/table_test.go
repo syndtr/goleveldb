@@ -16,6 +16,7 @@ package table
 import (
 	"bytes"
 	"leveldb"
+	"leveldb/block"
 	"math/rand"
 	"os"
 	"testing"
@@ -48,6 +49,10 @@ func (w *writer) Write(p []byte) (n int, err error) {
 }
 
 func (w *writer) Sync() error {
+	return nil
+}
+
+func (w *writer) Close() error {
 	return nil
 }
 
@@ -111,27 +116,24 @@ type Constructor interface {
 }
 
 type BlockConstructor struct {
-	bb *blockBuilder
-	br *block
+	bw *block.Writer
+	br *block.Reader
 }
 
 func (t *BlockConstructor) Init() error {
-	o := &leveldb.Options{
-		BlockRestartInterval: 3,
-	}
-	t.bb = newBlockBuilder(o, 0)
+	t.bw = block.NewWriter(3)
 	return nil
 }
 
 func (t *BlockConstructor) Add(key, value []byte) error {
-	t.bb.Add(key, value)
+	t.bw.Add(key, value)
 	return nil
 }
 
 func (t *BlockConstructor) Finish() (size int, err error) {
-	buf := t.bb.Finish()
+	buf := t.bw.Finish()
 	size = len(buf)
-	t.br, err = newBlock(buf)
+	t.br, err = block.NewReader(buf)
 	return
 }
 
@@ -143,7 +145,7 @@ func (t *BlockConstructor) CustomTest(h *Harness) {}
 
 type TableConstructor struct {
 	b  *bytes.Buffer
-	tb *Builder
+	tw *Writer
 	tr *Reader
 }
 
@@ -153,17 +155,17 @@ func (t *TableConstructor) Init() error {
 		BlockSize:            512,
 		BlockRestartInterval: 3,
 	}
-	t.tb = NewBuilder(&writer{b: t.b}, o)
+	t.tw = NewWriter(&writer{b: t.b}, o)
 	return nil
 }
 
 func (t *TableConstructor) Add(key, value []byte) error {
-	t.tb.Add(key, value)
+	t.tw.Add(key, value)
 	return nil
 }
 
 func (t *TableConstructor) Finish() (size int, err error) {
-	err = t.tb.Finish()
+	err = t.tw.Finish()
 	if err != nil {
 		return
 	}
@@ -397,15 +399,15 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		BlockSize:       1024,
 		CompressionType: leveldb.NoCompression,
 	}
-	tb := NewBuilder(w, new(leveldb.Options))
-	tb.Add([]byte("k01"), []byte("hello"))
-	tb.Add([]byte("k02"), []byte("hello2"))
-	tb.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
-	tb.Add([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
-	tb.Add([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
-	tb.Add([]byte("k06"), []byte("hello3"))
-	tb.Add([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
-	if err := tb.Finish(); err != nil {
+	tw := NewWriter(w, new(leveldb.Options))
+	tw.Add([]byte("k01"), []byte("hello"))
+	tw.Add([]byte("k02"), []byte("hello2"))
+	tw.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
+	tw.Add([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
+	tw.Add([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
+	tw.Add([]byte("k06"), []byte("hello3"))
+	tw.Add([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
+	if err := tw.Finish(); err != nil {
 		t.Fatal("error when finalizing table:", err.Error())
 	}
 	size := w.b.Len()

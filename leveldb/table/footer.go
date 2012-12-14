@@ -39,10 +39,10 @@ func init() {
 	binary.LittleEndian.PutUint32(magicBytes[4:], uint32(magic>>32))
 }
 
-func writeFooter(w io.Writer, metaHandle, indexHandle *blockHandle) (n int, err error) {
+func writeFooter(w io.Writer, mi, ii *bInfo) (n int, err error) {
 	buf := make([]byte, binary.MaxVarintLen64*2*2)
-	i := metaHandle.EncodeTo(buf)
-	indexHandle.EncodeTo(buf[i:])
+	i := mi.encodeTo(buf)
+	ii.encodeTo(buf[i:])
 	_, err = w.Write(buf)
 	if err != nil {
 		return
@@ -54,15 +54,14 @@ func writeFooter(w io.Writer, metaHandle, indexHandle *blockHandle) (n int, err 
 	return len(buf) + len(magicBytes), nil
 }
 
-func readFooter(r leveldb.Reader, size uint64) (metaHandle, indexHandle *blockHandle, err error) {
+func readFooter(r io.ReaderAt, size uint64) (mi, ii *bInfo, err error) {
 	if size < uint64(footerSize) {
 		err = leveldb.ErrInvalid("file is too short to be an sstable")
 		return
 	}
 
-	var n int
 	buf := make([]byte, footerSize)
-	n, err = r.ReadAt(buf, int64(size)-footerSize)
+	n, err := r.ReadAt(buf, int64(size)-footerSize)
 	if err != nil {
 		return
 	}
@@ -72,14 +71,14 @@ func readFooter(r leveldb.Reader, size uint64) (metaHandle, indexHandle *blockHa
 		return
 	}
 
-	metaHandle = new(blockHandle)
-	n, err = metaHandle.DecodeFrom(buf)
+	mi = new(bInfo)
+	n, err = mi.decodeFrom(buf)
 	if err != nil {
 		return
 	}
 
-	indexHandle = new(blockHandle)
-	n, err = indexHandle.DecodeFrom(buf[n:])
+	ii = new(bInfo)
+	n, err = ii.decodeFrom(buf[n:])
 	if err != nil {
 		return
 	}

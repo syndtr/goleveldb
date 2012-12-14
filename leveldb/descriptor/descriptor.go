@@ -11,12 +11,13 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+package descriptor
 
 import (
 	"bytes"
 	"fmt"
 	"io"
+	"leveldb"
 	"os"
 	"path"
 )
@@ -97,9 +98,8 @@ type StdDescriptor struct {
 	lock *os.File
 }
 
-func OpenDescriptor(dbpath string) (d *StdDescriptor, err error) {
-	var lock *os.File
-	lock, err = os.OpenFile(path.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
+func Open(dbpath string) (d *StdDescriptor, err error) {
+	lock, err := os.OpenFile(path.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return
 	}
@@ -137,8 +137,7 @@ func (d *StdDescriptor) GetFiles(t FileType) (r []File) {
 
 func (d *StdDescriptor) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
-	var file *os.File
-	file, err = os.OpenFile(pth, os.O_RDONLY, 0)
+	file, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
 		return
 	}
@@ -150,7 +149,7 @@ func (d *StdDescriptor) GetMainManifest() (f File, err error) {
 	b := buf.Bytes()
 	p := &stdFile{desc: d}
 	if len(b) < 1 || b[len(b)-1] != '\n' || !p.parse(string(b[:len(b)-1])) {
-		return nil, ErrCorrupt("invalid CURRENT file")
+		return nil, leveldb.ErrCorrupt("invalid CURRENT file")
 	}
 	return p, nil
 }
@@ -159,8 +158,7 @@ func (d *StdDescriptor) SetMainManifest(f File) (err error) {
 	p := f.(*stdFile)
 	pth := path.Join(d.path, "CURRENT")
 	pthTmp := fmt.Sprintf("%s.%d", pth, p.num)
-	var file *os.File
-	file, err = os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	file, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return
 	}
@@ -217,8 +215,7 @@ func (p *stdFile) Number() uint64 {
 }
 
 func (p *stdFile) Size() (size uint64, err error) {
-	var fi os.FileInfo
-	fi, err = os.Stat(p.path())
+	fi, err := os.Stat(p.path())
 	if err == nil {
 		size = uint64(fi.Size())
 	}

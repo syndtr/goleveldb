@@ -13,19 +13,9 @@
 
 package leveldb
 
-type DB interface {
-	// Set the database entry for "key" to "value".
-	Put(key, value []byte, o *WriteOptions) error
-
-	// Remove the database entry (if any) for "key". It is not an error
-	// if "key" did not exist in the database.
-	Delete(key []byte, o *WriteOptions) error
-
-	// Apply the specified updates to the database.
-	Write(updates *WriteBatch, o *WriteOptions) error
-
+type Reader interface {
 	// Get value for given key.
-	Get(key []byte, o *ReadOptions) (value []byte, err error)
+	Get(key []byte, ro *ReadOptions) (value []byte, err error)
 
 	// Return a heap-allocated iterator over the contents of the database.
 	// The result of NewIterator() is initially invalid (caller must
@@ -33,17 +23,46 @@ type DB interface {
 	//
 	// Caller should delete the iterator when it is no longer needed.
 	// The returned iterator should be deleted before this db is deleted.
-	NewIterator(o *ReadOptions) (iter *Iterator, err error)
+	NewIterator(ro *ReadOptions) (iter Iterator, err error)
+}
+
+type Writer interface {
+	// Set the database entry for "key" to "value".
+	Put(key, value []byte, wo *WriteOptions) error
+
+	// Remove the database entry (if any) for "key". It is not an error
+	// if "key" did not exist in the database.
+	Delete(key []byte, wo *WriteOptions) error
+
+	// Apply the specified updates to the database.
+	Write(updates *WriteBatch, wo *WriteOptions) error
+}
+
+type Snapshot interface {
+	Reader
+
+	// Release a previously acquired snapshot.  The caller must not
+	// use "snapshot" after this call.
+	Release()
+}
+
+type Range struct {
+	// Start key, include in the range
+	Start []byte
+
+	// Limit, not include in the range
+	Limit []byte
+}
+
+type DB interface {
+	Reader
+	Writer
 
 	// Return a handle to the current DB state.  Iterators created with
 	// this handle will all observe a stable snapshot of the current DB
 	// state.  The caller must call ReleaseSnapshot(result) when the
 	// snapshot is no longer needed.
-	GetSnapshot() (snapshot *Snapshot, err error)
-
-	// Release a previously acquired snapshot.  The caller must not
-	// use "snapshot" after this call.
-	ReleaseSnapshot(snapshot *Snapshot) error
+	GetSnapshot() (snapshot Snapshot, err error)
 
 	// DB implementations can export properties about their state
 	// via this method.  If "property" is a valid property understood by this
@@ -84,5 +103,3 @@ type DB interface {
 }
 
 type WriteBatch interface{}
-type Snapshot interface{}
-type Range interface{}

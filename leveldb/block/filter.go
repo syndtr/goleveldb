@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package table
+package block
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ var (
 	filterBase   int  = 1 << filterBaseLg
 )
 
-type filterBlockBuilder struct {
+type FilterWriter struct {
 	policy leveldb.FilterPolicy
 
 	buf     *bytes.Buffer
@@ -33,25 +33,25 @@ type filterBlockBuilder struct {
 	offsets []uint32
 }
 
-func newFilterBlockBuilder(policy leveldb.FilterPolicy) *filterBlockBuilder {
-	return &filterBlockBuilder{
+func NewFilterWriter(policy leveldb.FilterPolicy) *FilterWriter {
+	return &FilterWriter{
 		policy: policy,
 		buf:    new(bytes.Buffer),
 	}
 }
 
-func (b *filterBlockBuilder) StartBlock(offset int) {
+func (b *FilterWriter) StartBlock(offset int) {
 	idx := offset / filterBase
 	for idx > len(b.offsets) {
 		b.generateFilter()
 	}
 }
 
-func (b *filterBlockBuilder) AddKey(key []byte) {
+func (b *FilterWriter) AddKey(key []byte) {
 	b.keys = append(b.keys, key)
 }
 
-func (b *filterBlockBuilder) Finish() []byte {
+func (b *FilterWriter) Finish() []byte {
 	if len(b.keys) > 0 {
 		b.generateFilter()
 	}
@@ -68,7 +68,7 @@ func (b *filterBlockBuilder) Finish() []byte {
 	return b.buf.Bytes()
 }
 
-func (b *filterBlockBuilder) generateFilter() {
+func (b *FilterWriter) generateFilter() {
 	b.offsets = append(b.offsets, uint32(b.buf.Len()))
 
 	// fast path if there are no keys for this filter
@@ -82,7 +82,7 @@ func (b *filterBlockBuilder) generateFilter() {
 	b.keys = nil
 }
 
-type filterBlock struct {
+type FilterReader struct {
 	policy leveldb.FilterPolicy
 	buf    []byte
 
@@ -93,7 +93,7 @@ type filterBlock struct {
 	or *bytes.Reader // offset reader
 }
 
-func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, err error) {
+func NewFilterReader(buf []byte, policy leveldb.FilterPolicy) (b *FilterReader, err error) {
 	// 4 bytes for offset start and 1 byte for baseLg
 	if len(buf) < 5 {
 		err = leveldb.ErrCorrupt("filter block to short")
@@ -106,7 +106,7 @@ func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, er
 		return
 	}
 
-	b = &filterBlock{
+	b = &FilterReader{
 		policy:       policy,
 		buf:          buf,
 		baseLg:       uint(buf[len(buf)-1]),
@@ -117,16 +117,7 @@ func newFilterBlock(policy leveldb.FilterPolicy, buf []byte) (b *filterBlock, er
 	return
 }
 
-func newFilterBlockFromHandle(handle *blockHandle, r leveldb.Reader, verify bool, policy leveldb.FilterPolicy) (b *filterBlock, err error) {
-	var buf []byte
-	buf, err = handle.ReadAll(r, verify)
-	if err != nil {
-		return
-	}
-	return newFilterBlock(policy, buf)
-}
-
-func (b *filterBlock) KeyMayMatch(offset uint, key []byte) bool {
+func (b *FilterReader) KeyMayMatch(offset uint, key []byte) bool {
 	idx := offset >> b.baseLg
 	if idx < b.length {
 		var start, end uint32

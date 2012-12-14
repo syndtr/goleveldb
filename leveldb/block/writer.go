@@ -11,17 +11,15 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package table
+package block
 
 import (
 	"bytes"
 	"encoding/binary"
-	"leveldb"
 )
 
-type blockBuilder struct {
-	o                    *leveldb.Options
-	blockRestartInterval int
+type Writer struct {
+	restartInterval int
 
 	buf      *bytes.Buffer
 	restarts []uint32
@@ -29,26 +27,18 @@ type blockBuilder struct {
 	counter  int
 }
 
-func newBlockBuilder(o *leveldb.Options, blockRestartInterval int) *blockBuilder {
-	return &blockBuilder{
-		o:                    o,
-		blockRestartInterval: blockRestartInterval,
-		buf:                  new(bytes.Buffer),
-		restarts:             make([]uint32, 1),
+func NewWriter(restartInterval int) *Writer {
+	return &Writer{
+		restartInterval: restartInterval,
+		buf:             new(bytes.Buffer),
+		restarts:        make([]uint32, 1),
 	}
 }
 
-func (b *blockBuilder) getBlockRestartInterval() int {
-	if b.blockRestartInterval > 0 {
-		return b.blockRestartInterval
-	}
-	return b.o.GetBlockRestartInterval()
-}
-
-func (b *blockBuilder) Add(key, value []byte) {
+func (b *Writer) Add(key, value []byte) {
 	// Get key shared prefix
 	shared := 0
-	if b.counter < b.getBlockRestartInterval() {
+	if b.counter < b.restartInterval {
 		n := len(b.lastKey)
 		if n > len(key) {
 			n = len(key)
@@ -79,11 +69,11 @@ func (b *blockBuilder) Add(key, value []byte) {
 	b.counter++
 }
 
-func (b *blockBuilder) Len() int {
+func (b *Writer) Len() int {
 	return b.buf.Len() + len(b.restarts)*4 + 4
 }
 
-func (b *blockBuilder) Finish() []byte {
+func (b *Writer) Finish() []byte {
 	for _, restart := range b.restarts {
 		binary.Write(b.buf, binary.LittleEndian, restart)
 	}
@@ -92,7 +82,7 @@ func (b *blockBuilder) Finish() []byte {
 	return b.buf.Bytes()
 }
 
-func (b *blockBuilder) Reset() {
+func (b *Writer) Reset() {
 	b.buf.Reset()
 	b.restarts = make([]uint32, 1)
 	b.lastKey = nil

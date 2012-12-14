@@ -15,49 +15,45 @@ package table
 
 import (
 	"encoding/binary"
-	"io"
 	"leveldb"
+	"leveldb/block"
+	"leveldb/descriptor"
 )
 
-type Writer interface {
-	io.Writer
-	leveldb.Syncer
-}
-
-type Builder struct {
-	w Writer
+type Writer struct {
+	w descriptor.Writer
 	o *leveldb.Options
 
-	dataBlock   *blockBuilder
-	indexBlock  *blockBuilder
-	filterBlock *filterBlockBuilder
+	dataBlock   *block.Writer
+	indexBlock  *block.Writer
+	filterBlock *block.FilterWriter
 
-	n, offset     int
-	lastKey       []byte
-	pendingIndex  bool
-	pendingHandle *blockHandle
+	n, offset    int
+	lastKey      []byte
+	pendingIndex bool
+	pendingBlock *bInfo
 
 	closed bool
 }
 
-func NewBuilder(w Writer, o *leveldb.Options) *Builder {
-	t := &Builder{w: w}
+func NewWriter(w descriptor.Writer, o *leveldb.Options) *Writer {
+	t := &Writer{w: w}
 	// Copy options
 	t.o = new(leveldb.Options)
 	*t.o = *o
 	// Creating blocks
-	t.dataBlock = newBlockBuilder(o, 0)
-	t.indexBlock = newBlockBuilder(o, 1)
+	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
+	t.indexBlock = block.NewWriter(1)
 	filterPolicy := o.GetFilterPolicy()
 	if filterPolicy != nil {
-		t.filterBlock = newFilterBlockBuilder(filterPolicy)
+		t.filterBlock = block.NewFilterWriter(filterPolicy)
 		t.filterBlock.StartBlock(0)
 	}
-	t.pendingHandle = new(blockHandle)
+	t.pendingBlock = new(bInfo)
 	return t
 }
 
-func (t *Builder) Add(key, value []byte) (err error) {
+func (t *Writer) Add(key, value []byte) (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -69,7 +65,7 @@ func (t *Builder) Add(key, value []byte) (err error) {
 
 	if t.pendingIndex {
 		sep := cmp.FindShortestSeparator(t.lastKey, key)
-		t.indexBlock.Add(sep, t.pendingHandle.Encode())
+		t.indexBlock.Add(sep, t.pendingBlock.encode())
 		t.pendingIndex = false
 	}
 
@@ -87,7 +83,7 @@ func (t *Builder) Add(key, value []byte) (err error) {
 	return
 }
 
-func (t *Builder) Flush() (err error) {
+func (t *Writer) Flush() (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -96,7 +92,7 @@ func (t *Builder) Flush() (err error) {
 		return
 	}
 
-	err = t.write(t.dataBlock.Finish(), t.pendingHandle, false)
+	err = t.write(t.dataBlock.Finish(), t.pendingBlock, false)
 	if err != nil {
 		return
 	}
@@ -115,7 +111,7 @@ func (t *Builder) Flush() (err error) {
 	return
 }
 
-func (t *Builder) Finish() (err error) {
+func (t *Writer) Finish() (err error) {
 	if t.closed {
 		panic("operation on closed table builder")
 	}
@@ -127,26 +123,24 @@ func (t *Builder) Finish() (err error) {
 
 	t.closed = true
 
-	var filterHandle, metaHandle, indexHandle *blockHandle
-
 	// Write filter block
+	fi := new(bInfo)
 	if t.filterBlock != nil {
-		filterHandle = new(blockHandle)
-		err = t.write(t.filterBlock.Finish(), filterHandle, true)
+		err = t.write(t.filterBlock.Finish(), fi, true)
 		if err != nil {
 			return
 		}
 	}
 
 	// Write meta block
-	metaBlock := newBlockBuilder(t.o, 0)
-	metaHandle = new(blockHandle)
+	metaBlock := block.NewWriter(t.o.GetBlockRestartInterval())
 	if t.filterBlock != nil {
 		filterPolicy := t.o.GetFilterPolicy()
 		key := []byte("filter." + filterPolicy.Name())
-		metaBlock.Add(key, filterHandle.Encode())
+		metaBlock.Add(key, fi.encode())
 	}
-	err = t.write(metaBlock.Finish(), metaHandle, false)
+	mi := new(bInfo)
+	err = t.write(metaBlock.Finish(), mi, false)
 	if err != nil {
 		return
 	}
@@ -155,18 +149,18 @@ func (t *Builder) Finish() (err error) {
 	if t.pendingIndex {
 		cmp := t.o.GetComparator()
 		suc := cmp.FindShortSuccessor(t.lastKey)
-		t.indexBlock.Add(suc, t.pendingHandle.Encode())
+		t.indexBlock.Add(suc, t.pendingBlock.encode())
 		t.pendingIndex = false
 	}
-	indexHandle = new(blockHandle)
-	err = t.write(t.indexBlock.Finish(), indexHandle, false)
+	ii := new(bInfo)
+	err = t.write(t.indexBlock.Finish(), ii, false)
 	if err != nil {
 		return
 	}
 
 	// Write footer
 	var n int
-	n, err = writeFooter(t.w, metaHandle, indexHandle)
+	n, err = writeFooter(t.w, mi, ii)
 	if err != nil {
 		return
 	}
@@ -174,15 +168,15 @@ func (t *Builder) Finish() (err error) {
 	return
 }
 
-func (t *Builder) NumEntries() int {
+func (t *Writer) NumEntries() int {
 	return t.n
 }
 
-func (t *Builder) FileSize() int {
+func (t *Writer) FileSize() int {
 	return t.offset
 }
 
-func (t *Builder) write(buf []byte, handle *blockHandle, raw bool) (err error) {
+func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
 	compression := leveldb.NoCompression
 	if !raw {
 		compression = t.o.GetCompressionType()
@@ -192,9 +186,9 @@ func (t *Builder) write(buf []byte, handle *blockHandle, raw bool) (err error) {
 		compression = leveldb.NoCompression
 	}
 
-	if handle != nil {
-		handle.Offset = uint64(t.offset)
-		handle.Size = uint64(len(buf))
+	if bi != nil {
+		bi.offset = uint64(t.offset)
+		bi.size = uint64(len(buf))
 	}
 
 	_, err = t.w.Write(buf)

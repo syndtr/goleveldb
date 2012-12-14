@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package table
+package block
 
 import (
 	"bytes"
@@ -43,10 +43,7 @@ var cases = []string{
 }
 
 func TestBlock(t *testing.T) {
-	o := &leveldb.Options{
-		BlockRestartInterval: 3,
-	}
-	bb := newBlockBuilder(o, 0)
+	bb := NewWriter(3)
 	for _, v := range cases {
 		bb.Add([]byte(v), []byte(v))
 	}
@@ -55,12 +52,12 @@ func TestBlock(t *testing.T) {
 	if ll != len(out) {
 		t.Error("guessed len doesn't equal with output len, ", ll, "!=", len(out))
 	}
-	br, err := newBlock(out)
+	br, err := NewReader(out)
 	if err != nil {
 		t.Error(err)
 	}
 
-	iter := br.NewIterator(o.GetComparator())
+	iter := br.NewIterator(leveldb.DefaultComparator)
 
 	for i := 1; i < len(cases)+1; i++ {
 		for j := 0; j < i; j++ {

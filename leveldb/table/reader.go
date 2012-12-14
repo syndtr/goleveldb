@@ -16,55 +16,67 @@ package table
 import (
 	"encoding/binary"
 	"leveldb"
+	"leveldb/block"
+	"leveldb/descriptor"
 	"runtime"
 )
 
 type Reader struct {
-	r leveldb.Reader
+	r descriptor.Reader
 	o *leveldb.Options
 
-	meta  *block
-	index *block
-
-	filter *filterBlock
+	meta   *block.Reader
+	index  *block.Reader
+	filter *block.FilterReader
 
 	dataEnd uint64
 	cacheId uint64
 }
 
-func NewReader(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Reader, err error) {
-	var metaHandle, indexHandle *blockHandle
-	metaHandle, indexHandle, err = readFooter(r, size)
+func NewReader(r descriptor.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Reader, err error) {
+	mi, ii, err := readFooter(r, size)
 	if err != nil {
 		return
 	}
 
-	var index *block
-	index, err = newBlockFromHandle(indexHandle, r, true)
+	bb, err := ii.readAll(r, true)
+	if err != nil {
+		return
+	}
+	var index *block.Reader
+	index, err = block.NewReader(bb)
 	if err != nil {
 		return
 	}
 
-	dataEnd := metaHandle.Offset
+	dataEnd := mi.offset
 
-	var filter *filterBlock
+	var filter *block.FilterReader
 	filterPolicy := o.GetFilterPolicy()
 	if filterPolicy != nil {
-		var meta *block
-		meta, err = newBlockFromHandle(metaHandle, r, true)
+		bb, err = mi.readAll(r, true)
+		if err != nil {
+			return
+		}
+		var meta *block.Reader
+		meta, err = block.NewReader(bb)
 		if err != nil {
 			return
 		}
 		iter := meta.NewIterator(o.GetComparator())
 		key := "filter." + filterPolicy.Name()
 		if iter.Seek([]byte(key)) && string(iter.Key()) == key {
-			filterHandle := new(blockHandle)
-			_, err = filterHandle.DecodeFrom(iter.Value())
+			fh := new(bInfo)
+			_, err = fh.decodeFrom(iter.Value())
 			if err != nil {
 				return
 			}
-			dataEnd = filterHandle.Offset
-			filter, err = newFilterBlockFromHandle(filterHandle, r, true, filterPolicy)
+			dataEnd = fh.offset
+			bb, err = fh.readAll(r, true)
+			if err != nil {
+				return
+			}
+			filter, err = block.NewFilterReader(bb, filterPolicy)
 			if err != nil {
 				return
 			}
@@ -84,7 +96,7 @@ func NewReader(r leveldb.Reader, size uint64, o *leveldb.Options, cacheId uint64
 
 func (t *Reader) NewIterator(o *leveldb.ReadOptions) leveldb.Iterator {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
-	return leveldb.NewTwoLevelIterator(index_iter, &blockGetter{t: t, o: o})
+	return leveldb.NewTwoLevelIterator(index_iter, &bGet{t: t, o: o})
 }
 
 func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
@@ -97,14 +109,14 @@ func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, e
 		return
 	}
 
-	handle := new(blockHandle)
-	_, err = handle.DecodeFrom(index_iter.Value())
+	bi := new(bInfo)
+	_, err = bi.decodeFrom(index_iter.Value())
 	if err != nil {
 		return
 	}
-	if t.filter == nil || t.filter.KeyMayMatch(uint(handle.Offset), key) {
+	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
 		var iter leveldb.Iterator
-		iter, err = t.getBlock(handle, o)
+		iter, err = t.getBlock(bi, o)
 		if !iter.Seek(key) {
 			err = iter.Error()
 			if err == nil {
@@ -120,19 +132,23 @@ func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, e
 func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	if index_iter.Seek(key) {
-		handle := new(blockHandle)
-		_, err := handle.DecodeFrom(index_iter.Value())
+		bi := new(bInfo)
+		_, err := bi.decodeFrom(index_iter.Value())
 		if err == nil {
-			return handle.Offset
+			return bi.offset
 		}
 	}
 	return t.dataEnd
 }
 
-func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
-	var b *block
+func (t *Reader) getBlock(bi *bInfo, o *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
+	var b *block.Reader
 	newBlock := func() {
-		b, err = newBlockFromHandle(handle, t.r, o.HasFlag(leveldb.RFVerifyChecksums))
+		bb, err := bi.readAll(t.r, o.HasFlag(leveldb.RFVerifyChecksums))
+		if err != nil {
+			return
+		}
+		b, err = block.NewReader(bb)
 	}
 
 	var cacheObj leveldb.CacheObject
@@ -140,18 +156,18 @@ func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter lev
 	if cache != nil {
 		cacheKey := make([]byte, 16)
 		binary.LittleEndian.PutUint64(cacheKey, t.cacheId)
-		binary.LittleEndian.PutUint64(cacheKey[8:], handle.Offset)
+		binary.LittleEndian.PutUint64(cacheKey[8:], bi.offset)
 
 		var ok bool
 		cacheObj, ok = cache.Get(cacheKey)
 		if ok {
-			b = cacheObj.Value().(*block)
+			b = cacheObj.Value().(*block.Reader)
 		} else {
 			newBlock()
 			if err != nil {
 				return
 			}
-			cacheObj = cache.Set(cacheKey, b, int(handle.Size))
+			cacheObj = cache.Set(cacheKey, b, int(bi.size))
 		}
 	} else {
 		newBlock()
@@ -162,7 +178,7 @@ func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter lev
 
 	iter = b.NewIterator(t.o.GetComparator())
 	if cacheObj != nil {
-		if biter, ok := iter.(*blockIterator); ok {
+		if biter, ok := iter.(*block.Iterator); ok {
 			setCacheFinalizer(biter, cacheObj)
 		} else {
 			cacheObj.Release()
@@ -171,23 +187,23 @@ func (t *Reader) getBlock(handle *blockHandle, o *leveldb.ReadOptions) (iter lev
 	return
 }
 
-type blockGetter struct {
+type bGet struct {
 	t *Reader
 	o *leveldb.ReadOptions
 }
 
-func (g *blockGetter) Get(value []byte) (iter leveldb.Iterator, err error) {
-	handle := new(blockHandle)
-	_, err = handle.DecodeFrom(value)
+func (g *bGet) Get(value []byte) (iter leveldb.Iterator, err error) {
+	bi := new(bInfo)
+	_, err = bi.decodeFrom(value)
 	if err != nil {
 		return
 	}
 
-	return g.t.getBlock(handle, g.o)
+	return g.t.getBlock(bi, g.o)
 }
 
-func setCacheFinalizer(x *blockIterator, cache leveldb.CacheObject) {
-	runtime.SetFinalizer(x, func(x *blockIterator) {
+func setCacheFinalizer(x *block.Iterator, cache leveldb.CacheObject) {
+	runtime.SetFinalizer(x, func(x *block.Iterator) {
 		cache.Release()
 	})
 }

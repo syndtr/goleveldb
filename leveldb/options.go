@@ -210,13 +210,6 @@ const (
 type ReadOptions struct {
 	// Specify the read flag
 	Flag ReadOptionsFlag
-
-	// If "snapshot" is non-NULL, read as of the supplied snapshot
-	// (which must belong to the DB that is being read and which must
-	// not have been released).  If "snapshot" is NULL, use an impliicit
-	// snapshot of the state at the beginning of this read operation.
-	// Default: NULL
-	Snapshot Snapshot
 }
 
 func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
@@ -224,13 +217,6 @@ func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
 		return false
 	}
 	return (o.Flag | flag) != 0
-}
-
-func (o *ReadOptions) GetSnapshot() Snapshot {
-	if o == nil {
-		return nil
-	}
-	return o.Snapshot
 }
 
 // Write flag
