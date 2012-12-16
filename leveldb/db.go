@@ -26,6 +26,11 @@ type Reader interface {
 	NewIterator(ro *ReadOptions) (iter Iterator, err error)
 }
 
+type Batch interface {
+	Put(key, value []byte)
+	Delete(key []byte)
+}
+
 type Writer interface {
 	// Set the database entry for "key" to "value".
 	Put(key, value []byte, wo *WriteOptions) error
@@ -35,7 +40,7 @@ type Writer interface {
 	Delete(key []byte, wo *WriteOptions) error
 
 	// Apply the specified updates to the database.
-	Write(updates *WriteBatch, wo *WriteOptions) error
+	Write(updates *Batch, wo *WriteOptions) error
 }
 
 type Snapshot interface {
@@ -101,5 +106,3 @@ type DB interface {
 	//    db.CompactRange(nil, nil);
 	CompactRange(begin, end []byte) error
 }
-
-type WriteBatch interface{}
