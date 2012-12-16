@@ -47,7 +47,7 @@ func TestBlock(t *testing.T) {
 	for _, v := range cases {
 		bb.Add([]byte(v), []byte(v))
 	}
-	ll := bb.Len()
+	ll := bb.Size()
 	out := bb.Finish()
 	if ll != len(out) {
 		t.Error("guessed len doesn't equal with output len, ", ll, "!=", len(out))

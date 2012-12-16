@@ -24,21 +24,27 @@ type Writer struct {
 	buf      *bytes.Buffer
 	restarts []uint32
 	lastKey  []byte
-	counter  int
+	n        int
+	closed   bool
 }
 
 func NewWriter(restartInterval int) *Writer {
 	return &Writer{
 		restartInterval: restartInterval,
 		buf:             new(bytes.Buffer),
-		restarts:        make([]uint32, 1),
 	}
 }
 
 func (b *Writer) Add(key, value []byte) {
+	if b.closed {
+		panic("opeartion on closed block writer")
+	}
+
 	// Get key shared prefix
 	shared := 0
-	if b.counter < b.restartInterval {
+	if b.n%b.restartInterval == 0 {
+		b.restarts = append(b.restarts, uint32(b.buf.Len()))
+	} else {
 		n := len(b.lastKey)
 		if n > len(key) {
 			n = len(key)
@@ -46,9 +52,6 @@ func (b *Writer) Add(key, value []byte) {
 		for shared < n && b.lastKey[shared] == key[shared] {
 			shared++
 		}
-	} else {
-		b.counter = 0
-		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 	}
 
 	// Add "<shared><non_shared><value_size>" to buffer
@@ -66,14 +69,20 @@ func (b *Writer) Add(key, value []byte) {
 	b.buf.Write(value)
 
 	b.lastKey = key
-	b.counter++
-}
-
-func (b *Writer) Len() int {
-	return b.buf.Len() + len(b.restarts)*4 + 4
+	b.n++
 }
 
 func (b *Writer) Finish() []byte {
+	if b.closed {
+		panic("opeartion on closed block writer")
+	}
+
+	b.closed = true
+
+	if b.restarts == nil {
+		b.restarts = make([]uint32, 1)
+	}
+
 	for _, restart := range b.restarts {
 		binary.Write(b.buf, binary.LittleEndian, restart)
 	}
@@ -84,7 +93,24 @@ func (b *Writer) Finish() []byte {
 
 func (b *Writer) Reset() {
 	b.buf.Reset()
-	b.restarts = make([]uint32, 1)
+	b.restarts = nil
 	b.lastKey = nil
-	b.counter = 0
+	b.n = 0
+	b.closed = false
+}
+
+func (b *Writer) Len() int {
+	return b.n
+}
+
+func (b *Writer) Size() int {
+	n := b.buf.Len()
+	if !b.closed {
+		n += len(b.restarts)*4 + 4
+	}
+	return n
+}
+
+func (b *Writer) CountRestart() int {
+	return len(b.restarts)
 }

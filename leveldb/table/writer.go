@@ -55,7 +55,7 @@ func NewWriter(w descriptor.Writer, o *leveldb.Options) *Writer {
 
 func (t *Writer) Add(key, value []byte) (err error) {
 	if t.closed {
-		panic("operation on closed table builder")
+		panic("operation on closed table writer")
 	}
 
 	cmp := t.o.GetComparator()
@@ -77,7 +77,7 @@ func (t *Writer) Add(key, value []byte) (err error) {
 	t.n++
 
 	t.dataBlock.Add(key, value)
-	if t.dataBlock.Len() >= t.o.GetBlockSize() {
+	if t.dataBlock.Size() >= t.o.GetBlockSize() {
 		err = t.Flush()
 	}
 	return
@@ -85,7 +85,7 @@ func (t *Writer) Add(key, value []byte) (err error) {
 
 func (t *Writer) Flush() (err error) {
 	if t.closed {
-		panic("operation on closed table builder")
+		panic("operation on closed table writer")
 	}
 
 	if t.pendingIndex {
@@ -113,7 +113,7 @@ func (t *Writer) Flush() (err error) {
 
 func (t *Writer) Finish() (err error) {
 	if t.closed {
-		panic("operation on closed table builder")
+		panic("operation on closed table writer")
 	}
 
 	err = t.Flush()
@@ -168,12 +168,20 @@ func (t *Writer) Finish() (err error) {
 	return
 }
 
-func (t *Writer) NumEntries() int {
+func (t *Writer) Len() int {
 	return t.n
 }
 
-func (t *Writer) FileSize() int {
+func (t *Writer) Size() int {
 	return t.offset
+}
+
+func (t *Writer) CountBlock() int {
+	n := t.indexBlock.Len()
+	if !t.closed {
+		n++
+	}
+	return n
 }
 
 func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {

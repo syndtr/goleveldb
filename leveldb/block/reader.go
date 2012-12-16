@@ -40,8 +40,8 @@ func NewReader(buf []byte) (b *Reader, err error) {
 	restartLen := binary.LittleEndian.Uint32(buf[len(buf)-4:])
 
 	// Calculate restart start offset
-	restartStart := len(buf) - (1+int(restartLen))*4
-	if restartStart > len(buf)-4 {
+	restartStart := len(buf) - int(restartLen)*4 - 4
+	if restartStart >= len(buf)-4 {
 		err = leveldb.ErrCorrupt("bad restart offset in block")
 		return
 	}
@@ -56,7 +56,7 @@ func NewReader(buf []byte) (b *Reader, err error) {
 }
 
 func (b *Reader) NewIterator(cmp leveldb.Comparator) leveldb.Iterator {
-	if b.restartLen == 0 {
+	if b.restartStart == 0 {
 		return &leveldb.EmptyIterator{}
 	}
 
@@ -218,38 +218,44 @@ func (i *Iterator) Last() bool {
 	return i.Prev()
 }
 
+func (i *Iterator) search(key []byte) {
+	// catch panic raised by binary search
+	defer func() {
+		if x := recover(); x != nil {
+			if x != i {
+				panic(x)
+			}
+		}
+	}()
+
+	// binary search in restart array to find the last
+	// restart point with a 'key' < 'target'
+	i.ri = sort.Search(i.b.restartLen, func(x int) bool {
+		var rr *restartRange
+		rr, i.err = i.getRestartRange(x)
+		if i.err != nil {
+			panic(i)
+		}
+		i.err = rr.next()
+		if i.err != nil {
+			panic(i)
+		}
+		return i.cmp.Compare(rr.key(), key) > 0
+	})
+
+	if i.ri > 0 {
+		i.ri--
+	}
+}
+
 func (i *Iterator) Seek(key []byte) (r bool) {
 	if i.err != nil {
 		return false
 	}
 
-	func() {
-		// catch panic raised by binary search
-		defer func() {
-			if x := recover(); x != i {
-				panic(x)
-			}
-		}()
-
-		// binary search in restart array to find the last
-		// restart point with a 'key' < 'target'
-		i.ri = sort.Search(i.b.restartLen, func(x int) bool {
-			rr, err := i.getRestartRange(x)
-			if err != nil {
-				i.err = err
-				panic(i)
-			}
-			err = rr.next()
-			if err != nil {
-				i.err = err
-				panic(i)
-			}
-			return i.cmp.Compare(rr.key(), key) > 0
-		})
-	}()
-
-	if i.ri > 0 {
-		i.ri--
+	i.search(key)
+	if i.err != nil {
+		return false
 	}
 
 	i.rr = nil

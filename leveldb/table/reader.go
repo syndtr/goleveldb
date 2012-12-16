@@ -80,6 +80,11 @@ func NewReader(r descriptor.Reader, size uint64, o *leveldb.Options, cacheId uin
 			if err != nil {
 				return
 			}
+		} else {
+			err = iter.Error()
+			if err != nil {
+				return
+			}
 		}
 	}
 
