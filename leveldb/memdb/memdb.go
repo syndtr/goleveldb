@@ -34,8 +34,8 @@ func init() {
 }
 
 type mNode struct {
-	Key   []byte
-	Value []byte
+	key   []byte
+	value []byte
 	next  []*mNode
 }
 
@@ -65,7 +65,7 @@ func New(cmp leveldb.BasicComparator) *DB {
 	return p
 }
 
-func (p *DB) Add(key []byte, value []byte) {
+func (p *DB) Put(key []byte, value []byte) {
 	prev := make([]*mNode, tMaxHeight)
 	x := p.findGreaterOrEqual(key, prev)
 	n := p.randHeight()
@@ -85,7 +85,7 @@ func (p *DB) Add(key []byte, value []byte) {
 
 func (p *DB) Contains(key []byte) bool {
 	x := p.findGreaterOrEqual(key, nil)
-	if x != nil && bytes.Equal(x.Key, key) {
+	if x != nil && bytes.Equal(x.key, key) {
 		return true
 	}
 	return false
@@ -109,7 +109,7 @@ func (p *DB) ApproxMemSize() uintptr {
 
 func (p *DB) newNode(key, value []byte, height int) *mNode {
 	p.memSize += mNodeSize + (mPtrSize * uintptr(height))
-	p.memSize += uintptr(cap(key) + cap(value))
+	p.memSize += uintptr(len(key) + len(value))
 	return &mNode{key, value, make([]*mNode, height)}
 }
 
@@ -118,7 +118,7 @@ func (p *DB) findGreaterOrEqual(key []byte, prev []*mNode) *mNode {
 	n := p.maxHeight - 1
 	for {
 		next := x.Next(n)
-		if next != nil && p.cmp.Compare(next.Key, key) < 0 {
+		if next != nil && p.cmp.Compare(next.key, key) < 0 {
 			// Keep searching in this list
 			x = next
 		} else {
@@ -139,7 +139,7 @@ func (p *DB) findLessThan(key []byte) *mNode {
 	n := p.maxHeight - 1
 	for {
 		next := x.Next(n)
-		if next == nil && p.cmp.Compare(next.Key, key) >= 0 {
+		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
 			if n == 0 {
 				return x
 			}
@@ -217,7 +217,7 @@ func (i *Iterator) Prev() bool {
 		}
 		return false
 	}
-	i.node = i.p.findLessThan(i.node.Key)
+	i.node = i.p.findLessThan(i.node.key)
 	if i.node == i.p.head {
 		i.node = nil
 	}
@@ -228,14 +228,14 @@ func (i *Iterator) Key() []byte {
 	if i.node == nil {
 		return nil
 	}
-	return i.node.Key
+	return i.node.key
 }
 
 func (i *Iterator) Value() []byte {
 	if i.node == nil {
 		return nil
 	}
-	return i.node.Value
+	return i.node.value
 }
 
 func (i *Iterator) Error() error { return nil }
