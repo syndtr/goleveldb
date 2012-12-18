@@ -184,22 +184,22 @@ type Iterator struct {
 }
 
 func (i *Iterator) Valid() bool {
-	return i.node != nil
+	return i.node != nil && i.node != i.p.head
 }
 
 func (i *Iterator) First() bool {
 	i.node = i.p.head.Next(0)
-	return i.node != nil
+	return i.Valid()
 }
 
 func (i *Iterator) Last() bool {
 	i.node = i.p.findLast()
-	return i.node != nil
+	return i.Valid()
 }
 
 func (i *Iterator) Seek(key []byte) (r bool) {
 	i.node = i.p.findGreaterOrEqual(key, nil)
-	return i.node != nil
+	return i.Valid()
 }
 
 func (i *Iterator) Next() bool {
@@ -207,7 +207,7 @@ func (i *Iterator) Next() bool {
 		return i.First()
 	}
 	i.node = i.node.Next(0)
-	res := i.node != nil
+	res := i.Valid()
 	if !res {
 		i.onLast = true
 	}
@@ -225,18 +225,18 @@ func (i *Iterator) Prev() bool {
 	if i.node == i.p.head {
 		i.node = nil
 	}
-	return i.node != nil
+	return i.Valid()
 }
 
 func (i *Iterator) Key() []byte {
-	if i.node == nil {
+	if !i.Valid() {
 		return nil
 	}
 	return i.node.key
 }
 
 func (i *Iterator) Value() []byte {
-	if i.node == nil {
+	if !i.Valid() {
 		return nil
 	}
 	return i.node.value
