@@ -55,12 +55,24 @@ func NewReader(buf []byte) (b *Reader, err error) {
 	return
 }
 
-func (b *Reader) NewIterator(cmp leveldb.Comparator) leveldb.Iterator {
+func (b *Reader) NewIterator(cmp leveldb.Comparator) *Iterator {
 	if b.restartStart == 0 {
-		return &leveldb.EmptyIterator{}
+		return new(Iterator)
 	}
-
 	return &Iterator{b: b, cmp: cmp, rd: bytes.NewReader(b.rbuf)}
+}
+
+func (b *Reader) InitIterator(iter *Iterator, cmp leveldb.Comparator) {
+	if b.restartStart == 0 {
+		iter.b = nil
+	} else {
+		iter.b = b
+		iter.cmp = cmp
+		iter.rd = bytes.NewReader(b.rbuf)
+	}
+	iter.err = nil
+	iter.ri = 0
+	iter.rr = nil
 }
 
 type keyVal struct {
@@ -206,13 +218,23 @@ type Iterator struct {
 	rd  *bytes.Reader // restart reader
 }
 
+func (i *Iterator) Empty() bool {
+	return i.b == nil
+}
+
 func (i *Iterator) First() bool {
+	if i.Empty() {
+		return false
+	}
 	i.ri = 0
 	i.rr = nil
 	return i.Next()
 }
 
 func (i *Iterator) Last() bool {
+	if i.Empty() {
+		return false
+	}
 	i.ri = i.b.restartLen
 	i.rr = nil
 	return i.Prev()
@@ -249,7 +271,7 @@ func (i *Iterator) search(key []byte) {
 }
 
 func (i *Iterator) Seek(key []byte) (r bool) {
-	if i.err != nil {
+	if i.err != nil || i.Empty() {
 		return false
 	}
 
@@ -270,7 +292,7 @@ func (i *Iterator) Seek(key []byte) (r bool) {
 }
 
 func (i *Iterator) Next() bool {
-	if i.ri == i.b.restartLen || i.err != nil {
+	if i.err != nil || i.Empty() || i.ri == i.b.restartLen {
 		return false
 	}
 
@@ -299,7 +321,7 @@ func (i *Iterator) Next() bool {
 }
 
 func (i *Iterator) Prev() bool {
-	if i.err != nil {
+	if i.err != nil || i.Empty() {
 		return false
 	}
 

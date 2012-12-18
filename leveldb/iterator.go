@@ -13,7 +13,7 @@
 
 package leveldb
 
-type Iterator interface {
+type IteratorSeeker interface {
 	// Position at the first key in the source.  The iterator is Valid()
 	// after this call if the source is not empty.
 	First() bool
@@ -37,6 +37,13 @@ type Iterator interface {
 	// REQUIRES: Valid()
 	Prev() bool
 
+	// If an error has occurred, return it.  Else return nil.
+	Error() error
+}
+
+type Iterator interface {
+	IteratorSeeker
+
 	// Return the key for the current entry.  The underlying storage for
 	// the returned slice is valid only until the next modification of
 	// the iterator.
@@ -48,13 +55,13 @@ type Iterator interface {
 	// the iterator.
 	// REQUIRES: !AtEnd() && !AtStart()
 	Value() []byte
-
-	// If an error has occurred, return it.  Else return nil.
-	Error() error
 }
 
-type IteratorGetter interface {
-	Get(value []byte) (Iterator, error)
+type IteratorIndexer interface {
+	IteratorSeeker
+
+	// Return iterator for current entry.
+	Get() (Iterator, error)
 }
 
 type EmptyIterator struct {
@@ -70,18 +77,17 @@ func (*EmptyIterator) Key() []byte          { return nil }
 func (*EmptyIterator) Value() []byte        { return nil }
 func (i *EmptyIterator) Error() error       { return i.Err }
 
-type TwoLevelIterator struct {
-	getter IteratorGetter
-	index  Iterator
-	data   Iterator
-	err    error
+type IndexedIterator struct {
+	index IteratorIndexer
+	data  Iterator
+	err   error
 }
 
-func NewTwoLevelIterator(index Iterator, getter IteratorGetter) *TwoLevelIterator {
-	return &TwoLevelIterator{getter: getter, index: index}
+func NewIndexedIterator(index IteratorIndexer) *IndexedIterator {
+	return &IndexedIterator{index: index}
 }
 
-func (i *TwoLevelIterator) First() bool {
+func (i *IndexedIterator) First() bool {
 	if i.err != nil {
 		return false
 	}
@@ -93,7 +99,7 @@ func (i *TwoLevelIterator) First() bool {
 	return i.Next()
 }
 
-func (i *TwoLevelIterator) Last() bool {
+func (i *IndexedIterator) Last() bool {
 	if i.err != nil {
 		return false
 	}
@@ -110,7 +116,7 @@ func (i *TwoLevelIterator) Last() bool {
 	return true
 }
 
-func (i *TwoLevelIterator) Seek(key []byte) bool {
+func (i *IndexedIterator) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	}
@@ -125,7 +131,7 @@ func (i *TwoLevelIterator) Seek(key []byte) bool {
 	return true
 }
 
-func (i *TwoLevelIterator) Next() bool {
+func (i *IndexedIterator) Next() bool {
 	if i.err != nil {
 		return false
 	}
@@ -140,7 +146,7 @@ func (i *TwoLevelIterator) Next() bool {
 	return true
 }
 
-func (i *TwoLevelIterator) Prev() bool {
+func (i *IndexedIterator) Prev() bool {
 	if i.err != nil {
 		return false
 	}
@@ -160,19 +166,19 @@ func (i *TwoLevelIterator) Prev() bool {
 	return true
 }
 
-func (i *TwoLevelIterator) Key() []byte {
+func (i *IndexedIterator) Key() []byte {
 	if i.data == nil {
 		return nil
 	}
 	return i.data.Key()
 }
-func (i *TwoLevelIterator) Value() []byte {
+func (i *IndexedIterator) Value() []byte {
 	if i.data == nil {
 		return nil
 	}
 	return i.data.Value()
 }
-func (i *TwoLevelIterator) Error() error {
+func (i *IndexedIterator) Error() error {
 	if i.err != nil {
 		return i.err
 	} else if i.index.Error() != nil {
@@ -183,7 +189,7 @@ func (i *TwoLevelIterator) Error() error {
 	return nil
 }
 
-func (i *TwoLevelIterator) setData() bool {
-	i.data, i.err = i.getter.Get(i.index.Value())
+func (i *IndexedIterator) setData() bool {
+	i.data, i.err = i.index.Get()
 	return i.err == nil
 }

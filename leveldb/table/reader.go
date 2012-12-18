@@ -100,8 +100,9 @@ func NewReader(r descriptor.Reader, size uint64, o *leveldb.Options, cacheId uin
 }
 
 func (t *Reader) NewIterator(o *leveldb.ReadOptions) leveldb.Iterator {
-	index_iter := t.index.NewIterator(t.o.GetComparator())
-	return leveldb.NewTwoLevelIterator(index_iter, &bGet{t: t, o: o})
+	index_iter := &indexIter{t: t, o: o}
+	t.index.InitIterator(&index_iter.Iterator, t.o.GetComparator())
+	return leveldb.NewIndexedIterator(index_iter)
 }
 
 func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
@@ -181,30 +182,28 @@ func (t *Reader) getBlock(bi *bInfo, o *leveldb.ReadOptions) (iter leveldb.Itera
 		}
 	}
 
-	iter = b.NewIterator(t.o.GetComparator())
+	biter := b.NewIterator(t.o.GetComparator())
 	if cacheObj != nil {
-		if biter, ok := iter.(*block.Iterator); ok {
-			setCacheFinalizer(biter, cacheObj)
-		} else {
-			cacheObj.Release()
-		}
+		setCacheFinalizer(biter, cacheObj)
 	}
-	return
+	return biter, nil
 }
 
-type bGet struct {
+type indexIter struct {
+	block.Iterator
+
 	t *Reader
 	o *leveldb.ReadOptions
 }
 
-func (g *bGet) Get(value []byte) (iter leveldb.Iterator, err error) {
+func (i *indexIter) Get() (iter leveldb.Iterator, err error) {
 	bi := new(bInfo)
-	_, err = bi.decodeFrom(value)
+	_, err = bi.decodeFrom(i.Value())
 	if err != nil {
 		return
 	}
 
-	return g.t.getBlock(bi, g.o)
+	return i.t.getBlock(bi, i.o)
 }
 
 func setCacheFinalizer(x *block.Iterator, cache leveldb.CacheObject) {
