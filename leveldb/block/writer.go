@@ -79,6 +79,7 @@ func (b *Writer) Finish() []byte {
 
 	b.closed = true
 
+	// C++ leveldb need atleast 1 restart entry
 	if b.restarts == nil {
 		b.restarts = make([]uint32, 1)
 	}
@@ -107,6 +108,9 @@ func (b *Writer) Size() int {
 	n := b.buf.Len()
 	if !b.closed {
 		n += len(b.restarts)*4 + 4
+		if b.restarts == nil {
+			n += 4
+		}
 	}
 	return n
 }
