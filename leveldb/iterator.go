@@ -217,7 +217,7 @@ func NewMergedIterator(iters []Iterator, cmp Comparator) *MergedIterator {
 }
 
 func (i *MergedIterator) Valid() bool {
-	return i.err == nil && i.iter != nil && i.iter.Valid()
+	return i.err == nil && i.iter != nil
 }
 
 func (i *MergedIterator) First() bool {
