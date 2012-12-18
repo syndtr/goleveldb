@@ -23,14 +23,14 @@ import (
 const tMaxHeight = 12
 
 var (
-	mPtrSize  uintptr
-	mNodeSize uintptr
+	mPtrSize  int
+	mNodeSize int
 )
 
 func init() {
 	node := new(mNode)
-	mPtrSize = unsafe.Sizeof(node)
-	mNodeSize = unsafe.Sizeof(*node)
+	mPtrSize = int(unsafe.Sizeof(node))
+	mNodeSize = int(unsafe.Sizeof(*node))
 }
 
 type mNode struct {
@@ -52,7 +52,7 @@ type DB struct {
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int
-	memSize   uintptr
+	memSize   int
 }
 
 func New(cmp leveldb.BasicComparator) *DB {
@@ -103,13 +103,13 @@ func (p *DB) NewIterator() *Iterator {
 	return &Iterator{p: p}
 }
 
-func (p *DB) ApproxMemSize() uintptr {
+func (p *DB) Size() int {
 	return p.memSize
 }
 
 func (p *DB) newNode(key, value []byte, height int) *mNode {
-	p.memSize += mNodeSize + (mPtrSize * uintptr(height))
-	p.memSize += uintptr(len(key) + len(value))
+	p.memSize += mNodeSize + (mPtrSize * height)
+	p.memSize += len(key) + len(value)
 	return &mNode{key, value, make([]*mNode, height)}
 }
 

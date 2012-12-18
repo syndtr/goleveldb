@@ -179,6 +179,9 @@ func (p *TableConstructor) Finish(t *testing.T) (size int, err error) {
 		return
 	}
 	size = p.b.Len()
+	if size != p.tw.Size() {
+		t.Logf("table: calculated size doesn't equal with actual size, %d != %d", p.tw.Size(), size)
+	}
 	r := &reader{
 		r:    bytes.NewReader(p.b.Bytes()),
 		name: "table",
@@ -228,7 +231,7 @@ func (p *MemDBConstructor) Add(key, value []byte) error {
 }
 
 func (p *MemDBConstructor) Finish(t *testing.T) (size int, err error) {
-	return int(p.mem.ApproxMemSize()), nil
+	return int(p.mem.Size()), nil
 }
 
 func (p *MemDBConstructor) NewIterator() leveldb.Iterator {
