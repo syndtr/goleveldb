@@ -240,6 +240,40 @@ func (p *MemDBConstructor) NewIterator() leveldb.Iterator {
 
 func (p *MemDBConstructor) CustomTest(h *Harness) {}
 
+type MergedMemDBConstructor struct {
+	mem [3]*memdb.DB
+}
+
+func (p *MergedMemDBConstructor) Init() error {
+	for i := range p.mem {
+		p.mem[i] = memdb.New(leveldb.DefaultComparator)
+	}
+	return nil
+}
+
+func (p *MergedMemDBConstructor) Add(key, value []byte) error {
+	p.mem[rand.Intn(99999) % 3].Put(key, value)
+	return nil
+}
+
+func (p *MergedMemDBConstructor) Finish(t *testing.T) (size int, err error) {
+	for i, m := range p.mem {
+		t.Logf("merged: memdb[%d] size: %d", i, m.Size())
+		size += m.Size()
+	}
+	return
+}
+
+func (p *MergedMemDBConstructor) NewIterator() leveldb.Iterator {
+	var iters []leveldb.Iterator
+	for _, m := range p.mem {
+		iters = append(iters, m.NewIterator())
+	}
+	return leveldb.NewMergedIterator(iters, leveldb.DefaultComparator)
+}
+
+func (p *MergedMemDBConstructor) CustomTest(h *Harness) {}
+
 type Harness struct {
 	t *testing.T
 
@@ -259,6 +293,7 @@ func (h *Harness) TestAll() {
 	h.Test("block", &BlockConstructor{})
 	h.Test("table", &TableConstructor{})
 	h.Test("memdb", &MemDBConstructor{})
+	h.Test("merged", &MergedMemDBConstructor{})
 }
 
 func (h *Harness) Test(name string, c Constructor) {
