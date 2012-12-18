@@ -331,6 +331,8 @@ first:
 	for i := range h.keys {
 		if !iter.Next() {
 			h.t.Error(name + ": SortedTest: Scan: Forward: unxepected eof")
+		} else if !iter.Valid() {
+			h.t.Error(name + ": SortedTest: Scan: Forward: Valid != true")
 		}
 		if !bytes.Equal(iter.Key(), h.keys[i]) {
 			h.t.Error(name+": SortedTest: Scan: Forward: key are invalid, ", iter.Key(), "!=", h.keys[i])
@@ -344,6 +346,8 @@ first:
 		first = true
 		if !iter.First() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: unxepected eof")
+		} else if !iter.Valid() {
+			h.t.Error(name + ": SortedTest: Scan: ToFirst: Valid != true")
 		}
 		if !bytes.Equal(iter.Key(), h.keys[0]) {
 			h.t.Error(name+": SortedTest: Scan: ToFirst: key are invalid, ", iter.Key(), "!=", h.keys[0])
@@ -353,6 +357,8 @@ first:
 		}
 		if iter.Prev() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: expecting eof")
+		} else if iter.Valid() {
+			h.t.Error(name + ": SortedTest: Scan: ToFirst: Valid != false")
 		}
 		goto first
 	}
@@ -360,11 +366,15 @@ first:
 last:
 	if iter.Next() {
 		h.t.Error(name + ": SortedTest: Scan: Forward: expecting eof")
+	} else if iter.Valid() {
+		h.t.Error(name + ": SortedTest: Scan: Forward: Valid != false")
 	}
 
 	for i := len(h.keys) - 1; i >= 0; i-- {
 		if !iter.Prev() {
 			h.t.Error(name + ": SortedTest: Scan: Backward: unxepected eof")
+		} else if !iter.Valid() {
+			h.t.Error(name + ": SortedTest: Scan: Backward: Valid != true")
 		}
 		if !bytes.Equal(iter.Key(), h.keys[i]) {
 			h.t.Error(name+": SortedTest: Scan: Backward: key are invalid, ", iter.Key(), "!=", h.keys[i])
@@ -378,6 +388,8 @@ last:
 		last = true
 		if !iter.Last() {
 			h.t.Error(name + ": SortedTest: Scan: ToLast: unxepected eof")
+		} else if !iter.Valid() {
+			h.t.Error(name + ": SortedTest: Scan: ToLast: Valid != true")
 		}
 		i := len(h.keys) - 1
 		if !bytes.Equal(iter.Key(), h.keys[i]) {
@@ -401,6 +413,8 @@ func (h *Harness) testSeek(name string, c Constructor) {
 		if !iter.Seek(key) {
 			h.t.Errorf(name+": SortedTest: Seek: Forward: key '%v' is not found, err: '%v'", key, iter.Error())
 			continue
+		} else if !iter.Valid() {
+			h.t.Error(name + ": SortedTest: Seek: Forward: Valid != true")
 		}
 		for j := i; j >= 0; j-- {
 			key, value := h.keys[j], h.values[j]

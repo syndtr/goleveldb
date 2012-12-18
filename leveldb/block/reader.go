@@ -222,6 +222,10 @@ func (i *Iterator) Empty() bool {
 	return i.b == nil
 }
 
+func (i *Iterator) Valid() bool {
+	return i.rr != nil
+}
+
 func (i *Iterator) First() bool {
 	if i.Empty() {
 		return false

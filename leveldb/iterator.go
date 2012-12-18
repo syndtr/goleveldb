@@ -14,6 +14,10 @@
 package leveldb
 
 type IteratorSeeker interface {
+	// An iterator is either positioned at a key/value pair, or
+	// not valid.  This method returns true if the iterator is valid.
+	Valid() bool
+
 	// Position at the first key in the source.  The iterator is Valid()
 	// after this call if the source is not empty.
 	First() bool
@@ -68,6 +72,7 @@ type EmptyIterator struct {
 	Err error
 }
 
+func (*EmptyIterator) Valid() bool          { return false }
 func (*EmptyIterator) First() bool          { return false }
 func (*EmptyIterator) Last() bool           { return false }
 func (*EmptyIterator) Seek(key []byte) bool { return false }
@@ -85,6 +90,10 @@ type IndexedIterator struct {
 
 func NewIndexedIterator(index IteratorIndexer) *IndexedIterator {
 	return &IndexedIterator{index: index}
+}
+
+func (i *IndexedIterator) Valid() bool {
+	return i.data != nil && i.data.Valid()
 }
 
 func (i *IndexedIterator) First() bool {
@@ -205,6 +214,10 @@ type MergedIterator struct {
 
 func NewMergedIterator(iters []Iterator, cmp Comparator) *MergedIterator {
 	return &MergedIterator{iters: iters, cmp: cmp}
+}
+
+func (i *MergedIterator) Valid() bool {
+	return i.err == nil && i.iter != nil && i.iter.Valid()
 }
 
 func (i *MergedIterator) First() bool {
@@ -340,11 +353,10 @@ func (i *MergedIterator) Error() error {
 func (i *MergedIterator) smallest() {
 	i.iter = nil
 	for _, p := range i.iters {
-		key := p.Key()
-		if key == nil {
+		if !p.Valid() {
 			continue
 		}
-		if i.iter == nil || i.cmp.Compare(key, i.iter.Key()) < 0 {
+		if i.iter == nil || i.cmp.Compare(p.Key(), i.iter.Key()) < 0 {
 			i.iter = p
 		}
 	}
@@ -353,11 +365,10 @@ func (i *MergedIterator) smallest() {
 func (i *MergedIterator) largest() {
 	i.iter = nil
 	for _, p := range i.iters {
-		key := p.Key()
-		if key == nil {
+		if !p.Valid() {
 			continue
 		}
-		if i.iter == nil || i.cmp.Compare(key, i.iter.Key()) > 0 {
+		if i.iter == nil || i.cmp.Compare(p.Key(), i.iter.Key()) > 0 {
 			i.iter = p
 		}
 	}

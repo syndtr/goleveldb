@@ -183,6 +183,10 @@ type Iterator struct {
 	onLast bool
 }
 
+func (i *Iterator) Valid() bool {
+	return i.node != nil
+}
+
 func (i *Iterator) First() bool {
 	i.node = i.p.head.Next(0)
 	return i.node != nil
