@@ -252,7 +252,7 @@ func (p *MergedMemDBConstructor) Init() error {
 }
 
 func (p *MergedMemDBConstructor) Add(key, value []byte) error {
-	p.mem[rand.Intn(99999) % 3].Put(key, value)
+	p.mem[rand.Intn(99999)%3].Put(key, value)
 	return nil
 }
 

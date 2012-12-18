@@ -207,9 +207,9 @@ type MergedIterator struct {
 	cmp   Comparator
 	iters []Iterator
 
-	iter   Iterator
+	iter       Iterator
 	isBackward bool
-	err error
+	err        error
 }
 
 func NewMergedIterator(iters []Iterator, cmp Comparator) *MergedIterator {
