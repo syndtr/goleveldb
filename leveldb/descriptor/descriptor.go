@@ -20,6 +20,8 @@ import (
 	"leveldb"
 	"os"
 	"path"
+	"sync"
+	"time"
 )
 
 type FileType uint32
@@ -76,6 +78,9 @@ type File interface {
 }
 
 type Descriptor interface {
+	// Print a string, for logging.
+	Print(str string)
+
 	// Get file with given number and type.
 	GetFile(number uint64, t FileType) File
 
@@ -96,6 +101,9 @@ type Descriptor interface {
 type StdDescriptor struct {
 	path string
 	lock *os.File
+	log  *os.File
+	buf  []byte
+	mu   sync.Mutex
 }
 
 func Open(dbpath string) (d *StdDescriptor, err error) {
@@ -103,12 +111,77 @@ func Open(dbpath string) (d *StdDescriptor, err error) {
 	if err != nil {
 		return
 	}
+
+	defer func() {
+		if err != nil {
+			lock.Close()
+		}
+	}()
+
 	err = setFileLock(lock, true)
 	if err != nil {
-		lock.Close()
 		return
 	}
-	return &StdDescriptor{path: dbpath, lock: lock}, nil
+
+	os.Rename(path.Join(dbpath, "LOG"), path.Join(dbpath, "LOG.old"))
+	log, err := os.OpenFile(path.Join(dbpath, "LOCK"), os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return
+	}
+
+	return &StdDescriptor{path: dbpath, lock: lock, log: log}, nil
+}
+
+// Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
+// Knows the buffer has capacity.
+func itoa(buf *[]byte, i int, wid int) {
+	var u uint = uint(i)
+	if u == 0 && wid <= 1 {
+		*buf = append(*buf, '0')
+		return
+	}
+
+	// Assemble decimal in reverse order.
+	var b [32]byte
+	bp := len(b)
+	for ; u > 0 || wid > 0; u /= 10 {
+		bp--
+		wid--
+		b[bp] = byte(u%10) + '0'
+	}
+	*buf = append(*buf, b[bp:]...)
+}
+
+func (d *StdDescriptor) Print(str string) {
+	t := time.Now()
+	year, month, day := t.Date()
+	hour, min, sec := t.Clock()
+	msec := t.Nanosecond() / 1e3
+	d.mu.Lock()
+	d.buf = d.buf[:0]
+
+	// date
+	itoa(&d.buf, year, 4)
+	d.buf = append(d.buf, '/')
+	itoa(&d.buf, int(month), 2)
+	d.buf = append(d.buf, '/')
+	itoa(&d.buf, day, 4)
+	d.buf = append(d.buf, ' ')
+
+	// time
+	itoa(&d.buf, hour, 2)
+	d.buf = append(d.buf, ':')
+	itoa(&d.buf, min, 2)
+	d.buf = append(d.buf, ':')
+	itoa(&d.buf, sec, 2)
+	d.buf = append(d.buf, '.')
+	itoa(&d.buf, msec, 6)
+
+	// write
+	d.log.Write(d.buf)
+	d.log.WriteString(str)
+
+	d.mu.Unlock()
 }
 
 func (d *StdDescriptor) GetFile(number uint64, t FileType) File {
