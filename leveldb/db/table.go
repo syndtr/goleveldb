@@ -25,7 +25,7 @@ import (
 // table file
 type tFile struct {
 	file     descriptor.File
-	seekLeft int
+	seekLeft int32
 	size     uint64
 	smallest iKey
 	largest  iKey
@@ -62,7 +62,7 @@ func newTFile(file descriptor.File, size uint64, smallest, largest iKey) *tFile 
 	// same as the compaction of 40KB of data.  We are a little
 	// conservative and allow approximately one seek for every 16KB
 	// of data before triggering a compaction.
-	f.seekLeft = int(size / 16384)
+	f.seekLeft = int32(size / 16384)
 	if f.seekLeft < 100 {
 		f.seekLeft = 100
 	}

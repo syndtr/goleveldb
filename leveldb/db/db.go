@@ -783,8 +783,18 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	}
 	d.mu.RUnlock()
 
-	return s.version().get(ikey, ro)
+	var cState bool
+	value, cState, err = s.version().get(ikey, ro)
 
+	if cState {
+		// schedule compaction
+		select {
+		case d.cch <- true:
+		default:
+		}
+	}
+
+	return
 }
 
 func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {

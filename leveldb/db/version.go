@@ -15,6 +15,7 @@ package db
 
 import (
 	"leveldb"
+	"sync/atomic"
 )
 
 var levelMaxSize [kNumLevels]float64
@@ -40,11 +41,18 @@ type version struct {
 	// are initialized by ComputeCompaction()
 	compactionLevel int
 	compactionScore float64
+
+	seekCompactionLevel int
+	seekCompactionTable *tFile
 }
 
-func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, err error) {
+func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState bool, err error) {
 	s := v.s
 	ukey := key.ukey()
+
+	var fLevel int
+	var fTable *tFile
+	fSeek := true
 
 	// We can search level-by-level since entries never hop across
 	// levels. Therefore we are guaranteed that if we find data
@@ -81,6 +89,25 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, err erro
 		}
 
 		for _, t := range ts {
+			if fSeek {
+				if fTable != nil {
+					if atomic.AddInt32(&fTable.seekLeft, -1) <= 0 {
+						s.st.Lock()
+						if v.seekCompactionTable == nil {
+							v.seekCompactionLevel = fLevel
+							v.seekCompactionTable = fTable
+							cState = true
+						}
+						s.st.Unlock()
+					}
+
+					fSeek = false
+				} else {
+					fLevel = level
+					fTable = t
+				}
+			}
+
 			var rkey, rval []byte
 			rkey, rval, err = s.tops.get(t, key, ro)
 			if err == leveldb.ErrNotFound {
@@ -108,7 +135,8 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, err erro
 		}
 	}
 
-	return nil, leveldb.ErrNotFound
+	err = leveldb.ErrNotFound
+	return
 }
 
 func (v *version) newStaging() *versionStaging {

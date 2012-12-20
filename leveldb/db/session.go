@@ -178,15 +178,25 @@ func (s *session) commit(r *sessionRecord) (err error) {
 }
 
 func (s *session) needCompaction() bool {
-	return s.st.version.compactionScore >= 1
+	st := &s.st
+	st.RLock()
+	defer st.RUnlock()
+	v := st.version
+	return v.compactionScore >= 1 || v.seekCompactionTable != nil
 }
 
 func (s *session) pickCompaction() (c *compaction) {
-	v := s.st.version
+	st := &s.st
+
+	st.RLock()
+	v := st.version
+	bySize := v.compactionScore >= 1
+	bySeek := v.seekCompactionTable != nil
+	st.RUnlock()
 
 	var level int
 	var t0 tFiles
-	if v.compactionScore >= 1 {
+	if bySize {
 		level = v.compactionLevel
 		cp := s.st.compactPointers[level]
 		tt := v.tables[level]
@@ -199,6 +209,9 @@ func (s *session) pickCompaction() (c *compaction) {
 		if len(t0) == 0 {
 			t0 = append(t0, tt[0])
 		}
+	} else if bySeek {
+		level = v.seekCompactionLevel
+		t0 = append(t0, v.seekCompactionTable)
 	} else {
 		return
 	}
