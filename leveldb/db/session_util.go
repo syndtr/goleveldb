@@ -14,9 +14,20 @@
 package db
 
 import (
+	"fmt"
 	"leveldb/descriptor"
 	"leveldb/log"
 )
+
+// logging
+
+func (s *session) print(v ...interface{}) {
+	s.desc.Print(fmt.Sprint(v...))
+}
+
+func (s *session) printf(format string, v ...interface{}) {
+	s.desc.Print(fmt.Sprintf(format, v...))
+}
 
 // file utils
 

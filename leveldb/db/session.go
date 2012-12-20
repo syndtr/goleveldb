@@ -255,6 +255,9 @@ func (c *compaction) expand() {
 			xmin, xmax := exp0.getRange(s.icmp)
 			vt1.getOverlaps(xmin.ukey(), xmax.ukey(), &exp1, true, s.cmp)
 			if len(exp1) == len(t1) {
+				s.printf("Compaction: expanding@%d %d+%d (%d+%d bytes) to %d+%d (%d+%d bytes)",
+					level, len(t0), len(t1), t0.size(), t1.size(),
+					len(exp0), len(exp1), exp0.size(), exp1.size())
 				min, max = xmin, xmax
 				t0, t1 = exp0, exp1
 				amin, amax = append(t0, t1...).getRange(s.icmp)

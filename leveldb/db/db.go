@@ -133,6 +133,8 @@ func (d *DB) recoverLog() (err error) {
 			continue
 		}
 
+		s.printf("Recovering log %d", file.Number())
+
 		var r descriptor.Reader
 		r, err = file.Open()
 		if err != nil {
@@ -305,6 +307,8 @@ func (d *DB) ok() error {
 }
 
 func (d *DB) transact(f func() error) {
+	s := d.s
+
 	for {
 		if d.getClosed() {
 			runtime.Goexit()
@@ -316,6 +320,7 @@ func (d *DB) transact(f func() error) {
 		if err == nil {
 			return
 		}
+		s.print("Error during transact: ", err)
 		// dry the channel
 		for {
 			select {
@@ -333,12 +338,17 @@ func (d *DB) transact(f func() error) {
 func (d *DB) memCompaction() {
 	s := d.s
 
+	s.printf("MemCompaction: started at size %d", d.fmem.Size())
+
 	// Write memdb to table
 	var t *tFile
 	d.transact(func() (err error) {
 		t, err = s.tops.createFrom(d.fmem.NewIterator())
 		return
 	})
+
+	s.printf("MemCompaction: created table %d, size %d bytes",
+		t.file.Number(), t.size)
 
 	// Build manifest record
 	rec := new(sessionRecord)
@@ -362,6 +372,9 @@ func (d *DB) doCompaction() {
 
 	c := s.pickCompaction()
 
+	s.printf("Compaction: compacting %d@%d + %d@%d tables",
+		len(c.tables[0]), c.level, len(c.tables[1]), c.level+1)
+
 	rec := new(sessionRecord)
 	rec.addCompactPointer(c.level, c.max)
 
@@ -372,6 +385,8 @@ func (d *DB) doCompaction() {
 		d.transact(func() (err error) {
 			return s.commit(rec)
 		})
+		s.printf("Compaction: table %d level changed from %d to %d",
+			t.file.Number(), c.level, c.level+1)
 		return
 	}
 
@@ -502,6 +517,9 @@ func (d *DB) doCompaction() {
 				}
 				rec.addTableFile(c.level+1, t)
 				snapSched = true
+				s.printf("Compaction: created table %d, size %d bytes, %d entries",
+					t.file.Number(), t.size, tw.tw.Len())
+				tw = nil
 			}
 		}
 
@@ -516,9 +534,15 @@ func (d *DB) doCompaction() {
 				return
 			}
 			rec.addTableFile(c.level+1, t)
+			s.printf("Compaction: created table %d, size %d bytes, %d entries",
+				t.file.Number(), t.size, tw.tw.Len())
+			tw = nil
 			return
 		})
 	}
+
+	s.printf("Compaction: compacted %d@%d + %d@%d tables",
+		len(c.tables[0]), c.level, len(c.tables[1]), c.level+1)
 
 	// Insert deleted tables into record
 	for n, tt := range c.tables {
