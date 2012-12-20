@@ -1,0 +1,252 @@
+// Copyright (c) 2012, Suryandaru Triandana <syndtr@gmail.com>
+// All rights reserved.
+//
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// This LevelDB Go implementation is based on LevelDB C++ implementation.
+// Which contains the following header:
+//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+//   Use of this source code is governed by a BSD-style license that can be
+//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
+//   for names of contributors.
+
+package db
+
+import (
+	"leveldb"
+)
+
+var levelMaxSize [kNumLevels]float64
+
+func init() {
+	// Precompute max size of each level
+	for level := range levelMaxSize {
+		res := float64(10 * 1048576)
+		for n := level; n > 1; n-- {
+			res *= 10
+		}
+		levelMaxSize[level] = res
+	}
+}
+
+type version struct {
+	s *session
+
+	tables [kNumLevels]tFiles
+
+	// Level that should be compacted next and its compaction score.
+	// Score < 1 means compaction is not strictly needed.  These fields
+	// are initialized by ComputeCompaction()
+	compactionLevel int
+	compactionScore float64
+}
+
+func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, err error) {
+	s := v.s
+	ukey := key.ukey()
+
+	// We can search level-by-level since entries never hop across
+	// levels. Therefore we are guaranteed that if we find data
+	// in an smaller level, later levels are irrelevant.
+	for level, ts := range v.tables {
+		if len(ts) == 0 {
+			continue
+		}
+
+		if level == 0 {
+			// Level-0 files may overlap each other. Find all files that
+			// overlap user_key and process them in order from newest to
+			var tmp tFiles
+			for _, t := range ts {
+				if s.cmp.Compare(ukey, t.smallest.ukey()) >= 0 &&
+					s.cmp.Compare(ukey, t.largest.ukey()) <= 0 {
+					tmp = append(tmp, t)
+				}
+			}
+
+			if len(tmp) == 0 {
+				continue
+			}
+
+			tmp.sort(tFileSorterNewest(nil))
+			ts = tmp
+		} else {
+			i := ts.search(key, s.icmp)
+			if i >= len(ts) || s.cmp.Compare(ukey, ts[i].smallest.ukey()) < 0 {
+				continue
+			}
+
+			ts = ts[i : i+1]
+		}
+
+		for _, t := range ts {
+			var rkey, rval []byte
+			rkey, rval, err = s.tops.get(t, key, ro)
+			if err == leveldb.ErrNotFound {
+				continue
+			} else if err != nil {
+				return
+			}
+
+			pk := iKey(rkey).parse()
+			if pk == nil {
+				err = leveldb.ErrCorrupt("internal key corrupted")
+				return
+			}
+			if s.cmp.Compare(ukey, pk.ukey) == 0 {
+				switch pk.vtype {
+				case tVal:
+					value = rval
+				case tDel:
+					err = leveldb.ErrNotFound
+				default:
+					panic("not reached")
+				}
+				return
+			}
+		}
+	}
+
+	return nil, leveldb.ErrNotFound
+}
+
+func (v *version) newStaging() *versionStaging {
+	return &versionStaging{base: v}
+}
+
+// Spawn a new version based on this version.
+func (v *version) spawn(r *sessionRecord) *version {
+	staging := v.newStaging()
+	staging.commit(r)
+	return staging.finish()
+}
+
+func (v *version) fillRecord(r *sessionRecord) {
+	for level, ts := range v.tables {
+		for _, t := range ts {
+			r.addTableFile(level, t)
+		}
+	}
+}
+
+func (v *version) tLen(level int) int {
+	return len(v.tables[0])
+}
+
+func (v *version) pickLevel(min, max []byte) (level int) {
+	icmp := v.s.icmp
+	ucmp := icmp.cmp
+
+	if !v.tables[0].isOverlaps(min, max, false, icmp) {
+		var r tFiles
+		for ; level < kMaxMemCompactLevel; level++ {
+			if v.tables[level+1].isOverlaps(min, max, true, icmp) {
+				break
+			}
+			v.tables[level+2].getOverlaps(min, max, &r, true, ucmp)
+			if r.size() > kMaxGrandParentOverlapBytes {
+				break
+			}
+		}
+	}
+
+	return
+}
+
+func (v *version) computeCompaction() {
+	// Precomputed best level for next compaction
+	var bestLevel int = -1
+	var bestScore float64 = -1
+
+	for level, ff := range v.tables {
+		var score float64
+		if level == 0 {
+			// We treat level-0 specially by bounding the number of files
+			// instead of number of bytes for two reasons:
+			//
+			// (1) With larger write-buffer sizes, it is nice not to do too
+			// many level-0 compactions.
+			//
+			// (2) The files in level-0 are merged on every read and
+			// therefore we wish to avoid too many files when the individual
+			// file size is small (perhaps because of a small write-buffer
+			// setting, or very high compression ratios, or lots of
+			// overwrites/deletions).
+			score = float64(len(ff)) / kL0_CompactionTrigger
+		} else {
+			score = float64(ff.size()) / levelMaxSize[level]
+		}
+
+		if score > bestScore {
+			bestLevel = level
+			bestScore = score
+		}
+	}
+
+	v.compactionLevel = bestLevel
+	v.compactionScore = bestScore
+}
+
+type versionStaging struct {
+	base   *version
+	tables [kNumLevels]struct {
+		added   map[uint64]ntRecord
+		deleted map[uint64]struct{}
+	}
+}
+
+func (p *versionStaging) commit(r *sessionRecord) {
+	// deleted tables
+	for _, tr := range r.deletedTables {
+		tm := &(p.tables[tr.level])
+		if tm.deleted == nil {
+			tm.deleted = make(map[uint64]struct{})
+		}
+		tm.deleted[tr.num] = struct{}{}
+		delete(tm.added, tr.num)
+	}
+
+	// new tables
+	for _, tr := range r.newTables {
+		tm := &(p.tables[tr.level])
+		if tm.added == nil {
+			tm.added = make(map[uint64]ntRecord)
+		}
+		tm.added[tr.num] = tr
+		delete(tm.deleted, tr.num)
+	}
+}
+
+func (p *versionStaging) finish() *version {
+	// build new version
+	s := p.base.s
+	nv := &version{s: s}
+	sorter := &tFileSorterKey{cmp: s.icmp}
+	for level, tm := range p.tables {
+		ot := p.base.tables[level]
+		nt := make(tFiles, 0, len(tm.added)+len(ot)-len(tm.deleted))
+		// old tables
+		for _, t := range ot {
+			if _, ok := tm.deleted[t.file.Number()]; ok {
+				continue
+			}
+			if _, ok := tm.added[t.file.Number()]; ok {
+				continue
+			}
+			nt = append(nt, t)
+		}
+		// new tables
+		for _, tr := range tm.added {
+			nt = append(nt, tr.makeFile(s))
+		}
+		// sort tables
+		nt.sort(sorter)
+		nv.tables[level] = nt
+	}
+
+	// compute compaction score for new version
+	nv.computeCompaction()
+
+	return nv
+}
