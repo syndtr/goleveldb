@@ -43,7 +43,7 @@ func TestBatch(t *testing.T) {
 	}
 	n2, err := replayBatch(buf, b2)
 	if err != nil {
-		t.Error("error when replaying batch header: ", err)
+		t.Error("error when replaying batch: ", err)
 	}
 	if uint64(n) != n2-b2.sequence {
 		t.Errorf("invalid record length (replayBatch ret) want %d, got %d", n, n2-b2.sequence)
