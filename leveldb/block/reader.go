@@ -252,17 +252,13 @@ func (i *Iterator) Seek(key []byte) (r bool) {
 	for j < k {
 		h := j + (k-j+1)/2
 
-		var rr *restartRange
-		rr, i.err = i.getRestartRange(h)
-		if i.err != nil {
-			return false
-		}
-		i.err = rr.next()
+		var rkey []byte
+		rkey, i.err = i.getRestartKey(h)
 		if i.err != nil {
 			return false
 		}
 
-		if i.cmp.Compare(rr.key(), key) < 0 {
+		if i.cmp.Compare(rkey, key) < 0 {
 			j = h
 		} else {
 			k = h - 1
@@ -372,6 +368,29 @@ func (i *Iterator) getRestartOffset(idx int) (offset int, err error) {
 	var tmp uint32
 	err = binary.Read(i.rd, binary.LittleEndian, &tmp)
 	offset = int(tmp)
+	return
+}
+
+func (i *Iterator) getRestartKey(idx int) (key []byte, err error) {
+	offset, err := i.getRestartOffset(idx)
+	if err != nil {
+		return
+	}
+
+	buf := i.b.buf[offset:]
+	shared, n := binary.Uvarint(buf) // shared key
+	buf = buf[n:]
+	nonShared, n := binary.Uvarint(buf) // non-shared key
+	buf = buf[n:]
+	valueLen, n := binary.Uvarint(buf) // value len
+	buf = buf[n:]
+
+	if shared > 0 || nonShared+valueLen > uint64(len(buf)) {
+		err = leveldb.ErrCorrupt("bad entry in block")
+		return
+	}
+
+	key = buf[:nonShared]
 	return
 }
 
