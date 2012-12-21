@@ -156,7 +156,7 @@ func (d *DB) recoverLog() (err error) {
 			fLogFile = nil
 		}
 
-		mem = memdb.New(s.cmp)
+		mem = memdb.New(s.icmp)
 
 		lr := log.NewReader(r, true)
 		for lr.Next() {
@@ -218,7 +218,7 @@ func (d *DB) newMem() (err error) {
 
 	// new mem
 	d.fmem = d.mem
-	d.mem = memdb.New(s.cmp)
+	d.mem = memdb.New(s.icmp)
 
 	d.fSequence = d.sequence
 
