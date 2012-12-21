@@ -15,6 +15,7 @@ package descriptor
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"leveldb"
@@ -32,6 +33,8 @@ const (
 	TypeTable
 	TypeTemp
 )
+
+var ErrInvalidFile = errors.New("invalid file for argument")
 
 type Syncer interface {
 	Sync() error
@@ -228,7 +231,10 @@ func (d *StdDescriptor) GetMainManifest() (f File, err error) {
 }
 
 func (d *StdDescriptor) SetMainManifest(f File) (err error) {
-	p := f.(*stdFile)
+	p, ok := f.(*stdFile)
+	if !ok {
+		return ErrInvalidFile
+	}
 	pth := path.Join(d.path, "CURRENT")
 	pthTmp := fmt.Sprintf("%s.%d", pth, p.num)
 	file, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
