@@ -182,6 +182,10 @@ func (s *session) createManifest(num uint64, v *version) (err error) {
 
 	s.manifest = log.NewWriter(w)
 
+	if v == nil {
+		v = s.st.version
+	}
+
 	r := new(sessionRecord)
 	s.fillRecord(r, true)
 	v.fillRecord(r)
@@ -194,9 +198,6 @@ func (s *session) createManifest(num uint64, v *version) (err error) {
 			file.Remove()
 		}
 	}()
-	if v == nil {
-		v = s.st.version
-	}
 	err = s.manifest.Append(r.encode())
 	if err != nil {
 		return
