@@ -133,7 +133,7 @@ func (d *DB) recoverLog() (err error) {
 			continue
 		}
 
-		s.printf("Recovering log %d", file.Number())
+		s.printf("Recovering log, num=%d", file.Number())
 
 		var r descriptor.Reader
 		r, err = file.Open()
@@ -319,7 +319,7 @@ func (d *DB) transact(f func() error) {
 		if err == nil {
 			return
 		}
-		s.print("Error during transact: ", err)
+		s.printf("Transact: err=`%v'", err)
 		// dry the channel
 		for {
 			select {
@@ -337,7 +337,7 @@ func (d *DB) transact(f func() error) {
 func (d *DB) memCompaction() {
 	s := d.s
 
-	s.printf("MemCompaction: started at size %d", d.fmem.Size())
+	s.printf("MemCompaction: started, size=%d", d.fmem.Size())
 
 	// Write memdb to table
 	var t *tFile
@@ -346,15 +346,16 @@ func (d *DB) memCompaction() {
 		return
 	})
 
-	s.printf("MemCompaction: created table %d, size %d bytes",
-		t.file.Number(), t.size)
-
 	// Build manifest record
 	rec := new(sessionRecord)
 	rec.setLogNum(d.logFile.Number())
 	rec.setSequence(d.fSequence)
 	min, max := t.smallest.ukey(), t.largest.ukey()
-	rec.addTableFile(s.version().pickLevel(min, max), t)
+	level := s.version().pickLevel(min, max)
+	rec.addTableFile(level, t)
+
+	s.printf("MemCompaction: table created, level=%d num=%d size=%d",
+		level, t.file.Number(), t.size)
 
 	// Commit changes
 	d.transact(func() (err error) {
@@ -371,8 +372,8 @@ func (d *DB) doCompaction() {
 
 	c := s.pickCompaction()
 
-	s.printf("Compaction: compacting %d@%d + %d@%d tables",
-		len(c.tables[0]), c.level, len(c.tables[1]), c.level+1)
+	s.printf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
+		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
 
 	rec := new(sessionRecord)
 	rec.addCompactPointer(c.level, c.max)
@@ -384,7 +385,7 @@ func (d *DB) doCompaction() {
 		d.transact(func() (err error) {
 			return s.commit(rec)
 		})
-		s.printf("Compaction: table %d level changed from %d to %d",
+		s.printf("Compaction: table level changed, num=%d from=%d to=%d",
 			t.file.Number(), c.level, c.level+1)
 		return
 	}
@@ -516,7 +517,7 @@ func (d *DB) doCompaction() {
 				}
 				rec.addTableFile(c.level+1, t)
 				snapSched = true
-				s.printf("Compaction: created table %d, size %d bytes, %d entries",
+				s.printf("Compaction: table created, num=%d size=%d entries=%d",
 					t.file.Number(), t.size, tw.tw.Len())
 				tw = nil
 			}
@@ -533,15 +534,14 @@ func (d *DB) doCompaction() {
 				return
 			}
 			rec.addTableFile(c.level+1, t)
-			s.printf("Compaction: created table %d, size %d bytes, %d entries",
+			s.printf("Compaction: table created, num=%d size=%d entries=%d",
 				t.file.Number(), t.size, tw.tw.Len())
 			tw = nil
 			return
 		})
 	}
 
-	s.printf("Compaction: compacted %d@%d + %d@%d tables",
-		len(c.tables[0]), c.level, len(c.tables[1]), c.level+1)
+	s.print("Compaction: done")
 
 	// Insert deleted tables into record
 	for n, tt := range c.tables {
