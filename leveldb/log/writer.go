@@ -16,8 +16,8 @@ package log
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"leveldb"
-	"leveldb/descriptor"
 )
 
 const (
@@ -43,12 +43,12 @@ const (
 var sixZero [6]byte
 
 type Writer struct {
-	w descriptor.Writer
+	w io.Writer
 
 	boff int
 }
 
-func NewWriter(w descriptor.Writer) *Writer {
+func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w}
 }
 
@@ -123,10 +123,6 @@ func (l *Writer) write(rtype uint, record []byte) (err error) {
 		return
 	}
 	_, err = l.w.Write(record)
-	if err != nil {
-		return
-	}
-	err = l.w.Sync()
 	if err != nil {
 		return
 	}
