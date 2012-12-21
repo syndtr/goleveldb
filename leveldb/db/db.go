@@ -640,7 +640,7 @@ func (d *DB) write() {
 		}
 
 		// merge with other batch
-		for done := false; !done && b.size() <= m; {
+		for done := false; !done && b.size() <= m && !b.sync; {
 			select {
 			case nb := <-d.wch:
 				b.append(nb)
@@ -662,6 +662,14 @@ func (d *DB) write() {
 		if err != nil {
 			b.done(err)
 			continue
+		}
+
+		if b.sync {
+			err = d.logWriter.Sync()
+			if err != nil {
+				b.done(err)
+				continue
+			}
 		}
 
 		d.mu.Lock()
@@ -699,7 +707,7 @@ func (d *DB) Write(w leveldb.Batch, wo *leveldb.WriteOptions) (err error) {
 		return leveldb.ErrInvalid("not a *Batch")
 	}
 
-	rch := b.init()
+	rch := b.init(wo.HasFlag(leveldb.WFSync))
 	d.wch <- b
 	err = <-rch
 	close(rch)

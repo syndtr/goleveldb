@@ -40,6 +40,7 @@ type Batch struct {
 	sequence uint64
 	kvSize   int
 	ch       []chan error
+	sync     bool
 }
 
 func (b *Batch) Put(key, value []byte) {
@@ -52,10 +53,11 @@ func (b *Batch) Delete(key []byte) {
 	b.kvSize += len(key)
 }
 
-func (b *Batch) init() chan error {
+func (b *Batch) init(sync bool) chan error {
 	ch := make(chan error)
 	b.ch = nil
 	b.ch = append(b.ch, ch)
+	b.sync = sync
 	return ch
 }
 
@@ -83,6 +85,9 @@ func (b *Batch) append(p *Batch) {
 	b.rec = append(b.rec, p.rec...)
 	b.ch = append(b.ch, p.ch...)
 	b.kvSize += p.kvSize
+	if p.sync {
+		b.sync = true
+	}
 }
 
 func (b *Batch) len() int {
