@@ -253,11 +253,10 @@ func (d *DB) getSnapshot() (p *snapEntry) {
 	if back != nil {
 		p = back.Value.(*snapEntry)
 	}
-	num := d.s.sequence()
+	num := d.sequence
 	if p == nil || p.sequence != num {
 		p = &snapEntry{sequence: num}
 		p.elem = d.snapshots.PushBack(p)
-
 	}
 	p.ref++
 	return
