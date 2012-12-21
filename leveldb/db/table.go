@@ -86,7 +86,7 @@ func (p tFiles) sort(s tFileSorter) {
 
 func (p tFiles) search(key iKey, cmp *iKeyComparator) int {
 	return sort.Search(len(p), func(i int) bool {
-		return cmp.Compare(p[i].largest, key) < 0
+		return cmp.Compare(p[i].largest, key) >= 0
 	})
 }
 
