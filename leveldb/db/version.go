@@ -232,7 +232,9 @@ func (p *versionStaging) commit(r *sessionRecord) {
 			tm.deleted = make(map[uint64]struct{})
 		}
 		tm.deleted[tr.num] = struct{}{}
-		delete(tm.added, tr.num)
+		if tm.added != nil {
+			delete(tm.added, tr.num)
+		}
 	}
 
 	// new tables
@@ -242,7 +244,9 @@ func (p *versionStaging) commit(r *sessionRecord) {
 			tm.added = make(map[uint64]ntRecord)
 		}
 		tm.added[tr.num] = tr
-		delete(tm.deleted, tr.num)
+		if tm.deleted != nil {
+			delete(tm.deleted, tr.num)
+		}
 	}
 }
 
