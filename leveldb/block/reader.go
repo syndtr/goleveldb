@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"io"
 	"leveldb"
-	"sort"
 )
 
 const maxInt = int(^uint(0) >> 1)
@@ -244,46 +243,33 @@ func (i *Iterator) Last() bool {
 	return i.Prev()
 }
 
-func (i *Iterator) search(key []byte) {
-	// catch panic raised by binary search
-	defer func() {
-		if x := recover(); x != nil {
-			if x != i {
-				panic(x)
-			}
-		}
-	}()
-
-	// binary search in restart array to find the last
-	// restart point with a 'key' < 'target'
-	i.ri = sort.Search(i.b.restartLen, func(x int) bool {
-		var rr *restartRange
-		rr, i.err = i.getRestartRange(x)
-		if i.err != nil {
-			panic(i)
-		}
-		i.err = rr.next()
-		if i.err != nil {
-			panic(i)
-		}
-		return i.cmp.Compare(rr.key(), key) > 0
-	})
-
-	if i.ri > 0 {
-		i.ri--
-	}
-}
-
 func (i *Iterator) Seek(key []byte) (r bool) {
 	if i.err != nil || i.Empty() {
 		return false
 	}
 
-	i.search(key)
-	if i.err != nil {
-		return false
+	j, k := 0, i.b.restartLen-1
+	for j < k {
+		h := j + (k-j+1)/2
+
+		var rr *restartRange
+		rr, i.err = i.getRestartRange(h)
+		if i.err != nil {
+			return false
+		}
+		i.err = rr.next()
+		if i.err != nil {
+			return false
+		}
+
+		if i.cmp.Compare(rr.key(), key) < 0 {
+			j = h
+		} else {
+			k = h - 1
+		}
 	}
 
+	i.ri = j
 	i.rr = nil
 
 	// linear scan for first 'key' >= 'target'
