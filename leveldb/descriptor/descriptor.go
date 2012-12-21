@@ -34,6 +34,20 @@ const (
 	TypeTemp
 )
 
+func (t FileType) String() string {
+	switch t {
+	case TypeManifest:
+		return "manifest"
+	case TypeLog:
+		return "log"
+	case TypeTable:
+		return "table"
+	case TypeTemp:
+		return "temp"
+	}
+	return "<unknown>"
+}
+
 var ErrInvalidFile = errors.New("invalid file for argument")
 
 type Syncer interface {
