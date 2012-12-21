@@ -318,7 +318,7 @@ func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, err error) {
 		}
 	}()
 
-	if src.Next() {
+	for src.Next() {
 		err = w.add(src.Key(), src.Value())
 		if err != nil {
 			w.drop()
@@ -401,6 +401,7 @@ func (w *tWriter) add(key, value []byte) error {
 		w.last = key
 	} else {
 		w.first = key
+		w.last = key
 		w.notFirst = true
 	}
 	return w.tw.Add(key, value)
