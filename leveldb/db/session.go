@@ -53,8 +53,10 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 		filter: opt.GetFilterPolicy(),
 	}
 	s.icmp = &iKeyComparator{s.cmp}
+	opt.Comparator = s.icmp
 	if s.filter != nil {
 		s.ifilter = &iFilterPolicy{s.filter}
+		opt.FilterPolicy = s.ifilter
 	}
 	s.tops = newTableOps(s, s.opt.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
