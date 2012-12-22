@@ -20,30 +20,40 @@ import (
 	"leveldb/log"
 	"leveldb/memdb"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+var ErrClosed = leveldb.ErrInvalid("database closed")
+
 type memBatch struct {
-	db *DB
+	mem **memdb.DB
 }
 
 func (p *memBatch) put(key, value []byte, seq uint64) {
 	ikey := newIKey(key, seq, tVal)
-	p.db.mem.Put(ikey, value)
+	(*(p.mem)).Put(ikey, value)
 }
 
 func (p *memBatch) delete(key []byte, seq uint64) {
 	ikey := newIKey(key, seq, tDel)
-	p.db.mem.Put(ikey, nil)
+	(*(p.mem)).Put(ikey, nil)
 }
 
+type cSignal int
+
+const (
+	cWait cSignal = iota
+	cSched
+	cClose
+)
+
 type DB struct {
-	s   *session
-	cch chan bool
-	wch chan *Batch
+	s    *session
+	cch  chan cSignal
+	wch  chan *Batch
+	eack chan struct{}
 
 	mu        sync.RWMutex
 	mem, fmem *memdb.DB
@@ -60,13 +70,12 @@ type DB struct {
 
 func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 	s := newSession(desc, opt)
-	newSession := false
 
 	err = s.recover()
 	if err == os.ErrNotExist && opt.HasFlag(leveldb.OFCreateIfMissing) {
 		err = s.create()
-		newSession = true
 	} else if err == nil && opt.HasFlag(leveldb.OFErrorIfExist) {
+		println(opt.HasFlag(leveldb.OFErrorIfExist))
 		err = os.ErrExist
 	}
 	if err != nil {
@@ -75,24 +84,16 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 
 	d = &DB{
 		s:        s,
-		cch:      make(chan bool),
+		cch:      make(chan cSignal),
 		wch:      make(chan *Batch),
+		eack:     make(chan struct{}),
 		sequence: s.st.sequence,
 	}
 	d.snapshots.Init()
 
-	if !newSession {
-		err = d.recoverLog()
-		if err != nil {
-			return
-		}
-	}
-
-	if d.mem == nil {
-		err = d.newMem()
-		if err != nil {
-			return
-		}
+	err = d.recoverLog()
+	if err != nil {
+		return
 	}
 
 	go d.compaction()
@@ -102,10 +103,13 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 
 func (d *DB) recoverLog() (err error) {
 	s := d.s
-	mb := &memBatch{d}
 
 	var mem *memdb.DB
 	var logNum uint64
+	mb := &memBatch{&mem}
+
+	s.printf("LogRecovery: started, min=%d", s.st.logNum)
+
 	memCompaction := func() error {
 		// Write memdb to table
 		t, err := s.tops.createFrom(mem.NewIterator())
@@ -121,19 +125,32 @@ func (d *DB) recoverLog() (err error) {
 		rec.setLogNum(logNum)
 		rec.setSequence(d.fSequence)
 		min, max := t.smallest.ukey(), t.largest.ukey()
-		rec.addTableFile(s.version().pickLevel(min, max), t)
+		level := s.version().pickLevel(min, max)
+		rec.addTableFile(level, t)
+
+		s.printf("LogRecovery: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
+			level, t.file.Number(), t.size, string(min), string(max))
 
 		// Commit changes
 		return s.commit(rec)
 	}
 
 	var fLogFile descriptor.File
-	for _, file := range s.getFiles(descriptor.TypeLog) {
+	ff := files(s.getFiles(descriptor.TypeLog))
+	ff.sort()
+
+	skip := 0
+	for _, file := range ff {
 		if file.Number() < s.st.logNum {
+			skip++
 			continue
 		}
+		s.markFileNum(file.Number())
+	}
 
-		s.printf("Recovering log, num=%d", file.Number())
+	ff = ff[skip:]
+	for _, file := range ff {
+		s.printf("LogRecovery: recovering, num=%d", file.Number())
 
 		var r descriptor.Reader
 		r, err = file.Open()
@@ -142,9 +159,8 @@ func (d *DB) recoverLog() (err error) {
 		}
 
 		logNum = file.Number()
-		s.markFileNum(logNum)
 
-		if mem != nil {
+		if mem != nil && mem.Len() > 0 {
 			d.fSequence = d.sequence
 
 			// write prev log
@@ -175,13 +191,13 @@ func (d *DB) recoverLog() (err error) {
 		fLogFile = file
 	}
 
-	if mem != nil {
-		// create new log
-		err = d.newMem()
-		if err != nil {
-			return
-		}
+	// create new log
+	err = d.newMem()
+	if err != nil {
+		return
+	}
 
+	if mem != nil && mem.Len() > 0 {
 		logNum = d.logFile.Number()
 
 		// write last log
@@ -300,7 +316,7 @@ func (d *DB) ok() error {
 		return d.err
 	}
 	if d.closed {
-		return leveldb.ErrInvalid("database closed")
+		return ErrClosed
 	}
 	return nil
 }
@@ -308,9 +324,21 @@ func (d *DB) ok() error {
 func (d *DB) transact(f func() error) {
 	s := d.s
 
+	exit := func() {
+		s.print("Transact: exiting")
+
+		// dry out, until found close signal
+		for signal := range d.cch {
+			if signal == cClose {
+				break
+			}
+		}
+		panic(d)
+	}
+
 	for {
 		if d.getClosed() {
-			runtime.Goexit()
+			exit()
 		}
 		err := f()
 		if err != d.err {
@@ -321,14 +349,16 @@ func (d *DB) transact(f func() error) {
 		}
 		s.printf("Transact: err=`%v'", err)
 		// dry the channel
+	drain:
 		for {
 			select {
 			case <-d.cch:
 			default:
+				break drain
 			}
 		}
 		if d.getClosed() {
-			runtime.Goexit()
+			exit()
 		}
 		time.Sleep(time.Second)
 	}
@@ -354,8 +384,8 @@ func (d *DB) memCompaction() {
 	level := s.version().pickLevel(min, max)
 	rec.addTableFile(level, t)
 
-	s.printf("MemCompaction: table created, level=%d num=%d size=%d",
-		level, t.file.Number(), t.size)
+	s.printf("MemCompaction: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
+		level, t.file.Number(), t.size, string(min), string(max))
 
 	// Commit changes
 	d.transact(func() (err error) {
@@ -420,10 +450,15 @@ func (d *DB) doCompaction() {
 			if d.hasFrozenMem() {
 				d.memCompaction()
 				// dry the channel
+			drain:
 				for {
 					select {
-					case <-d.cch:
+					case signal := <-d.cch:
+						if signal == cClose {
+							panic(d)
+						}
 					default:
+						break drain
 					}
 				}
 			}
@@ -566,9 +601,32 @@ func (d *DB) doCompaction() {
 func (d *DB) compaction() {
 	s := d.s
 
-	for sched := range d.cch {
-		if !sched {
+	defer func() {
+		if x := recover(); x != nil {
+			if x != d {
+				panic(x)
+			}
+		}
+		// dry the channel
+	drain:
+		for {
+			select {
+			case <-d.cch:
+			default:
+				break drain
+			}
+		}
+		d.eack <- struct{}{}
+		close(d.cch)
+	}()
+
+	for signal := range d.cch {
+		switch signal {
+		case cWait:
 			continue
+		case cSched:
+		case cClose:
+			return
 		}
 
 		if d.hasFrozenMem() {
@@ -595,7 +653,7 @@ func (d *DB) flush() (err error) {
 			// still room
 			return
 		case d.hasFrozenMem(), v.tLen(0) >= kL0_StopWritesTrigger:
-			d.cch <- false
+			d.cch <- cWait
 			continue
 		}
 
@@ -607,7 +665,7 @@ func (d *DB) flush() (err error) {
 
 		// schedule compaction
 		select {
-		case d.cch <- true:
+		case d.cch <- cSched:
 		default:
 		}
 	}
@@ -616,13 +674,13 @@ func (d *DB) flush() (err error) {
 }
 
 func (d *DB) write() {
-	mb := &memBatch{d}
+	mb := &memBatch{&d.mem}
 
 	for {
 		b := <-d.wch
-		if b == nil {
+		if b == nil && d.getClosed() {
+			d.eack <- struct{}{}
 			close(d.wch)
-			d.flush()
 			return
 		}
 
@@ -650,13 +708,13 @@ func (d *DB) write() {
 		}
 
 		// set batch first sequence number relative from last sequence
-		// don't hold lock here, since this gorouting
+		// don't hold lock here, since this goroutine
 		// is the only one that modify the sequence number
 		seq := d.sequence
 		b.sequence = seq + 1
 
 		// write log
-		// don't hold lock here, since this gorouting
+		// don't hold lock here, since this goroutine
 		// is the only one that modify and write to log
 		err = d.log.Append(b.encode())
 		if err != nil {
@@ -735,20 +793,59 @@ func (d *DB) NewIterator(ro *leveldb.ReadOptions) (iter leveldb.Iterator, err er
 }
 
 func (d *DB) GetSnapshot() (s leveldb.Snapshot, err error) {
+	if d.getClosed() {
+		return nil, ErrClosed
+	}
 	return &snapshot{d: d, entry: d.getSnapshot()}, nil
 }
 
 func (d *DB) GetProperty(property string) (value string, err error) {
+	if d.getClosed() {
+		return "", ErrClosed
+	}
 	return
 }
 
 func (d *DB) GetApproximateSizes(r *leveldb.Range, n int) (size uint64, err error) {
+	if d.getClosed() {
+		return 0, ErrClosed
+	}
 	return
 }
 
 func (d *DB) CompactRange(begin, end []byte) error {
 	panic("not implemented")
 	return nil
+}
+
+func (d *DB) Close() error {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return ErrClosed
+	}
+	d.closed = true
+	d.mu.Unlock()
+
+	// wake writer goroutine
+	d.wch <- nil
+
+	// wake Compaction goroutine
+	d.cch <- cClose
+
+	// wait for ack
+	for i := 0; i < 2; i++ {
+		<-d.eack
+	}
+
+	if d.logWriter != nil {
+		d.logWriter.Close()
+	}
+	if d.s.manifestWriter != nil {
+		d.s.manifestWriter.Close()
+	}
+
+	return d.err
 }
 
 type snapshot struct {
@@ -760,6 +857,10 @@ type snapshot struct {
 func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
 	d := p.d
 	s := d.s
+
+	if d.getClosed() {
+		return nil, ErrClosed
+	}
 
 	ikey := newIKey(key, p.entry.sequence, tSeek)
 	memGet := func(m *memdb.DB) bool {
@@ -793,10 +894,10 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	var cState bool
 	value, cState, err = s.version().get(ikey, ro)
 
-	if cState {
+	if cState && d.getClosed() {
 		// schedule compaction
 		select {
-		case d.cch <- true:
+		case d.cch <- cSched:
 		default:
 		}
 	}
@@ -805,6 +906,9 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 }
 
 func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
+	if p.d.getClosed() {
+		return nil, ErrClosed
+	}
 	return
 }
 

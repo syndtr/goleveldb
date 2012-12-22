@@ -31,8 +31,9 @@ type session struct {
 	ifilter *iFilterPolicy
 	tops    *tOps
 
-	manifestNum uint64
-	manifest    *log.Writer
+	// 	manifestNum uint64
+	manifest       *log.Writer
+	manifestWriter descriptor.Writer
 
 	st struct {
 		sync.RWMutex
@@ -66,8 +67,8 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 // Create a new database session
 func (s *session) create() (err error) {
 	// create manifest
-	s.manifestNum = s.allocFileNum()
-	err = s.createManifest(s.manifestNum, nil)
+	// 	s.manifestNum = s.allocFileNum()
+	err = s.createManifest(s.allocFileNum(), nil)
 	if err != nil {
 		return
 	}
@@ -89,7 +90,7 @@ func (s *session) recover() (err error) {
 
 	st := &s.st
 
-	cmpName := s.opt.GetComparator().Name()
+	cmpName := s.cmp.Name()
 	staging := st.version.newStaging()
 	srec := new(sessionRecord)
 	lr := log.NewReader(r, true)
@@ -147,7 +148,7 @@ func (s *session) recover() (err error) {
 	s.recordCommited(srec)
 	// allocate manifest file number now, but create new
 	// manifest lazily during first session commit
-	s.manifestNum = s.allocFileNum()
+	// 	s.manifestNum = s.allocFileNum()
 
 	return
 }
@@ -158,7 +159,7 @@ func (s *session) commit(r *sessionRecord) (err error) {
 
 	if s.manifest == nil {
 		// manifest log writer not yet created, create one
-		err = s.createManifest(s.manifestNum, nv)
+		err = s.createManifest(s.allocFileNum(), nv)
 	} else {
 		// fill record
 		s.fillRecord(r, false)

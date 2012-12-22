@@ -174,13 +174,12 @@ func (s *session) recordCommited(r *sessionRecord) {
 
 func (s *session) createManifest(num uint64, v *version) (err error) {
 	file := s.desc.GetFile(num, descriptor.TypeManifest)
-	var w descriptor.Writer
-	w, err = file.Create()
+	s.manifestWriter, err = file.Create()
 	if err != nil {
 		return
 	}
 
-	s.manifest = log.NewWriter(w)
+	s.manifest = log.NewWriter(s.manifestWriter)
 
 	if v == nil {
 		v = s.st.version
@@ -194,7 +193,8 @@ func (s *session) createManifest(num uint64, v *version) (err error) {
 			s.recordCommited(r)
 		} else {
 			s.manifest = nil
-			w.Close()
+			s.manifestWriter.Close()
+			s.manifestWriter = nil
 			file.Remove()
 		}
 	}()

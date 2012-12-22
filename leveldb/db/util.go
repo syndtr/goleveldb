@@ -16,6 +16,8 @@ package db
 import (
 	"encoding/binary"
 	"io"
+	"leveldb/descriptor"
+	"sort"
 )
 
 type readByteReader interface {
@@ -52,4 +54,22 @@ func readBytes(r readByteReader) (b []byte, err error) {
 		b = nil
 	}
 	return
+}
+
+type files []descriptor.File
+
+func (p files) Len() int {
+	return len(p)
+}
+
+func (p files) Less(i, j int) bool {
+	return p[i].Number() < p[j].Number()
+}
+
+func (p files) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+}
+
+func (p files) sort() {
+	sort.Sort(p)
 }
