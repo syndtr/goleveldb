@@ -33,12 +33,12 @@ type tFile struct {
 
 // test if key is after t
 func (t *tFile) isAfter(key []byte, cmp leveldb.BasicComparator) bool {
-	return cmp.Compare(key, t.largest.ukey()) > 0
+	return key != nil && cmp.Compare(key, t.largest.ukey()) > 0
 }
 
 // test if key is before t
 func (t *tFile) isBefore(key []byte, cmp leveldb.BasicComparator) bool {
-	return cmp.Compare(key, t.smallest.ukey()) < 0
+	return key != nil && cmp.Compare(key, t.smallest.ukey()) < 0
 }
 
 func newTFile(file descriptor.File, size uint64, smallest, largest iKey) *tFile {
@@ -127,11 +127,11 @@ func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp le
 		if !disjSorted {
 			// Level-0 files may overlap each other.  So check if the newly
 			// added file has expanded the range.  If so, restart search.
-			if ucmp.Compare(t.smallest.ukey(), min) < 0 {
+			if min != nil && ucmp.Compare(t.smallest.ukey(), min) < 0 {
 				min = t.smallest.ukey()
 				*r = nil
 				i = 0
-			} else if ucmp.Compare(t.largest.ukey(), max) > 0 {
+			} else if max != nil && ucmp.Compare(t.largest.ukey(), max) > 0 {
 				max = t.largest.ukey()
 				*r = nil
 				i = 0
@@ -171,7 +171,7 @@ type tFilesIter struct {
 }
 
 func (i *tFilesIter) Empty() bool {
-	return len(i.tt) > 0
+	return len(i.tt) == 0
 }
 
 func (i *tFilesIter) Valid() bool {

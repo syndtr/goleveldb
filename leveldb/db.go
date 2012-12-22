@@ -103,7 +103,7 @@ type DB interface {
 	// begin==nil is treated as a key before all keys in the database.
 	// end==nil is treated as a key after all keys in the database.
 	// Therefore the following call will compact the entire database:
-	//    db.CompactRange(nil, nil);
+	//    db.CompactRange(nil);
 	CompactRange(r *Range) error
 
 	// Close the DB.

@@ -159,7 +159,7 @@ func (v *version) fillRecord(r *sessionRecord) {
 }
 
 func (v *version) tLen(level int) int {
-	return len(v.tables[0])
+	return len(v.tables[level])
 }
 
 func (v *version) pickLevel(min, max []byte) (level int) {

@@ -226,6 +226,25 @@ func (s *session) pickCompaction() (c *compaction) {
 	return
 }
 
+func (s *session) getCompactionRange(level int, min, max []byte) (c *compaction) {
+	st := &s.st
+
+	st.RLock()
+	v := st.version
+	st.RUnlock()
+
+	var t0 tFiles
+	v.tables[level].getOverlaps(min, max, &t0, level != 0, s.cmp)
+	if len(t0) == 0 {
+		return nil
+	}
+
+	c = &compaction{s: s, version: v, level: level}
+	c.tables[0] = t0
+	c.expand()
+	return
+}
+
 type compaction struct {
 	s       *session
 	version *version

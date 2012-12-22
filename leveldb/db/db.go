@@ -41,6 +41,11 @@ func (p *memBatch) delete(key []byte, seq uint64) {
 	(*(p.mem)).Put(ikey, nil)
 }
 
+type cReq struct {
+	level    int
+	min, max iKey
+}
+
 type cSignal int
 
 const (
@@ -52,6 +57,7 @@ const (
 type DB struct {
 	s    *session
 	cch  chan cSignal
+	creq chan *cReq
 	wch  chan *Batch
 	eack chan struct{}
 
@@ -85,6 +91,7 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 	d = &DB{
 		s:        s,
 		cch:      make(chan cSignal),
+		creq:     make(chan *cReq),
 		wch:      make(chan *Batch),
 		eack:     make(chan struct{}),
 		sequence: s.st.sequence,
@@ -396,11 +403,9 @@ func (d *DB) memCompaction() {
 	d.dropFrozenMem()
 }
 
-func (d *DB) doCompaction() {
+func (d *DB) doCompaction(c *compaction) {
 	s := d.s
 	ucmp := s.cmp
-
-	c := s.pickCompaction()
 
 	s.printf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
 		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
@@ -436,6 +441,7 @@ func (d *DB) doCompaction() {
 		defer func() {
 			if err != nil && tw != nil {
 				tw.drop()
+				tw = nil
 			}
 		}()
 
@@ -612,6 +618,7 @@ func (d *DB) compaction() {
 		for {
 			select {
 			case <-d.cch:
+			case <-d.creq:
 			default:
 				break drain
 			}
@@ -620,13 +627,44 @@ func (d *DB) compaction() {
 		close(d.cch)
 	}()
 
-	for signal := range d.cch {
-		switch signal {
-		case cWait:
+	for {
+		var creq *cReq
+		select {
+		case signal := <-d.cch:
+			switch signal {
+			case cWait:
+				continue
+			case cSched:
+			case cClose:
+				return
+			}
+		case creq = <-d.creq:
+		}
+
+		if creq != nil {
+			s.printf("CompactRange: ordered, level=%d", creq.level)
+			if creq.level >= 0 {
+				c := s.getCompactionRange(creq.level, creq.min, creq.max)
+				if c != nil {
+					d.doCompaction(c)
+				}
+				continue
+			}
+
+			v := s.version()
+			maxLevel := 1
+			for i, tt := range v.tables[1:] {
+				if tt.isOverlaps(creq.min, creq.max, true, s.icmp) {
+					maxLevel = i + 1
+				}
+			}
+			for i := 0; i <= maxLevel; i++ {
+				c := s.getCompactionRange(i, creq.min, creq.max)
+				if c != nil {
+					d.doCompaction(c)
+				}
+			}
 			continue
-		case cSched:
-		case cClose:
-			return
 		}
 
 		if d.hasFrozenMem() {
@@ -635,7 +673,7 @@ func (d *DB) compaction() {
 		}
 
 		if s.needCompaction() {
-			d.doCompaction()
+			d.doCompaction(s.pickCompaction())
 		}
 	}
 }
@@ -813,9 +851,22 @@ func (d *DB) GetApproximateSizes(r *leveldb.Range, n int) (size uint64, err erro
 	return
 }
 
-func (d *DB) CompactRange(begin, end []byte) error {
-	panic("not implemented")
-	return nil
+func (d *DB) CompactRange(r *leveldb.Range) error {
+	err := d.ok()
+	if err != nil {
+		return err
+	}
+
+	req := &cReq{level: -1}
+	if r != nil {
+		req.min = r.Start
+		req.max = r.Limit
+	}
+
+	d.creq <- req
+	d.cch <- cWait
+
+	return d.ok()
 }
 
 func (d *DB) Close() error {
@@ -894,7 +945,7 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	var cState bool
 	value, cState, err = s.version().get(ikey, ro)
 
-	if cState && d.getClosed() {
+	if cState && !d.getClosed() {
 		// schedule compaction
 		select {
 		case d.cch <- cSched:
