@@ -41,6 +41,46 @@ func (p *memBatch) delete(key []byte, seq uint64) {
 	(*(p.mem)).Put(ikey, nil)
 }
 
+type cMem struct {
+	s   *session
+	rec *sessionRecord
+}
+
+func newCMem(s *session) *cMem {
+	return &cMem{s, new(sessionRecord)}
+}
+
+func (c *cMem) flush(mem *memdb.DB) error {
+	s := c.s
+
+	// Write memdb to table
+	t, err := s.tops.createFrom(mem.NewIterator())
+	if err != nil {
+		return err
+	}
+
+	min, max := t.smallest.ukey(), t.largest.ukey()
+	level := s.version().pickLevel(min, max)
+	c.rec.addTableFile(level, t)
+
+	s.printf("MemCompaction: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
+		level, t.file.Number(), t.size, string(min), string(max))
+
+	return nil
+}
+
+func (c *cMem) reset() {
+	c.rec = new(sessionRecord)
+}
+
+func (c *cMem) commit(log, seq uint64) error {
+	c.rec.setLogNum(log)
+	c.rec.setSequence(seq)
+
+	// Commit changes
+	return c.s.commit(c.rec)
+}
+
 type cReq struct {
 	level    int
 	min, max iKey
@@ -112,35 +152,10 @@ func (d *DB) recoverLog() (err error) {
 	s := d.s
 
 	var mem *memdb.DB
-	var logNum uint64
 	mb := &memBatch{&mem}
+	cm := newCMem(s)
 
 	s.printf("LogRecovery: started, min=%d", s.st.logNum)
-
-	memCompaction := func() error {
-		// Write memdb to table
-		t, err := s.tops.createFrom(mem.NewIterator())
-		if err != nil {
-			return err
-		}
-
-		// Drop memdb
-		mem = nil
-
-		// Build manifest record
-		rec := new(sessionRecord)
-		rec.setLogNum(logNum)
-		rec.setSequence(d.fSequence)
-		min, max := t.smallest.ukey(), t.largest.ukey()
-		level := s.version().pickLevel(min, max)
-		rec.addTableFile(level, t)
-
-		s.printf("LogRecovery: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
-			level, t.file.Number(), t.size, string(min), string(max))
-
-		// Commit changes
-		return s.commit(rec)
-	}
 
 	var fLogFile descriptor.File
 	ff := files(s.getFiles(descriptor.TypeLog))
@@ -165,16 +180,23 @@ func (d *DB) recoverLog() (err error) {
 			return
 		}
 
-		logNum = file.Number()
-
-		if mem != nil && mem.Len() > 0 {
+		if mem != nil {
 			d.fSequence = d.sequence
 
-			// write prev log
-			err = memCompaction()
+			if mem.Len() > 0 {
+				err = cm.flush(mem)
+				if err != nil {
+					return
+				}
+			}
+
+			err = cm.commit(file.Number(), d.fSequence)
 			if err != nil {
 				return
 			}
+
+			cm.reset()
+
 			fLogFile.Remove()
 			fLogFile = nil
 		}
@@ -186,6 +208,17 @@ func (d *DB) recoverLog() (err error) {
 			d.sequence, err = replayBatch(lr.Record(), mb)
 			if err != nil {
 				return
+			}
+
+			if mem.Size() > s.opt.GetWriteBuffer() {
+				// flush to table
+				err = cm.flush(mem)
+				if err != nil {
+					return
+				}
+
+				// create new memdb
+				mem = memdb.New(s.icmp)
 			}
 		}
 
@@ -205,13 +238,20 @@ func (d *DB) recoverLog() (err error) {
 	}
 
 	if mem != nil && mem.Len() > 0 {
-		logNum = d.logFile.Number()
-
-		// write last log
-		err = memCompaction()
+		err = cm.flush(mem)
 		if err != nil {
 			return
 		}
+	}
+
+	d.fSequence = d.sequence
+
+	err = cm.commit(d.logFile.Number(), d.fSequence)
+	if err != nil {
+		return
+	}
+
+	if fLogFile != nil {
 		fLogFile.Remove()
 	}
 
@@ -373,30 +413,16 @@ func (d *DB) transact(f func() error) {
 
 func (d *DB) memCompaction() {
 	s := d.s
+	c := newCMem(s)
 
 	s.printf("MemCompaction: started, size=%d", d.fmem.Size())
 
-	// Write memdb to table
-	var t *tFile
 	d.transact(func() (err error) {
-		t, err = s.tops.createFrom(d.fmem.NewIterator())
-		return
+		return c.flush(d.fmem)
 	})
 
-	// Build manifest record
-	rec := new(sessionRecord)
-	rec.setLogNum(d.logFile.Number())
-	rec.setSequence(d.fSequence)
-	min, max := t.smallest.ukey(), t.largest.ukey()
-	level := s.version().pickLevel(min, max)
-	rec.addTableFile(level, t)
-
-	s.printf("MemCompaction: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
-		level, t.file.Number(), t.size, string(min), string(max))
-
-	// Commit changes
 	d.transact(func() (err error) {
-		return s.commit(rec)
+		return c.commit(d.logFile.Number(), d.fSequence)
 	})
 
 	// drop frozen mem

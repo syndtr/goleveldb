@@ -138,8 +138,14 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 	}
 
 	if snapshot {
-		r.setLogNum(st.logNum)
-		r.setSequence(st.sequence)
+		if !r.hasLogNum {
+			r.setLogNum(st.logNum)
+		}
+
+		if !r.hasLogNum {
+			r.setSequence(st.sequence)
+		}
+
 		for level, ik := range st.compactPointers {
 			r.addCompactPointer(level, ik)
 		}
@@ -172,7 +178,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 	}
 }
 
-func (s *session) createManifest(num uint64, v *version) (err error) {
+func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
 	file := s.desc.GetFile(num, descriptor.TypeManifest)
 	s.manifestWriter, err = file.Create()
 	if err != nil {
@@ -185,7 +191,9 @@ func (s *session) createManifest(num uint64, v *version) (err error) {
 		v = s.st.version
 	}
 
-	r := new(sessionRecord)
+	if r == nil {
+		r = new(sessionRecord)
+	}
 	s.fillRecord(r, true)
 	v.fillRecord(r)
 	defer func() {
@@ -203,4 +211,14 @@ func (s *session) createManifest(num uint64, v *version) (err error) {
 		return
 	}
 	return s.desc.SetMainManifest(file)
+}
+
+func (s *session) flushManifest(r *sessionRecord) (err error) {
+	s.fillRecord(r, false)
+	err = s.manifest.Append(r.encode())
+	if err != nil {
+		return
+	}
+	s.recordCommited(r)
+	return
 }

@@ -66,7 +66,7 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 // Create a new database session
 func (s *session) create() (err error) {
 	// create manifest
-	err = s.createManifest(s.allocFileNum(), nil)
+	err = s.createManifest(s.allocFileNum(), nil, nil)
 	if err != nil {
 		return
 	}
@@ -154,17 +154,9 @@ func (s *session) commit(r *sessionRecord) (err error) {
 
 	if s.manifest == nil {
 		// manifest log writer not yet created, create one
-		err = s.createManifest(s.allocFileNum(), nv)
+		err = s.createManifest(s.allocFileNum(), r, nv)
 	} else {
-		// fill record
-		s.fillRecord(r, false)
-		defer func() {
-			if err == nil {
-				s.recordCommited(r)
-			}
-		}()
-		// write log
-		err = s.manifest.Append(r.encode())
+		err = s.flushManifest(r)
 	}
 
 	// finally, apply new version if no error rise
