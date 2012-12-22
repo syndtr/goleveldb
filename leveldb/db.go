@@ -104,5 +104,8 @@ type DB interface {
 	// end==nil is treated as a key after all keys in the database.
 	// Therefore the following call will compact the entire database:
 	//    db.CompactRange(nil, nil);
-	CompactRange(begin, end []byte) error
+	CompactRange(r *Range) error
+
+	// Close the DB.
+	Close() error
 }

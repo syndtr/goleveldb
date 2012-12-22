@@ -22,7 +22,7 @@ import (
 
 type Writer struct {
 	w descriptor.Writer
-	o *leveldb.Options
+	o leveldb.OptionsInterface
 
 	dataBlock   *block.Writer
 	indexBlock  *block.Writer
@@ -36,11 +36,8 @@ type Writer struct {
 	closed bool
 }
 
-func NewWriter(w descriptor.Writer, o *leveldb.Options) *Writer {
-	t := &Writer{w: w}
-	// Copy options
-	t.o = new(leveldb.Options)
-	*t.o = *o
+func NewWriter(w descriptor.Writer, o leveldb.OptionsInterface) *Writer {
+	t := &Writer{w: w, o: o}
 	// Creating blocks
 	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
 	t.indexBlock = block.NewWriter(1)

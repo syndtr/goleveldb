@@ -25,13 +25,13 @@ type session struct {
 
 	desc    descriptor.Descriptor
 	opt     *leveldb.Options
+	iopt    *iOptions
 	cmp     leveldb.Comparator
 	icmp    *iKeyComparator
 	filter  leveldb.FilterPolicy
 	ifilter *iFilterPolicy
 	tops    *tOps
 
-	// 	manifestNum uint64
 	manifest       *log.Writer
 	manifestWriter descriptor.Writer
 
@@ -53,11 +53,10 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 		cmp:    opt.GetComparator(),
 		filter: opt.GetFilterPolicy(),
 	}
+	s.iopt = &iOptions{s}
 	s.icmp = &iKeyComparator{s.cmp}
-	opt.Comparator = s.icmp
 	if s.filter != nil {
 		s.ifilter = &iFilterPolicy{s.filter}
-		opt.FilterPolicy = s.ifilter
 	}
 	s.tops = newTableOps(s, s.opt.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
@@ -67,7 +66,6 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 // Create a new database session
 func (s *session) create() (err error) {
 	// create manifest
-	// 	s.manifestNum = s.allocFileNum()
 	err = s.createManifest(s.allocFileNum(), nil)
 	if err != nil {
 		return
@@ -146,9 +144,6 @@ func (s *session) recover() (err error) {
 	s.setVersion(staging.finish())
 	s.setFileNum(srec.nextNum)
 	s.recordCommited(srec)
-	// allocate manifest file number now, but create new
-	// manifest lazily during first session commit
-	// 	s.manifestNum = s.allocFileNum()
 
 	return
 }

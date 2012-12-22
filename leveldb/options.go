@@ -43,6 +43,18 @@ const (
 	nCompression
 )
 
+type OptionsInterface interface {
+	GetComparator() Comparator
+	HasFlag(flag OptionsFlag) bool
+	GetWriteBuffer() int
+	GetMaxOpenFiles() int
+	GetBlockCache() Cache
+	GetBlockSize() int
+	GetBlockRestartInterval() int
+	GetCompressionType() Compression
+	GetFilterPolicy() FilterPolicy
+}
+
 // Database options
 type Options struct {
 	mu sync.Mutex
@@ -206,6 +218,10 @@ const (
 	RFDontFillCache
 )
 
+type ReadOptionsInterface interface {
+	HasFlag(flag ReadOptionsFlag) bool
+}
+
 // Read options
 type ReadOptions struct {
 	// Specify the read flag
@@ -239,6 +255,10 @@ const (
 	// system call followed by "fsync()".
 	WFSync WriteOptionsFlag = 1 << iota
 )
+
+type WriteOptionsInterface interface {
+	HasFlag(flag WriteOptionsFlag) bool
+}
 
 // Write options
 type WriteOptions struct {

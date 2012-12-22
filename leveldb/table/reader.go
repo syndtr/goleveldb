@@ -23,7 +23,7 @@ import (
 
 type Reader struct {
 	r descriptor.Reader
-	o *leveldb.Options
+	o leveldb.OptionsInterface
 
 	meta   *block.Reader
 	index  *block.Reader
@@ -33,7 +33,7 @@ type Reader struct {
 	cacheId uint64
 }
 
-func NewReader(r descriptor.Reader, size uint64, o *leveldb.Options, cacheId uint64) (t *Reader, err error) {
+func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cacheId uint64) (t *Reader, err error) {
 	mi, ii, err := readFooter(r, size)
 	if err != nil {
 		return
@@ -99,13 +99,13 @@ func NewReader(r descriptor.Reader, size uint64, o *leveldb.Options, cacheId uin
 	return
 }
 
-func (t *Reader) NewIterator(o *leveldb.ReadOptions) leveldb.Iterator {
-	index_iter := &indexIter{t: t, o: o}
+func (t *Reader) NewIterator(ro leveldb.ReadOptionsInterface) leveldb.Iterator {
+	index_iter := &indexIter{t: t, ro: ro}
 	t.index.InitIterator(&index_iter.Iterator, t.o.GetComparator())
 	return leveldb.NewIndexedIterator(index_iter)
 }
 
-func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
+func (t *Reader) Get(key []byte, ro leveldb.ReadOptionsInterface) (rkey, rvalue []byte, err error) {
 	index_iter := t.index.NewIterator(t.o.GetComparator())
 	if !index_iter.Seek(key) {
 		err = index_iter.Error()
@@ -122,7 +122,7 @@ func (t *Reader) Get(key []byte, o *leveldb.ReadOptions) (rkey, rvalue []byte, e
 	}
 	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
 		var iter leveldb.Iterator
-		iter, err = t.getBlock(bi, o)
+		iter, err = t.getBlock(bi, ro)
 		if !iter.Seek(key) {
 			err = iter.Error()
 			if err == nil {
@@ -147,10 +147,10 @@ func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 	return t.dataEnd
 }
 
-func (t *Reader) getBlock(bi *bInfo, o *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
+func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leveldb.Iterator, err error) {
 	var b *block.Reader
 	newBlock := func() {
-		bb, err := bi.readAll(t.r, o.HasFlag(leveldb.RFVerifyChecksums))
+		bb, err := bi.readAll(t.r, ro.HasFlag(leveldb.RFVerifyChecksums))
 		if err != nil {
 			return
 		}
@@ -193,7 +193,7 @@ type indexIter struct {
 	block.Iterator
 
 	t *Reader
-	o *leveldb.ReadOptions
+	ro leveldb.ReadOptionsInterface
 }
 
 func (i *indexIter) Get() (iter leveldb.Iterator, err error) {
@@ -203,7 +203,7 @@ func (i *indexIter) Get() (iter leveldb.Iterator, err error) {
 		return
 	}
 
-	return i.t.getBlock(bi, i.o)
+	return i.t.getBlock(bi, i.ro)
 }
 
 func setCacheFinalizer(x *block.Iterator, cache leveldb.CacheObject) {
