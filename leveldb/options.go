@@ -135,7 +135,7 @@ func (o *Options) HasFlag(flag OptionsFlag) bool {
 	if o == nil {
 		return false
 	}
-	return (o.Flag | flag) != 0
+	return (o.Flag & flag) != 0
 }
 
 func (o *Options) GetWriteBuffer() int {
@@ -216,7 +216,7 @@ func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
 	if o == nil {
 		return false
 	}
-	return (o.Flag | flag) != 0
+	return (o.Flag & flag) != 0
 }
 
 // Write flag
@@ -250,5 +250,5 @@ func (o *WriteOptions) HasFlag(flag WriteOptionsFlag) bool {
 	if o == nil {
 		return false
 	}
-	return (o.Flag | flag) != 0
+	return (o.Flag & flag) != 0
 }
