@@ -53,6 +53,7 @@ type DB struct {
 	head      *mNode
 	maxHeight int
 	memSize   int
+	n         int
 }
 
 func New(cmp leveldb.BasicComparator) *DB {
@@ -81,6 +82,8 @@ func (p *DB) Put(key []byte, value []byte) {
 		x.SetNext(i, prev[i].Next(i))
 		prev[i].SetNext(i, x)
 	}
+
+	p.n++
 }
 
 func (p *DB) Contains(key []byte) bool {
@@ -105,6 +108,10 @@ func (p *DB) NewIterator() *Iterator {
 
 func (p *DB) Size() int {
 	return p.memSize
+}
+
+func (p *DB) Len() int {
+	return p.n
 }
 
 func (p *DB) newNode(key, value []byte, height int) *mNode {
