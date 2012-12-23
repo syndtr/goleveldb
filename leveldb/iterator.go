@@ -207,9 +207,10 @@ type MergedIterator struct {
 	cmp   Comparator
 	iters []Iterator
 
-	iter       Iterator
-	isBackward bool
-	err        error
+	iter     Iterator
+	backward bool
+	last     bool
+	err      error
 }
 
 func NewMergedIterator(iters []Iterator, cmp Comparator) *MergedIterator {
@@ -232,7 +233,8 @@ func (i *MergedIterator) First() bool {
 		}
 	}
 	i.smallest()
-	i.isBackward = false
+	i.backward = false
+	i.last = false
 	return i.iter != nil
 }
 
@@ -248,7 +250,8 @@ func (i *MergedIterator) Last() bool {
 		}
 	}
 	i.largest()
-	i.isBackward = true
+	i.backward = true
+	i.last = false
 	return i.iter != nil
 }
 
@@ -264,8 +267,9 @@ func (i *MergedIterator) Seek(key []byte) bool {
 		}
 	}
 	i.smallest()
-	i.isBackward = false
-	return i.iter != nil
+	i.backward = false
+	i.last = i.iter == nil
+	return !i.last
 }
 
 func (i *MergedIterator) Next() bool {
@@ -274,10 +278,13 @@ func (i *MergedIterator) Next() bool {
 	}
 
 	if i.iter == nil {
-		return i.First()
+		if !i.last {
+			return i.First()
+		}
+		return false
 	}
 
-	if i.isBackward {
+	if i.backward {
 		key := i.iter.Key()
 		for _, p := range i.iters {
 			if p == i.iter {
@@ -291,12 +298,13 @@ func (i *MergedIterator) Next() bool {
 				return false
 			}
 		}
-		i.isBackward = false
+		i.backward = false
 	}
 
 	i.iter.Next()
 	i.smallest()
-	return i.iter != nil
+	i.last = i.iter == nil
+	return !i.last
 }
 
 func (i *MergedIterator) Prev() bool {
@@ -305,10 +313,13 @@ func (i *MergedIterator) Prev() bool {
 	}
 
 	if i.iter == nil {
-		return i.Last()
+		if i.last {
+			return i.Last()
+		}
+		return false
 	}
 
-	if !i.isBackward {
+	if !i.backward {
 		key := i.iter.Key()
 		for _, p := range i.iters {
 			if p == i.iter {
@@ -324,7 +335,7 @@ func (i *MergedIterator) Prev() bool {
 				return false
 			}
 		}
-		i.isBackward = true
+		i.backward = true
 	}
 
 	i.iter.Prev()
