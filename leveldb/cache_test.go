@@ -65,7 +65,15 @@ func TestCache_HitMiss(t *testing.T) {
 	}
 
 	for i, x := range cases {
-		c.Delete([]byte(x.key))
+		finalizerOk := false
+		c.Delete([]byte(x.key), func() {
+			finalizerOk = true
+		})
+
+		if !finalizerOk {
+			t.Errorf("case %d finalizer not executed", i)
+		}
+
 		for j, y := range cases {
 			r, ok := c.Get([]byte(y.key))
 			if j > i {
@@ -79,7 +87,7 @@ func TestCache_HitMiss(t *testing.T) {
 			} else {
 				// should miss
 				if ok {
-					t.Errorf("case '%d' iteration '%d' is hit , value '%s'", i, j, r.Value().(string))
+					t.Errorf("case '%d' iteration '%d' is hit, value '%s'", i, j, r.Value().(string))
 				}
 			}
 			if ok {

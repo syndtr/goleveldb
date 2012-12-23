@@ -31,8 +31,8 @@ type Cache interface {
 
 	// If the cache contains entry for key, delete it.  Note that the
 	// underlying entry will be kept around until all existing handles
-	// to it have been released.
-	Delete(key []byte)
+	// to it have been released and the finalizer will finally executed.
+	Delete(key []byte, finalizer func())
 
 	// Return a new numeric id.  May be used by multiple clients who are
 	// sharing the same cache to partition the key space.  Typically the

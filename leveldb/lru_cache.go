@@ -80,7 +80,7 @@ func (c *LRUCache) Get(key []byte) (ret CacheObject, ok bool) {
 	return e.makeObject(), true
 }
 
-func (c *LRUCache) Delete(key []byte) {
+func (c *LRUCache) Delete(key []byte, finalizer func()) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -91,6 +91,9 @@ func (c *LRUCache) Delete(key []byte) {
 
 	// remove from lru list
 	e.mRemove()
+
+	// set finalizer
+	e.finalizer = finalizer
 
 	// evict elem if no one use it
 	if e.ref == 0 {
@@ -104,6 +107,10 @@ func (c *LRUCache) Delete(key []byte) {
 			prev.tNext = e.tNext
 		}
 		c.size -= e.charge
+		if e.finalizer != nil {
+			e.finalizer()
+			e.finalizer = nil
+		}
 	}
 }
 
@@ -156,10 +163,11 @@ type lruElem struct {
 	mNext, mPrev *lruElem
 	tNext        *lruElem
 
-	key    []byte
-	value  interface{}
-	charge int
-	ref    uint
+	key       []byte
+	value     interface{}
+	charge    int
+	ref       uint
+	finalizer func()
 }
 
 func (p *lruElem) mInsert(at *lruElem) {
@@ -206,6 +214,10 @@ func (p *lruElem) evict() {
 			x.tNext = p.tNext
 		}
 		lru.size -= p.charge
+		if p.finalizer != nil {
+			p.finalizer()
+			p.finalizer = nil
+		}
 	}
 }
 
