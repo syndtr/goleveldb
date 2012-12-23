@@ -306,7 +306,7 @@ func (t *tOps) create() (w *tWriter, err error) {
 	}, nil
 }
 
-func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, err error) {
+func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, n int, err error) {
 	w, err := t.create()
 	if err != nil {
 		return
@@ -330,7 +330,9 @@ func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, err error) {
 		return
 	}
 
-	return w.finish()
+	n = w.tw.Len()
+	f, err = w.finish()
+	return
 }
 
 func (t *tOps) newIterator(f *tFile, ro *leveldb.ReadOptions) leveldb.Iterator {

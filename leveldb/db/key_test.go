@@ -25,7 +25,7 @@ func ikey(key string, seq uint64, t vType) iKey {
 	return newIKey([]byte(key), uint64(seq), t)
 }
 
-func shorten(a, b []byte) []byte {
+func shortSep(a, b []byte) []byte {
 	return icmp.FindShortestSeparator(a, b)
 }
 
@@ -75,36 +75,36 @@ func assertBytes(t *testing.T, want, got []byte) {
 func TestIKeyShortSeparator(t *testing.T) {
 	// When user keys are same
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("foo", 99, tVal)))
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("foo", 101, tVal)))
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("foo", 100, tVal)))
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("foo", 100, tDel)))
 
 	// When user keys are misordered
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("bar", 99, tVal)))
 
 	// When user keys are different, but correctly ordered
 	assertBytes(t, ikey("g", uint64(kMaxSeq), tSeek),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("hello", 200, tVal)))
 
 	// When start user key is prefix of limit user key
 	assertBytes(t, ikey("foo", 100, tVal),
-		shorten(ikey("foo", 100, tVal),
+		shortSep(ikey("foo", 100, tVal),
 			ikey("foobar", 200, tVal)))
 
 	// When limit user key is prefix of start user key
 	assertBytes(t, ikey("foobar", 100, tVal),
-		shorten(ikey("foobar", 100, tVal),
+		shortSep(ikey("foobar", 100, tVal),
 			ikey("foo", 200, tVal)))
 }
 

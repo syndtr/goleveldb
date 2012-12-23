@@ -139,6 +139,27 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 	return
 }
 
+func (v *version) getIterators(ro *leveldb.ReadOptions) (iters []leveldb.Iterator) {
+	s := v.s
+
+	// Merge all level zero files together since they may overlap
+	for _, t := range v.tables[0] {
+		iter := s.tops.newIterator(t, ro)
+		iters = append(iters, iter)
+	}
+
+	for _, tt := range v.tables[1:] {
+		if len(tt) == 0 {
+			continue
+		}
+
+		iter := leveldb.NewIndexedIterator(tt.newIndexIterator(s.tops, s.icmp, ro))
+		iters = append(iters, iter)
+	}
+
+	return
+}
+
 func (v *version) newStaging() *versionStaging {
 	return &versionStaging{base: v}
 }

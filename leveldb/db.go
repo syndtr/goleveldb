@@ -23,7 +23,7 @@ type Reader interface {
 	//
 	// Caller should delete the iterator when it is no longer needed.
 	// The returned iterator should be deleted before this db is deleted.
-	NewIterator(ro *ReadOptions) (iter Iterator, err error)
+	NewIterator(ro *ReadOptions) Iterator
 }
 
 type Batch interface {

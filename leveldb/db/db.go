@@ -54,7 +54,7 @@ func (c *cMem) flush(mem *memdb.DB) error {
 	s := c.s
 
 	// Write memdb to table
-	t, err := s.tops.createFrom(mem.NewIterator())
+	t, n, err := s.tops.createFrom(mem.NewIterator())
 	if err != nil {
 		return err
 	}
@@ -63,8 +63,8 @@ func (c *cMem) flush(mem *memdb.DB) error {
 	level := s.version().pickLevel(min, max)
 	c.rec.addTableFile(level, t)
 
-	s.printf("MemCompaction: table created, level=%d num=%d size=%d min=`%s' max=`%s'",
-		level, t.file.Number(), t.size, string(min), string(max))
+	s.printf("MemCompaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
+		level, t.file.Number(), t.size, n, shorten(string(min)), shorten(string(max)))
 
 	return nil
 }
@@ -457,6 +457,19 @@ func (d *DB) doCompaction(c *compaction) {
 	var snapIter int
 	minSeq := d.minSnapshot()
 	var tw *tWriter
+
+	finish := func() error {
+		t, err := tw.finish()
+		if err != nil {
+			return err
+		}
+		rec.addTableFile(c.level+1, t)
+		min, max := shorten(string(t.smallest.ukey())), shorten(string(t.largest.ukey()))
+		s.printf("Compaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
+			c.level+1, t.file.Number(), t.size, tw.tw.Len(), min, max)
+		return nil
+	}
+
 	d.transact(func() (err error) {
 		tw = nil
 		ukey := snapUkey
@@ -498,12 +511,10 @@ func (d *DB) doCompaction(c *compaction) {
 			key := iKey(iter.Key())
 
 			if c.shouldStopBefore(key) && tw != nil {
-				var t *tFile
-				t, err = tw.finish()
+				err = finish()
 				if err != nil {
 					return
 				}
-				rec.addTableFile(c.level+1, t)
 				snapSched = true
 
 				// create new table but don't check for error now
@@ -577,15 +588,11 @@ func (d *DB) doCompaction(c *compaction) {
 
 			// Finish table if it is big enough
 			if tw.tw.Size() > kMaxTableSize {
-				var t *tFile
-				t, err = tw.finish()
+				err = finish()
 				if err != nil {
 					return
 				}
-				rec.addTableFile(c.level+1, t)
 				snapSched = true
-				s.printf("Compaction: table created, num=%d size=%d entries=%d",
-					t.file.Number(), t.size, tw.tw.Len())
 				tw = nil
 			}
 		}
@@ -596,15 +603,7 @@ func (d *DB) doCompaction(c *compaction) {
 	// Finish last table
 	if tw != nil {
 		d.transact(func() (err error) {
-			t, err := tw.finish()
-			if err != nil {
-				return
-			}
-			rec.addTableFile(c.level+1, t)
-			s.printf("Compaction: table created, num=%d size=%d entries=%d",
-				t.file.Number(), t.size, tw.tw.Len())
-			tw = nil
-			return
+			return finish()
 		})
 	}
 
@@ -674,32 +673,35 @@ func (d *DB) compaction() {
 				if c != nil {
 					d.doCompaction(c)
 				}
+			} else {
+				v := s.version()
+				maxLevel := 1
+				for i, tt := range v.tables[1:] {
+					if tt.isOverlaps(creq.min, creq.max, true, s.icmp) {
+						maxLevel = i + 1
+					}
+				}
+				for i := 0; i <= maxLevel; i++ {
+					c := s.getCompactionRange(i, creq.min, creq.max)
+					if c != nil {
+						d.doCompaction(c)
+					}
+				}
+			}
+		}
+
+		for a, b := true, true; a || b; {
+			a, b = false, false
+			if d.hasFrozenMem() {
+				d.memCompaction()
+				a = true
 				continue
 			}
 
-			v := s.version()
-			maxLevel := 1
-			for i, tt := range v.tables[1:] {
-				if tt.isOverlaps(creq.min, creq.max, true, s.icmp) {
-					maxLevel = i + 1
-				}
+			if s.needCompaction() {
+				d.doCompaction(s.pickCompaction())
+				b = true
 			}
-			for i := 0; i <= maxLevel; i++ {
-				c := s.getCompactionRange(i, creq.min, creq.max)
-				if c != nil {
-					d.doCompaction(c)
-				}
-			}
-			continue
-		}
-
-		if d.hasFrozenMem() {
-			d.memCompaction()
-			continue
-		}
-
-		if s.needCompaction() {
-			d.doCompaction(s.pickCompaction())
 		}
 	}
 }
@@ -707,17 +709,22 @@ func (d *DB) compaction() {
 func (d *DB) flush() (err error) {
 	s := d.s
 
+	delayed := false
 	for {
 		v := s.version()
 		switch {
-		case v.tLen(0) >= kL0_SlowdownWritesTrigger:
+		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
+			delayed = true
 			time.Sleep(1000 * time.Microsecond)
 			continue
 		case d.mem.Size() <= s.opt.GetWriteBuffer():
 			// still room
 			return
-		case d.hasFrozenMem(), v.tLen(0) >= kL0_StopWritesTrigger:
+		case d.hasFrozenMem():
 			d.cch <- cWait
+			continue
+		case v.tLen(0) >= kL0_StopWritesTrigger:
+			d.cch <- cSched
 			continue
 		}
 
@@ -837,8 +844,7 @@ func (d *DB) Write(w leveldb.Batch, wo *leveldb.WriteOptions) (err error) {
 }
 
 func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
-	var p leveldb.Snapshot
-	p, err = d.GetSnapshot()
+	p, err := d.GetSnapshot()
 	if err != nil {
 		return
 	}
@@ -846,13 +852,11 @@ func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) 
 	return p.Get(key, ro)
 }
 
-func (d *DB) NewIterator(ro *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
-	var p leveldb.Snapshot
-	p, err = d.GetSnapshot()
+func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+	p, err := d.GetSnapshot()
 	if err != nil {
-		return
+		return &leveldb.EmptyIterator{err}
 	}
-	defer p.Release()
 	return p.NewIterator(ro)
 }
 
@@ -982,11 +986,26 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	return
 }
 
-func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) (iter leveldb.Iterator, err error) {
-	if p.d.getClosed() {
-		return nil, ErrClosed
+func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+	d := p.d
+	s := d.s
+
+	if d.getClosed() {
+		return &leveldb.EmptyIterator{ErrClosed}
 	}
-	return
+
+	d.mu.RLock()
+	ti := s.version().getIterators(ro)
+	ii := make([]leveldb.Iterator, 0, len(ti)+2)
+	ii = append(ii, d.mem.NewIterator())
+	if d.fmem != nil {
+		ii = append(ii, d.fmem.NewIterator())
+	}
+	ii = append(ii, ti...)
+	d.mu.RUnlock()
+
+	iiter := leveldb.NewMergedIterator(ii, s.icmp)
+	return newDBIter(p.entry.sequence, iiter, s.cmp)
 }
 
 func (p *snapshot) Release() {

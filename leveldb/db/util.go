@@ -56,6 +56,13 @@ func readBytes(r readByteReader) (b []byte, err error) {
 	return
 }
 
+func shorten(str string) string {
+	if len(str) <= 13 {
+		return str
+	}
+	return str[:5] + "..." + str[len(str)-5:]
+}
+
 type files []descriptor.File
 
 func (p files) Len() int {
