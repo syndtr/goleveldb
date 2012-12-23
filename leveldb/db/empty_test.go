@@ -11,35 +11,36 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package table
+package db
 
 import "testing"
 
 func TestIter_Empty(t *testing.T) {
 	cc := []struct {
 		name string
-		c    Constructor
+		c    stConstructor
 	}{
-		{"block", &BlockConstructor{}},
-		{"table", &TableConstructor{}},
-		{"memdb", &MemDBConstructor{}},
-		{"merged", &MergedMemDBConstructor{}},
+		{"block", &stConstructor_Block{}},
+		{"table", &stConstructor_Table{}},
+		{"memdb", &stConstructor_MemDB{}},
+		{"merged", &stConstructor_MergedMemDB{}},
+		{"db", &stConstructor_DB{}},
 	}
 
 	for _, p := range cc {
 		c, name := p.c, p.name
-		err := c.Init()
+		err := c.init(t, new(stHarnessOpt))
 		if err != nil {
 			t.Error(name+": error when initializing constructor:", err.Error())
 			continue
 		}
-		size, err := c.Finish(t)
+		size, err := c.finish()
 		if err != nil {
 			t.Error(name+": error when finishing constructor:", err.Error())
 			continue
 		}
 		t.Logf(name+": final size is %d bytes", size)
-		iter := c.NewIterator()
+		iter := c.newIterator()
 		if iter.Valid() {
 			t.Error(name + ": Valid() return true")
 		}

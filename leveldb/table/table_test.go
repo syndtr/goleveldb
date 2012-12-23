@@ -19,6 +19,19 @@ import (
 	"testing"
 )
 
+type writer struct {
+	bytes.Buffer
+}
+
+func (*writer) Close() error { return nil }
+func (*writer) Sync() error  { return nil }
+
+type reader struct {
+	bytes.Reader
+}
+
+func (*reader) Close() error { return nil }
+
 func offsetBetween(t *testing.T, v, low, hi uint64) {
 	if !(v >= low && v <= hi) {
 		t.Errorf("offset %v not in range, want %v - %v", v, low, hi)
@@ -26,7 +39,7 @@ func offsetBetween(t *testing.T, v, low, hi uint64) {
 }
 
 func TestApproximateOffsetOfPlain(t *testing.T) {
-	w := &writer{b: new(bytes.Buffer)}
+	w := new(writer)
 	o := &leveldb.Options{
 		BlockSize:       1024,
 		CompressionType: leveldb.NoCompression,
@@ -42,13 +55,8 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 	if err := tw.Finish(); err != nil {
 		t.Fatal("error when finalizing table:", err.Error())
 	}
-	size := w.b.Len()
-	r := &reader{
-		r:    bytes.NewReader(w.b.Bytes()),
-		name: "table",
-		size: int64(size),
-	}
-
+	size := w.Len()
+	r := &reader{*bytes.NewReader(w.Bytes())}
 	tr, err := NewReader(r, uint64(size), o, 0)
 	if err != nil {
 		t.Fatal("error when creating table reader instance:", err.Error())

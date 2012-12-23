@@ -192,7 +192,7 @@ func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leve
 type indexIter struct {
 	block.Iterator
 
-	t *Reader
+	t  *Reader
 	ro leveldb.ReadOptionsInterface
 }
 
