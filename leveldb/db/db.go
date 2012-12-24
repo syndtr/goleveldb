@@ -51,7 +51,7 @@ func newCMem(s *session) *cMem {
 	return &cMem{s, new(sessionRecord)}
 }
 
-func (c *cMem) flush(mem *memdb.DB) error {
+func (c *cMem) flush(mem *memdb.DB, level int) error {
 	s := c.s
 
 	// Write memdb to table
@@ -61,7 +61,9 @@ func (c *cMem) flush(mem *memdb.DB) error {
 	}
 
 	min, max := t.smallest.ukey(), t.largest.ukey()
-	level := s.version().pickLevel(min, max)
+	if level < 0 {
+		level = s.version().pickLevel(min, max)
+	}
 	c.rec.addTableFile(level, t)
 
 	s.printf("MemCompaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
@@ -185,7 +187,7 @@ func (d *DB) recoverLog() (err error) {
 			d.fSequence = d.sequence
 
 			if mem.Len() > 0 {
-				err = cm.flush(mem)
+				err = cm.flush(mem, 0)
 				if err != nil {
 					return
 				}
@@ -213,7 +215,7 @@ func (d *DB) recoverLog() (err error) {
 
 			if mem.Size() > s.opt.GetWriteBuffer() {
 				// flush to table
-				err = cm.flush(mem)
+				err = cm.flush(mem, 0)
 				if err != nil {
 					return
 				}
@@ -239,7 +241,7 @@ func (d *DB) recoverLog() (err error) {
 	}
 
 	if mem != nil && mem.Len() > 0 {
-		err = cm.flush(mem)
+		err = cm.flush(mem, 0)
 		if err != nil {
 			return
 		}
@@ -419,7 +421,7 @@ func (d *DB) memCompaction() {
 	s.printf("MemCompaction: started, size=%d", d.fmem.Size())
 
 	d.transact(func() (err error) {
-		return c.flush(d.fmem)
+		return c.flush(d.fmem, -1)
 	})
 
 	d.transact(func() (err error) {
@@ -433,7 +435,7 @@ func (d *DB) memCompaction() {
 	runtime.GC()
 }
 
-func (d *DB) doCompaction(c *compaction) {
+func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	s := d.s
 	ucmp := s.cmp
 
@@ -443,7 +445,7 @@ func (d *DB) doCompaction(c *compaction) {
 	rec := new(sessionRecord)
 	rec.addCompactPointer(c.level, c.max)
 
-	if c.trivial() {
+	if !noTrivial && c.trivial() {
 		t := c.tables[0][0]
 		rec.deleteTable(c.level, t.file.Number())
 		rec.addTableFile(c.level+1, t)
@@ -591,7 +593,7 @@ func (d *DB) doCompaction(c *compaction) {
 			}
 
 			// Finish table if it is big enough
-			if tw.tw.Size() > kMaxTableSize {
+			if tw.tw.Size() >= kMaxTableSize {
 				err = finish()
 				if err != nil {
 					return
@@ -684,7 +686,7 @@ func (d *DB) compaction() {
 			if creq.level >= 0 {
 				c := s.getCompactionRange(creq.level, creq.min, creq.max)
 				if c != nil {
-					d.doCompaction(c)
+					d.doCompaction(c, true)
 				}
 			} else {
 				v := s.version()
@@ -697,7 +699,7 @@ func (d *DB) compaction() {
 				for i := 0; i < maxLevel; i++ {
 					c := s.getCompactionRange(i, creq.min, creq.max)
 					if c != nil {
-						d.doCompaction(c)
+						d.doCompaction(c, true)
 					}
 				}
 			}
@@ -713,7 +715,7 @@ func (d *DB) compaction() {
 			}
 
 			if s.needCompaction() {
-				d.doCompaction(s.pickCompaction())
+				d.doCompaction(s.pickCompaction(), false)
 				b = true
 			}
 		}
