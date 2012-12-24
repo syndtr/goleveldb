@@ -671,10 +671,16 @@ func (d *DB) compaction() {
 				return
 			}
 		case creq = <-d.creq:
-		}
+			if creq == nil {
+				continue
+			}
 
-		if creq != nil {
 			s.printf("CompactRange: ordered, level=%d", creq.level)
+
+			if d.hasFrozenMem() {
+				d.memCompaction()
+			}
+
 			if creq.level >= 0 {
 				c := s.getCompactionRange(creq.level, creq.min, creq.max)
 				if c != nil {
@@ -688,13 +694,14 @@ func (d *DB) compaction() {
 						maxLevel = i + 1
 					}
 				}
-				for i := 0; i <= maxLevel; i++ {
+				for i := 0; i < maxLevel; i++ {
 					c := s.getCompactionRange(i, creq.min, creq.max)
 					if c != nil {
 						d.doCompaction(c)
 					}
 				}
 			}
+			s.print("CompactRange: done")
 		}
 
 		for a, b := true, true; a || b; {
