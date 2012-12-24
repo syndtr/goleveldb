@@ -305,8 +305,7 @@ func (c *compaction) isBaseLevelForKey(key []byte) bool {
 	s := c.s
 	v := c.version
 	cmp := s.cmp
-	for level := c.level; level < kNumLevels; level++ {
-		tt := v.tables[level]
+	for level, tt := range v.tables[c.level+2:] {
 		for c.tPtrs[level] < len(tt) {
 			t := tt[c.tPtrs[level]]
 			if cmp.Compare(key, t.largest.ukey()) <= 0 {
