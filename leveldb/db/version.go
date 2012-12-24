@@ -279,13 +279,20 @@ type versionStaging struct {
 }
 
 func (p *versionStaging) commit(r *sessionRecord) {
+	btt := p.base.tables
+
 	// deleted tables
 	for _, tr := range r.deletedTables {
 		tm := &(p.tables[tr.level])
-		if tm.deleted == nil {
-			tm.deleted = make(map[uint64]struct{})
+
+		bt := btt[tr.level]
+		if len(bt) > 0 {
+			if tm.deleted == nil {
+				tm.deleted = make(map[uint64]struct{})
+			}
+			tm.deleted[tr.num] = struct{}{}
 		}
-		tm.deleted[tr.num] = struct{}{}
+
 		if tm.added != nil {
 			delete(tm.added, tr.num)
 		}
@@ -294,10 +301,12 @@ func (p *versionStaging) commit(r *sessionRecord) {
 	// new tables
 	for _, tr := range r.newTables {
 		tm := &(p.tables[tr.level])
+
 		if tm.added == nil {
 			tm.added = make(map[uint64]ntRecord)
 		}
 		tm.added[tr.num] = tr
+
 		if tm.deleted != nil {
 			delete(tm.deleted, tr.num)
 		}
@@ -305,15 +314,23 @@ func (p *versionStaging) commit(r *sessionRecord) {
 }
 
 func (p *versionStaging) finish() *version {
-	// build new version
 	s := p.base.s
+	btt := p.base.tables
+
+	// build new version
 	nv := &version{s: s}
 	sorter := &tFileSorterKey{cmp: s.icmp}
 	for level, tm := range p.tables {
-		ot := p.base.tables[level]
-		nt := make(tFiles, 0, len(tm.added)+len(ot)-len(tm.deleted))
-		// old tables
-		for _, t := range ot {
+		bt := btt[level]
+
+		n := len(bt) + len(tm.added) - len(tm.deleted)
+		if n < 0 {
+			n = 0
+		}
+		nt := make(tFiles, 0, n)
+
+		// base tables
+		for _, t := range bt {
 			if _, ok := tm.deleted[t.file.Number()]; ok {
 				continue
 			}
@@ -322,10 +339,12 @@ func (p *versionStaging) finish() *version {
 			}
 			nt = append(nt, t)
 		}
+
 		// new tables
 		for _, tr := range tm.added {
 			nt = append(nt, tr.makeFile(s))
 		}
+
 		// sort tables
 		nt.sort(sorter)
 		nv.tables[level] = nt
