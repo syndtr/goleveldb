@@ -20,7 +20,7 @@ type Cache interface {
 	// Return a cache object that corresponds to the mapping.
 	// The caller must call obj.Release() when the returned mapping is no
 	// longer needed.
-	Set(key []byte, value interface{}, charge int) CacheObject
+	Set(key []byte, value interface{}, charge int, finalizer func()) CacheObject
 
 	// If the cache has no mapping for "key", returns nil, false.
 	//
@@ -31,8 +31,13 @@ type Cache interface {
 
 	// If the cache contains entry for key, delete it.  Note that the
 	// underlying entry will be kept around until all existing handles
-	// to it have been released and the finalizer will finally executed.
-	Delete(key []byte, finalizer func())
+	// to it have been released and the finalizer will finally be executed.
+	Delete(key []byte, finalizer func()) bool
+
+	// Delete all caches. Note that the caches will be kept around until all
+	// of its existing handles have been released and the finalizer will
+	// finally be executed.
+	Purge(finalizer func())
 
 	// Return a new numeric id.  May be used by multiple clients who are
 	// sharing the same cache to partition the key space.  Typically the

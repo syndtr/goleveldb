@@ -39,9 +39,12 @@ func TestCache_HitMiss(t *testing.T) {
 		{"aaaaa", "v9"},
 	}
 
+	setfin := 0
 	c := NewLRUCache(1000, nil)
 	for i, x := range cases {
-		c.Set([]byte(x.key), x.value, len(x.value)).Release()
+		c.Set([]byte(x.key), x.value, len(x.value), func() {
+			setfin++
+		}).Release()
 		for j, y := range cases {
 			r, ok := c.Get([]byte(y.key))
 			if j <= i {
@@ -71,7 +74,7 @@ func TestCache_HitMiss(t *testing.T) {
 		})
 
 		if !finalizerOk {
-			t.Errorf("case %d finalizer not executed", i)
+			t.Errorf("case %d delete finalizer not executed", i)
 		}
 
 		for j, y := range cases {
@@ -95,18 +98,22 @@ func TestCache_HitMiss(t *testing.T) {
 			}
 		}
 	}
+
+	if setfin != len(cases) {
+		t.Errorf("some set finalizer may not not executed, want=%d got=%d", len(cases), setfin)
+	}
 }
 
 func TestLRUCache_Eviction(t *testing.T) {
 	c := NewLRUCache(12, nil)
-	c.Set([]byte("a"), "va", 1).Release()
-	c.Set([]byte("b"), "vb", 1).Release()
-	c.Set([]byte("c"), "vc", 1).Release()
-	c.Set([]byte("d"), "vd", 1).Release()
-	c.Set([]byte("e"), "ve", 1).Release()
+	c.Set([]byte("a"), "va", 1, nil).Release()
+	c.Set([]byte("b"), "vb", 1, nil).Release()
+	c.Set([]byte("c"), "vc", 1, nil).Release()
+	c.Set([]byte("d"), "vd", 1, nil).Release()
+	c.Set([]byte("e"), "ve", 1, nil).Release()
 	r, _ := c.Get([]byte("b"))
 	r.Release()
-	c.Set([]byte("x"), "vx", 10).Release()
+	c.Set([]byte("x"), "vx", 10, nil).Release()
 
 	for _, x := range []string{"b", "e", "x"} {
 		r, ok := c.Get([]byte(x))

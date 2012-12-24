@@ -22,6 +22,7 @@ import (
 	"leveldb/memdb"
 	"leveldb/table"
 	"math/rand"
+	"runtime"
 	"testing"
 )
 
@@ -251,7 +252,11 @@ func (p *stConstructor_DB) newIterator() leveldb.Iterator {
 	return p.db.NewIterator(p.ro)
 }
 
-func (p *stConstructor_DB) customTest(h *stHarness) {}
+func (p *stConstructor_DB) customTest(h *stHarness) {
+	p.db.Close()
+	p.db = nil
+	runtime.GC()
+}
 
 type stHarnessOpt struct {
 	Randomize bool

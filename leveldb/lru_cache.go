@@ -44,7 +44,7 @@ func NewLRUCache(capacity int, hash func([]byte) uint32) Cache {
 	return c
 }
 
-func (c *LRUCache) Set(key []byte, value interface{}, charge int) CacheObject {
+func (c *LRUCache) Set(key []byte, value interface{}, charge int, finalizer func()) CacheObject {
 	c.Lock()
 	defer c.Unlock()
 
@@ -52,6 +52,9 @@ func (c *LRUCache) Set(key []byte, value interface{}, charge int) CacheObject {
 	c.size += charge - e.charge
 	e.value = value
 	e.charge = charge
+	e.deleted = false
+	e.setFinalizer = finalizer
+	e.delFinalizer = nil
 	if !created {
 		e.mRemove()
 	}
@@ -73,27 +76,38 @@ func (c *LRUCache) Get(key []byte) (ret CacheObject, ok bool) {
 		return
 	}
 
-	// bump to front
-	e.mRemove()
-	e.mInsert(&c.root)
+	if !e.deleted {
+		// bump to front
+		e.mRemove()
+		e.mInsert(&c.root)
+	}
 
 	return e.makeObject(), true
 }
 
-func (c *LRUCache) Delete(key []byte, finalizer func()) {
+func (c *LRUCache) Delete(key []byte, finalizer func()) bool {
 	c.Lock()
 	defer c.Unlock()
 
 	e, _, prev, hash := c.lookup(key, false)
 	if e == nil {
-		return
+		if finalizer != nil {
+			finalizer()
+		}
+		return false
 	}
+
+	if e.deleted {
+		return false
+	}
+
+	e.deleted = true
 
 	// remove from lru list
 	e.mRemove()
 
 	// set finalizer
-	e.finalizer = finalizer
+	e.delFinalizer = finalizer
 
 	// evict elem if no one use it
 	if e.ref == 0 {
@@ -107,10 +121,28 @@ func (c *LRUCache) Delete(key []byte, finalizer func()) {
 			prev.tNext = e.tNext
 		}
 		c.size -= e.charge
-		if e.finalizer != nil {
-			e.finalizer()
-			e.finalizer = nil
+		if e.setFinalizer != nil {
+			e.setFinalizer()
+			e.setFinalizer = nil
 		}
+		if e.delFinalizer != nil {
+			e.delFinalizer()
+			e.delFinalizer = nil
+		}
+	}
+
+	return true
+}
+
+func (c *LRUCache) Purge(finalizer func()) {
+	top := &c.root
+	for n := c.root.mPrev; n != top; n = c.root.mPrev {
+		// set finalizer
+		n.delFinalizer = finalizer
+		// remove from lru list
+		n.mRemove()
+		// evict elem if no one use it
+		n.evict()
 	}
 }
 
@@ -163,11 +195,13 @@ type lruElem struct {
 	mNext, mPrev *lruElem
 	tNext        *lruElem
 
-	key       []byte
-	value     interface{}
-	charge    int
-	ref       uint
-	finalizer func()
+	key          []byte
+	value        interface{}
+	charge       int
+	ref          uint
+	deleted      bool
+	setFinalizer func()
+	delFinalizer func()
 }
 
 func (p *lruElem) mInsert(at *lruElem) {
@@ -214,9 +248,13 @@ func (p *lruElem) evict() {
 			x.tNext = p.tNext
 		}
 		lru.size -= p.charge
-		if p.finalizer != nil {
-			p.finalizer()
-			p.finalizer = nil
+		if p.setFinalizer != nil {
+			p.setFinalizer()
+			p.setFinalizer = nil
+		}
+		if p.delFinalizer != nil {
+			p.delFinalizer()
+			p.delFinalizer = nil
 		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"leveldb/log"
 	"leveldb/memdb"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -427,6 +428,9 @@ func (d *DB) memCompaction() {
 
 	// drop frozen mem
 	d.dropFrozenMem()
+
+	c = nil
+	runtime.GC()
 }
 
 func (d *DB) doCompaction(c *compaction) {
@@ -605,6 +609,7 @@ func (d *DB) doCompaction(c *compaction) {
 		d.transact(func() (err error) {
 			return finish()
 		})
+		tw = nil
 	}
 
 	s.print("Compaction: done")
@@ -624,9 +629,11 @@ func (d *DB) doCompaction(c *compaction) {
 	// Delete unused tables
 	for _, tt := range c.tables {
 		for _, t := range tt {
-			t.file.Remove()
+			s.tops.remove(t)
 		}
 	}
+
+	runtime.GC()
 }
 
 func (d *DB) compaction() {
@@ -919,12 +926,17 @@ func (d *DB) Close() error {
 		<-d.eack
 	}
 
+	d.s.tops.purgeCache()
+	d.s.opt.GetBlockCache().Purge(nil)
+
 	if d.logWriter != nil {
 		d.logWriter.Close()
 	}
 	if d.s.manifestWriter != nil {
 		d.s.manifestWriter.Close()
 	}
+
+	runtime.GC()
 
 	return d.err
 }

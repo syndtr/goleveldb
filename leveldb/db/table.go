@@ -359,6 +359,19 @@ func (t *tOps) get(f *tFile, key []byte, ro *leveldb.ReadOptions) (rkey, rvalue 
 	return c.Value().(*table.Reader).Get(key, ro)
 }
 
+func (t *tOps) remove(f *tFile) {
+	cacheKey := make([]byte, 8)
+	binary.LittleEndian.PutUint64(cacheKey, f.file.Number())
+
+	t.cache.Delete(cacheKey, func() {
+		f.file.Remove()
+	})
+}
+
+func (t *tOps) purgeCache() {
+	t.cache.Purge(nil)
+}
+
 func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
 	cacheKey := make([]byte, 8)
 	binary.LittleEndian.PutUint64(cacheKey, f.file.Number())
@@ -376,7 +389,9 @@ func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
 		if err != nil {
 			return
 		}
-		c = t.cache.Set(cacheKey, p, 1)
+		c = t.cache.Set(cacheKey, p, 1, func() {
+			r.Close()
+		})
 	}
 	return
 }

@@ -173,7 +173,7 @@ func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leve
 			if err != nil {
 				return
 			}
-			cacheObj = cache.Set(cacheKey, b, int(bi.size))
+			cacheObj = cache.Set(cacheKey, b, int(bi.size), nil)
 		}
 	} else {
 		newBlock()
