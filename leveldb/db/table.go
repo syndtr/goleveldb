@@ -93,7 +93,8 @@ func (p tFiles) search(key iKey, cmp *iKeyComparator) int {
 func (p tFiles) isOverlaps(min, max []byte, disjSorted bool, cmp *iKeyComparator) bool {
 	ucmp := cmp.cmp
 
-	if disjSorted {
+	if !disjSorted {
+		// Need to check against all files
 		for _, t := range p {
 			if !t.isAfter(min, ucmp) && !t.isBefore(max, ucmp) {
 				return true
