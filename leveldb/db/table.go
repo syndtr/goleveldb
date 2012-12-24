@@ -350,13 +350,22 @@ func (t *tOps) newIterator(f *tFile, ro *leveldb.ReadOptions) leveldb.Iterator {
 }
 
 func (t *tOps) get(f *tFile, key []byte, ro *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
-	var c leveldb.CacheObject
-	c, err = t.lookup(f)
+	c, err := t.lookup(f)
 	if err != nil {
 		return
 	}
 	defer c.Release()
 	return c.Value().(*table.Reader).Get(key, ro)
+}
+
+func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
+	c, err := t.lookup(f)
+	if err != nil {
+		return
+	}
+	defer c.Release()
+	n = c.Value().(*table.Reader).ApproximateOffsetOf(key)
+	return
 }
 
 func (t *tOps) remove(f *tFile) {

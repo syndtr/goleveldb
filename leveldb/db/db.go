@@ -859,6 +859,22 @@ func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) 
 	return p.Get(key, ro)
 }
 
+func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+	s := d.s
+
+	d.mu.RLock()
+	ti := s.version().getIterators(ro)
+	ii := make([]leveldb.Iterator, 0, len(ti)+2)
+	ii = append(ii, d.mem.NewIterator())
+	if d.fmem != nil {
+		ii = append(ii, d.fmem.NewIterator())
+	}
+	ii = append(ii, ti...)
+	d.mu.RUnlock()
+
+	return leveldb.NewMergedIterator(ii, s.icmp)
+}
+
 func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	p, err := d.GetSnapshot()
 	if err != nil {
@@ -881,10 +897,31 @@ func (d *DB) GetProperty(property string) (value string, err error) {
 	return
 }
 
-func (d *DB) GetApproximateSizes(r *leveldb.Range, n int) (size uint64, err error) {
+func (d *DB) GetApproximateSizes(rr []leveldb.Range) (sizes leveldb.Sizes, err error) {
 	if d.getClosed() {
-		return 0, ErrClosed
+		return nil, ErrClosed
 	}
+
+	v := d.s.version()
+	sizes = make(leveldb.Sizes, 0, len(rr))
+	for _, r := range rr {
+		min := newIKey(r.Start, kMaxSeq, tSeek)
+		max := newIKey(r.Limit, kMaxSeq, tSeek)
+		start, err := v.approximateOffsetOf(min)
+		if err != nil {
+			return nil, err
+		}
+		limit, err := v.approximateOffsetOf(max)
+		if err != nil {
+			return nil, err
+		}
+		var size uint64
+		if limit >= start {
+			size = limit - start
+		}
+		sizes = append(sizes, size)
+	}
+
 	return
 }
 
@@ -1006,18 +1043,7 @@ func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 		return &leveldb.EmptyIterator{ErrClosed}
 	}
 
-	d.mu.RLock()
-	ti := s.version().getIterators(ro)
-	ii := make([]leveldb.Iterator, 0, len(ti)+2)
-	ii = append(ii, d.mem.NewIterator())
-	if d.fmem != nil {
-		ii = append(ii, d.fmem.NewIterator())
-	}
-	ii = append(ii, ti...)
-	d.mu.RUnlock()
-
-	iiter := leveldb.NewMergedIterator(ii, s.icmp)
-	return newDBIter(p.entry.sequence, iiter, s.cmp)
+	return newDBIter(p.entry.sequence, d.newRawIterator(ro), s.cmp)
 }
 
 func (p *snapshot) Release() {

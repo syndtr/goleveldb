@@ -183,6 +183,39 @@ func (v *version) tLen(level int) int {
 	return len(v.tables[level])
 }
 
+func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
+	icmp := v.s.icmp
+	tops := v.s.tops
+
+	for level, tt := range v.tables {
+		for _, t := range tt {
+			if icmp.Compare(t.largest, key) <= 0 {
+				// Entire file is before "key", so just add the file size
+				n += t.size
+			} else if icmp.Compare(t.smallest, key) > 0 {
+				// Entire file is after "key", so ignore
+				if level > 0 {
+					// Files other than level 0 are sorted by meta->smallest, so
+					// no further files in this level will contain data for
+					// "key".
+					break
+				}
+			} else {
+				// "key" falls in the range for this table.  Add the
+				// approximate offset of "key" within the table.
+				var nn uint64
+				nn, err = tops.approximateOffsetOf(t, key)
+				if err != nil {
+					return 0, err
+				}
+				n += nn
+			}
+		}
+	}
+
+	return
+}
+
 func (v *version) pickLevel(min, max []byte) (level int) {
 	icmp := v.s.icmp
 	ucmp := icmp.cmp

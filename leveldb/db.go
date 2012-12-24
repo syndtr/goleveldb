@@ -59,6 +59,15 @@ type Range struct {
 	Limit []byte
 }
 
+type Sizes []uint64
+
+func (p Sizes) Sum() (n uint64) {
+	for _, s := range p {
+		n += s
+	}
+	return
+}
+
 type DB interface {
 	Reader
 	Writer
@@ -92,7 +101,7 @@ type DB interface {
 	// sizes will be one-tenth the size of the corresponding user data size.
 	//
 	// The results may not include the sizes of recently written data.
-	GetApproximateSizes(r *Range, n int) (size uint64, err error)
+	GetApproximateSizes(r []Range) (size uint64, err error)
 
 	// Compact the underlying storage for the key range [*begin,*end].
 	// In particular, deleted and overwritten versions are discarded,
