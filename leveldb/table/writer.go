@@ -21,8 +21,9 @@ import (
 )
 
 type Writer struct {
-	w descriptor.Writer
-	o leveldb.OptionsInterface
+	w   descriptor.Writer
+	o   leveldb.OptionsInterface
+	cmp leveldb.Comparator
 
 	dataBlock   *block.Writer
 	indexBlock  *block.Writer
@@ -37,7 +38,7 @@ type Writer struct {
 }
 
 func NewWriter(w descriptor.Writer, o leveldb.OptionsInterface) *Writer {
-	t := &Writer{w: w, o: o}
+	t := &Writer{w: w, o: o, cmp: o.GetComparator()}
 	// Creating blocks
 	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
 	t.indexBlock = block.NewWriter(1)
@@ -55,13 +56,8 @@ func (t *Writer) Add(key, value []byte) (err error) {
 		panic("operation on closed table writer")
 	}
 
-	cmp := t.o.GetComparator()
-	if t.n > 0 && cmp.Compare(key, t.lastKey) <= 0 {
-		panic("the key preceding last added key")
-	}
-
 	if t.pendingIndex {
-		sep := cmp.FindShortestSeparator(t.lastKey, key)
+		sep := t.cmp.FindShortestSeparator(t.lastKey, key)
 		t.indexBlock.Add(sep, t.pendingBlock.encode())
 		t.pendingIndex = false
 	}
@@ -94,11 +90,6 @@ func (t *Writer) Flush() (err error) {
 		return
 	}
 	t.dataBlock.Reset()
-
-	err = t.w.Sync()
-	if err != nil {
-		return
-	}
 
 	t.pendingIndex = true
 
@@ -144,8 +135,7 @@ func (t *Writer) Finish() (err error) {
 
 	// Write index block
 	if t.pendingIndex {
-		cmp := t.o.GetComparator()
-		suc := cmp.FindShortSuccessor(t.lastKey)
+		suc := t.cmp.FindShortSuccessor(t.lastKey)
 		t.indexBlock.Add(suc, t.pendingBlock.encode())
 		t.pendingIndex = false
 	}
@@ -162,6 +152,7 @@ func (t *Writer) Finish() (err error) {
 		return
 	}
 	t.offset += n
+
 	return
 }
 
