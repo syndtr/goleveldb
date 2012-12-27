@@ -38,6 +38,9 @@ func setFileLock(f *os.File, lock bool) (err error) {
 		Len:    0, // lock the entire file.
 		Pid:    uint32(os.Getpid()),
 	}
-	_, _, err = syscall.Syscall(syscall.SYS_FCNTL, f.Fd(), uintptr(syscall.F_SETLK), uintptr(unsafe.Pointer(&k)))
+	_, _, errno := syscall.Syscall(syscall.SYS_FCNTL, f.Fd(), uintptr(syscall.F_SETLK), uintptr(unsafe.Pointer(&k)))
+	if errno != 0 {
+		err = errno
+	}
 	return
 }

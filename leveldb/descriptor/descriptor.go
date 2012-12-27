@@ -124,6 +124,11 @@ type StdDescriptor struct {
 }
 
 func Open(dbpath string) (d *StdDescriptor, err error) {
+	err = os.MkdirAll(dbpath, 0755)
+	if err != nil {
+		return
+	}
+
 	lock, err := os.OpenFile(path.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return
@@ -141,8 +146,9 @@ func Open(dbpath string) (d *StdDescriptor, err error) {
 	}
 
 	os.Rename(path.Join(dbpath, "LOG"), path.Join(dbpath, "LOG.old"))
-	log, err := os.OpenFile(path.Join(dbpath, "LOCK"), os.O_WRONLY|os.O_CREATE, 0644)
+	log, err := os.OpenFile(path.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
+		setFileLock(lock, false)
 		return
 	}
 
@@ -193,10 +199,12 @@ func (d *StdDescriptor) Print(str string) {
 	itoa(&d.buf, sec, 2)
 	d.buf = append(d.buf, '.')
 	itoa(&d.buf, msec, 6)
+	d.buf = append(d.buf, ' ')
 
 	// write
 	d.log.Write(d.buf)
 	d.log.WriteString(str)
+	d.log.WriteString("\n")
 
 	d.mu.Unlock()
 }
@@ -229,6 +237,7 @@ func (d *StdDescriptor) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
 	file, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
+		err = err.(*os.PathError).Err
 		return
 	}
 	buf := new(bytes.Buffer)
@@ -260,10 +269,7 @@ func (d *StdDescriptor) SetMainManifest(f File) (err error) {
 		return
 	}
 	file.Close()
-	err = os.Remove(pth)
-	if err != nil {
-		return
-	}
+	os.Remove(pth)
 	return os.Rename(pthTmp, pth)
 
 }
