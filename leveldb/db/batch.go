@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"io"
 	"leveldb"
+	"leveldb/memdb"
 )
 
 var (
@@ -51,6 +52,14 @@ func (b *Batch) Put(key, value []byte) {
 func (b *Batch) Delete(key []byte) {
 	b.rec = append(b.rec, batchRecord{tDel, key, nil})
 	b.kvSize += len(key)
+}
+
+func (b *Batch) Reset() {
+	b.rec = b.rec[:0]
+	b.sequence = 0
+	b.kvSize = 0
+	b.ch = nil
+	b.sync = false
 }
 
 func (b *Batch) init(sync bool) chan error {
@@ -170,6 +179,13 @@ func (b *Batch) replay(to batchReplay) {
 		case tDel:
 			to.delete(rec.key, b.sequence+uint64(i))
 		}
+	}
+}
+
+func (b *Batch) memReplay(to *memdb.DB) {
+	for i, rec := range b.rec {
+		ikey := newIKey(rec.key, b.sequence+uint64(i), rec.t)
+		to.Put(ikey, rec.value)
 	}
 }
 
