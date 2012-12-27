@@ -121,7 +121,7 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 	s := newSession(desc, opt)
 
 	err = s.recover()
-	if err == os.ErrNotExist && opt.HasFlag(leveldb.OFCreateIfMissing) {
+	if os.IsNotExist(err) && opt.HasFlag(leveldb.OFCreateIfMissing) {
 		err = s.create()
 	} else if err == nil && opt.HasFlag(leveldb.OFErrorIfExist) {
 		println(opt.HasFlag(leveldb.OFErrorIfExist))
