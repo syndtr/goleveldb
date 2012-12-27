@@ -43,7 +43,8 @@ const (
 var sixZero [6]byte
 
 type Writer struct {
-	w io.Writer
+	w   io.Writer
+	buf bytes.Buffer
 
 	boff int
 }
@@ -98,34 +99,26 @@ func (l *Writer) Append(record []byte) (err error) {
 			break
 		}
 	}
-
 	return
 }
 
 func (l *Writer) write(rtype uint, record []byte) (err error) {
 	rlen := len(record)
-	buf := new(bytes.Buffer)
+	buf := &l.buf
+	buf.Reset()
 
 	crc := leveldb.NewCRC32C()
 	crc.Write([]byte{byte(rtype)})
 	crc.Write(record)
-	err = binary.Write(buf, binary.LittleEndian, leveldb.MaskCRC32(crc.Sum32()))
-	if err != nil {
-		return
-	}
+	binary.Write(buf, binary.LittleEndian, leveldb.MaskCRC32(crc.Sum32()))
 
 	buf.WriteByte(byte(rlen & 0xff))
 	buf.WriteByte(byte(rlen >> 8))
 	buf.WriteByte(byte(rtype))
 
-	_, err = l.w.Write(buf.Bytes())
-	if err != nil {
-		return
+	_, err = buf.WriteTo(l.w)
+	if err == nil {
+		_, err = l.w.Write(record)
 	}
-	_, err = l.w.Write(record)
-	if err != nil {
-		return
-	}
-
-	return
+	return err
 }
