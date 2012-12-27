@@ -28,13 +28,22 @@ const (
 
 const tSeek = tVal
 
-const kMaxSeq uint64 = (uint64(1) << 56) - 1
+const (
+	kMaxSeq uint64 = (uint64(1) << 56) - 1
+	kMaxNum uint64 = (kMaxSeq << 8) | uint64(tSeek)
+)
+
+var kMaxNumBytes = make([]byte, 8)
+
+func init() {
+	binary.LittleEndian.PutUint64(kMaxNumBytes, kMaxNum)
+}
 
 func packSequenceAndType(seq uint64, t vType) uint64 {
 	if seq > kMaxSeq || t > tVal {
 		panic("invalid sequence number or value type")
 	}
-	return (uint64(seq) << 8) | uint64(t)
+	return (seq << 8) | uint64(t)
 }
 
 func unpackSequenceAndType(packed uint64) (uint64, vType) {
@@ -71,6 +80,10 @@ func (p iKey) ukey() []byte {
 	return p[:len(p)-8]
 }
 
+func (p iKey) num() uint64 {
+	return binary.LittleEndian.Uint64(p[len(p)-8:])
+}
+
 func (p iKey) sequenceAndType() (valid bool, seq uint64, t vType) {
 	if p == nil {
 		panic("operation on nil iKey")
@@ -78,8 +91,7 @@ func (p iKey) sequenceAndType() (valid bool, seq uint64, t vType) {
 	if len(p) < 8 {
 		return false, 0, 0
 	}
-	packed := binary.LittleEndian.Uint64(p[len(p)-8:])
-	seq, t = unpackSequenceAndType(packed)
+	seq, t = unpackSequenceAndType(p.num())
 	if t > tVal {
 		return false, 0, 0
 	}

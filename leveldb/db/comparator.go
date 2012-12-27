@@ -13,11 +13,7 @@
 
 package db
 
-import (
-	"bytes"
-	"encoding/binary"
-	"leveldb"
-)
+import "leveldb"
 
 type iKeyComparator struct {
 	cmp leveldb.Comparator
@@ -28,11 +24,10 @@ func (p *iKeyComparator) Name() string {
 }
 
 func (p *iKeyComparator) Compare(a, b []byte) int {
-	r := p.cmp.Compare(iKey(a).ukey(), iKey(b).ukey())
+	ia, ib := iKey(a), iKey(b)
+	r := p.cmp.Compare(ia.ukey(), ib.ukey())
 	if r == 0 {
-		var an, bn uint64
-		binary.Read(bytes.NewBuffer(a[len(a)-8:]), binary.LittleEndian, &an)
-		binary.Read(bytes.NewBuffer(b[len(b)-8:]), binary.LittleEndian, &bn)
+		an, bn := ia.num(), ib.num()
 		if an > bn {
 			r = -1
 		} else if an < bn {
@@ -46,11 +41,10 @@ func (p *iKeyComparator) FindShortestSeparator(a, b []byte) []byte {
 	ua, ub := iKey(a).ukey(), iKey(b).ukey()
 	r := p.cmp.FindShortestSeparator(ua, ub)
 	if len(r) < len(ua) && p.cmp.Compare(ua, r) < 0 {
-		buf := new(bytes.Buffer)
-		buf.Write(r)
-		binary.Write(buf, binary.LittleEndian,
-			packSequenceAndType(kMaxSeq, tSeek))
-		return buf.Bytes()
+		rr := make([]byte, len(r)+8)
+		copy(rr, r)
+		copy(rr[len(r):], kMaxNumBytes)
+		return rr
 	}
 	return append(r, a[len(r):]...)
 }
@@ -59,11 +53,10 @@ func (p *iKeyComparator) FindShortSuccessor(b []byte) []byte {
 	ub := iKey(b).ukey()
 	r := p.cmp.FindShortSuccessor(ub)
 	if len(r) < len(ub) && p.cmp.Compare(ub, r) < 0 {
-		buf := new(bytes.Buffer)
-		buf.Write(r)
-		binary.Write(buf, binary.LittleEndian,
-			packSequenceAndType(kMaxSeq, tSeek))
-		return buf.Bytes()
+		rr := make([]byte, len(r)+8)
+		copy(rr, r)
+		copy(rr[len(r):], kMaxNumBytes)
+		return rr
 	}
 	return append(r, b[len(r):]...)
 }
