@@ -63,6 +63,6 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 	v.setComparer("foo")
 	v.setLogNum(big + 100)
 	v.setNextNum(big + 200)
-	v.setSequence(big + 1000)
+	v.setSeq(big + 1000)
 	test()
 }

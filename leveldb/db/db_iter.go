@@ -49,7 +49,7 @@ func (i *DBIter) scanNext(skip []byte) {
 			i.valid = false
 			return
 		}
-		if pkey.sequence <= i.seq {
+		if pkey.seq <= i.seq {
 			switch pkey.vtype {
 			case tDel:
 				skip = pkey.ukey
@@ -82,7 +82,7 @@ func (i *DBIter) scanPrev() {
 				i.clear()
 				return
 			}
-			if pkey.sequence <= i.seq {
+			if pkey.seq <= i.seq {
 				if vtype != tDel && cmp.Compare(pkey.ukey, i.skey) < 0 {
 					break
 				}

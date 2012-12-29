@@ -37,11 +37,11 @@ type batchRecord struct {
 }
 
 type Batch struct {
-	rec      []batchRecord
-	sequence uint64
-	kvSize   int
-	ch       []chan error
-	sync     bool
+	rec    []batchRecord
+	seq    uint64
+	kvSize int
+	ch     []chan error
+	sync   bool
 }
 
 func (b *Batch) Put(key, value []byte) {
@@ -56,7 +56,7 @@ func (b *Batch) Delete(key []byte) {
 
 func (b *Batch) Reset() {
 	b.rec = b.rec[:0]
-	b.sequence = 0
+	b.seq = 0
 	b.kvSize = 0
 	b.ch = nil
 	b.sync = false
@@ -78,14 +78,14 @@ func (b *Batch) done(err error) {
 
 func (b *Batch) put(key, value []byte, seq uint64) {
 	if len(b.rec) == 0 {
-		b.sequence = seq
+		b.seq = seq
 	}
 	b.Put(key, value)
 }
 
 func (b *Batch) delete(key []byte, seq uint64) {
 	if len(b.rec) == 0 {
-		b.sequence = seq
+		b.seq = seq
 	}
 	b.Delete(key)
 }
@@ -108,8 +108,8 @@ func (b *Batch) size() int {
 }
 
 func (b *Batch) encodeTo(w io.Writer) (err error) {
-	// write sequence number
-	err = binary.Write(w, binary.LittleEndian, b.sequence)
+	// write seq number
+	err = binary.Write(w, binary.LittleEndian, b.seq)
 	if err != nil {
 		return
 	}
@@ -175,16 +175,16 @@ func (b *Batch) replay(to batchReplay) {
 	for i, rec := range b.rec {
 		switch rec.t {
 		case tVal:
-			to.put(rec.key, rec.value, b.sequence+uint64(i))
+			to.put(rec.key, rec.value, b.seq+uint64(i))
 		case tDel:
-			to.delete(rec.key, b.sequence+uint64(i))
+			to.delete(rec.key, b.seq+uint64(i))
 		}
 	}
 }
 
 func (b *Batch) memReplay(to *memdb.DB) {
 	for i, rec := range b.rec {
-		ikey := newIKey(rec.key, b.sequence+uint64(i), rec.t)
+		ikey := newIKey(rec.key, b.seq+uint64(i), rec.t)
 		to.Put(ikey, rec.value)
 	}
 }

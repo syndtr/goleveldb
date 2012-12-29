@@ -38,7 +38,7 @@ type session struct {
 		versions        []*version
 		nextNum         stateNum
 		logNum          uint64
-		sequence        uint64
+		seq             uint64
 		compactPointers [kNumLevels]iKey
 	}
 }
@@ -113,8 +113,8 @@ func (s *session) recover() (err error) {
 		if rec.hasNextNum {
 			srec.setNextNum(rec.nextNum)
 		}
-		if rec.hasSequence {
-			srec.setSequence(rec.sequence)
+		if rec.hasSeq {
+			srec.setSeq(rec.seq)
 		}
 	}
 	// check for error in log reader
@@ -128,8 +128,8 @@ func (s *session) recover() (err error) {
 		err = leveldb.ErrCorrupt("manifest missing next file number")
 	case srec.hasLogNum:
 		err = leveldb.ErrCorrupt("manifest missing log file number")
-	case srec.hasSequence:
-		err = leveldb.ErrCorrupt("manifest missing sequence number")
+	case srec.hasSeq:
+		err = leveldb.ErrCorrupt("manifest missing seq number")
 	}
 	if err != nil {
 		return

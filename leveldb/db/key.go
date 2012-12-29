@@ -39,28 +39,28 @@ func init() {
 	binary.LittleEndian.PutUint64(kMaxNumBytes, kMaxNum)
 }
 
-func packSequenceAndType(seq uint64, t vType) uint64 {
+func packSeqAndType(seq uint64, t vType) uint64 {
 	if seq > kMaxSeq || t > tVal {
-		panic("invalid sequence number or value type")
+		panic("invalid seq number or value type")
 	}
 	return (seq << 8) | uint64(t)
 }
 
-func unpackSequenceAndType(packed uint64) (uint64, vType) {
+func unpackSeqAndType(packed uint64) (uint64, vType) {
 	return uint64(packed >> 8), vType(packed & 0xff)
 }
 
 type parsedIKey struct {
-	ukey     []byte
-	sequence uint64
-	vtype    vType
+	ukey  []byte
+	seq   uint64
+	vtype vType
 }
 
 type iKey []byte
 
 func writeIkey(w io.Writer, ukey []byte, seq uint64, t vType) {
 	w.Write(ukey)
-	binary.Write(w, binary.LittleEndian, packSequenceAndType(seq, t))
+	binary.Write(w, binary.LittleEndian, packSeqAndType(seq, t))
 }
 
 func newIKey(ukey []byte, seq uint64, t vType) iKey {
@@ -70,7 +70,7 @@ func newIKey(ukey []byte, seq uint64, t vType) iKey {
 }
 
 func newIKeyFromParsed(k *parsedIKey) iKey {
-	return newIKey(k.ukey, k.sequence, k.vtype)
+	return newIKey(k.ukey, k.seq, k.vtype)
 }
 
 func (p iKey) ukey() []byte {
@@ -84,14 +84,14 @@ func (p iKey) num() uint64 {
 	return binary.LittleEndian.Uint64(p[len(p)-8:])
 }
 
-func (p iKey) sequenceAndType() (valid bool, seq uint64, t vType) {
+func (p iKey) seqAndType() (valid bool, seq uint64, t vType) {
 	if p == nil {
 		panic("operation on nil iKey")
 	}
 	if len(p) < 8 {
 		return false, 0, 0
 	}
-	seq, t = unpackSequenceAndType(p.num())
+	seq, t = unpackSeqAndType(p.num())
 	if t > tVal {
 		return false, 0, 0
 	}
@@ -100,7 +100,7 @@ func (p iKey) sequenceAndType() (valid bool, seq uint64, t vType) {
 }
 
 func (p iKey) parse() *parsedIKey {
-	valid, seq, t := p.sequenceAndType()
+	valid, seq, t := p.seqAndType()
 	if !valid {
 		return nil
 	}

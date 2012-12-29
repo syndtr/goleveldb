@@ -26,7 +26,7 @@ const (
 	tagComparer
 	tagLogNum
 	tagNextNum
-	tagSequence
+	tagSeq
 	tagCompactPointer
 	tagDeletedTable
 	tagNewTable
@@ -81,8 +81,8 @@ type sessionRecord struct {
 	hasNextNum bool
 	nextNum    uint64
 
-	hasSequence bool
-	sequence    uint64
+	hasSeq bool
+	seq    uint64
 
 	compactPointers []cpRecord
 	newTables       []ntRecord
@@ -104,9 +104,9 @@ func (p *sessionRecord) setNextNum(num uint64) {
 	p.nextNum = num
 }
 
-func (p *sessionRecord) setSequence(seq uint64) {
-	p.hasSequence = true
-	p.sequence = seq
+func (p *sessionRecord) setSeq(seq uint64) {
+	p.hasSeq = true
+	p.seq = seq
 }
 
 func (p *sessionRecord) addCompactPointer(level int, key iKey) {
@@ -179,12 +179,12 @@ func (p *sessionRecord) encodeTo(w io.Writer) (err error) {
 		}
 	}
 
-	if p.hasSequence {
-		_, err = w.Write(tagBytesCache[tagSequence])
+	if p.hasSeq {
+		_, err = w.Write(tagBytesCache[tagSeq])
 		if err != nil {
 			return
 		}
-		err = putUvarint(uint64(p.sequence))
+		err = putUvarint(uint64(p.seq))
 		if err != nil {
 			return
 		}
@@ -288,12 +288,12 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 			if err == nil {
 				p.hasNextNum = true
 			}
-		case tagSequence:
+		case tagSeq:
 			var seq uint64
 			seq, err = binary.ReadUvarint(r)
 			if err == nil {
-				p.sequence = seq
-				p.hasSequence = true
+				p.seq = seq
+				p.hasSeq = true
 			}
 		case tagCompactPointer:
 			var level uint64

@@ -78,7 +78,7 @@ func (c *cMem) reset() {
 
 func (c *cMem) commit(log, seq uint64) error {
 	c.rec.setLogNum(log)
-	c.rec.setSequence(seq)
+	c.rec.setSeq(seq)
 
 	// Commit changes
 	return c.s.commit(c.rec)
@@ -110,8 +110,8 @@ type DB struct {
 	logWriter descriptor.Writer
 	logFile   descriptor.File
 	fLogFile  descriptor.File
-	sequence  uint64
-	fSequence uint64
+	seq       uint64
+	fSeq      uint64
 	snapshots list.List
 	err       error
 	closed    bool
@@ -132,12 +132,12 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 	}
 
 	d = &DB{
-		s:        s,
-		cch:      make(chan cSignal),
-		creq:     make(chan *cReq),
-		wch:      make(chan *Batch),
-		eack:     make(chan struct{}),
-		sequence: s.st.sequence,
+		s:    s,
+		cch:  make(chan cSignal),
+		creq: make(chan *cReq),
+		wch:  make(chan *Batch),
+		eack: make(chan struct{}),
+		seq:  s.st.seq,
 	}
 	d.snapshots.Init()
 
@@ -185,7 +185,7 @@ func (d *DB) recoverLog() (err error) {
 		}
 
 		if mem != nil {
-			d.fSequence = d.sequence
+			d.fSeq = d.seq
 
 			if mem.Len() > 0 {
 				err = cm.flush(mem, 0)
@@ -194,7 +194,7 @@ func (d *DB) recoverLog() (err error) {
 				}
 			}
 
-			err = cm.commit(file.Number(), d.fSequence)
+			err = cm.commit(file.Number(), d.fSeq)
 			if err != nil {
 				return
 			}
@@ -209,7 +209,7 @@ func (d *DB) recoverLog() (err error) {
 
 		lr := log.NewReader(r, true)
 		for lr.Next() {
-			d.sequence, err = replayBatch(lr.Record(), mb)
+			d.seq, err = replayBatch(lr.Record(), mb)
 			if err != nil {
 				return
 			}
@@ -248,9 +248,9 @@ func (d *DB) recoverLog() (err error) {
 		}
 	}
 
-	d.fSequence = d.sequence
+	d.fSeq = d.seq
 
-	err = cm.commit(d.logFile.Number(), d.fSequence)
+	err = cm.commit(d.logFile.Number(), d.fSeq)
 	if err != nil {
 		return
 	}
@@ -287,7 +287,7 @@ func (d *DB) newMem() (err error) {
 	d.fmem = d.mem
 	d.mem = memdb.New(s.cmp)
 
-	d.fSequence = d.sequence
+	d.fSeq = d.seq
 
 	return
 }
@@ -308,9 +308,9 @@ func (d *DB) dropFrozenMem() {
 }
 
 type snapEntry struct {
-	elem     *list.Element
-	sequence uint64
-	ref      int
+	elem *list.Element
+	seq  uint64
+	ref  int
 }
 
 func (d *DB) getSnapshot() (p *snapEntry) {
@@ -320,9 +320,9 @@ func (d *DB) getSnapshot() (p *snapEntry) {
 	if back != nil {
 		p = back.Value.(*snapEntry)
 	}
-	num := d.sequence
-	if p == nil || p.sequence != num {
-		p = &snapEntry{sequence: num}
+	num := d.seq
+	if p == nil || p.seq != num {
+		p = &snapEntry{seq: num}
 		p.elem = d.snapshots.PushBack(p)
 	}
 	p.ref++
@@ -343,9 +343,9 @@ func (d *DB) minSnapshot() uint64 {
 	defer d.mu.RUnlock()
 	back := d.snapshots.Front()
 	if back == nil {
-		return d.s.sequence()
+		return d.s.seq()
 	}
-	return back.Value.(*snapEntry).sequence
+	return back.Value.(*snapEntry).seq
 }
 
 func (d *DB) setError(err error) {
@@ -426,7 +426,7 @@ func (d *DB) memCompaction() {
 	})
 
 	d.transact(func() (err error) {
-		return c.commit(d.logFile.Number(), d.fSequence)
+		return c.commit(d.logFile.Number(), d.fSeq)
 	})
 
 	// drop frozen mem
@@ -561,18 +561,18 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				if seq <= minSeq {
 					// Dropped because newer entry for same user key exist
 					drop = true // (A)
-				} else if ik.vtype == tDel && ik.sequence <= minSeq && c.isBaseLevelForKey(ik.ukey) {
+				} else if ik.vtype == tDel && ik.seq <= minSeq && c.isBaseLevelForKey(ik.ukey) {
 					// For this user key:
 					// (1) there is no data in higher levels
-					// (2) data in lower levels will have larger sequence numbers
+					// (2) data in lower levels will have larger seq numbers
 					// (3) data in layers that are being compacted here and have
-					//     smaller sequence numbers will be dropped in the next
+					//     smaller seq numbers will be dropped in the next
 					//     few iterations of this loop (by rule (A) above).
 					// Therefore this deletion marker is obsolete and can be dropped.
 					drop = true
 				}
 
-				seq = ik.sequence
+				seq = ik.seq
 			}
 
 			if drop {
@@ -795,11 +795,11 @@ func (d *DB) write() {
 			}
 		}
 
-		// set batch first sequence number relative from last sequence
+		// set batch first seq number relative from last seq
 		// don't hold lock here, since this goroutine
-		// is the only one that modify the sequence number
-		seq := d.sequence
-		b.sequence = seq + 1
+		// is the only one that modify the seq number
+		seq := d.seq
+		b.seq = seq + 1
 
 		// write log
 		// don't hold lock here, since this goroutine
@@ -821,8 +821,8 @@ func (d *DB) write() {
 		d.mu.Lock()
 		// replay batch to memdb
 		b.replay(mb)
-		// set last sequence number
-		d.sequence = seq + uint64(b.len())
+		// set last seq number
+		d.seq = seq + uint64(b.len())
 		d.mu.Unlock()
 
 		// done
@@ -1003,7 +1003,7 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	}
 
 	ucmp := s.cmp.cmp
-	ikey := newIKey(key, p.entry.sequence, tSeek)
+	ikey := newIKey(key, p.entry.seq, tSeek)
 	memGet := func(m *memdb.DB) bool {
 		var k []byte
 		k, value, err = m.Get(ikey)
@@ -1014,7 +1014,7 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 		if ucmp.Compare(ik.ukey(), key) != 0 {
 			return false
 		}
-		valid, _, vt := ik.sequenceAndType()
+		valid, _, vt := ik.seqAndType()
 		if !valid {
 			panic("got invalid ikey")
 		}
@@ -1054,7 +1054,7 @@ func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 		return &leveldb.EmptyIterator{ErrClosed}
 	}
 
-	return newDBIter(p.entry.sequence, d.newRawIterator(ro), s.cmp.cmp)
+	return newDBIter(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
 }
 
 func (p *snapshot) Release() {

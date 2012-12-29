@@ -121,11 +121,11 @@ func (s *session) version() *version {
 	return st.version
 }
 
-func (s *session) sequence() uint64 {
+func (s *session) seq() uint64 {
 	st := &s.st
 	st.Lock()
 	defer st.Unlock()
-	return st.sequence
+	return st.seq
 }
 
 func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
@@ -143,7 +143,7 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 		}
 
 		if !r.hasLogNum {
-			r.setSequence(st.sequence)
+			r.setSeq(st.seq)
 		}
 
 		for level, ik := range st.compactPointers {
@@ -169,8 +169,8 @@ func (s *session) recordCommited(r *sessionRecord) {
 		st.logNum = r.logNum
 	}
 
-	if r.hasSequence {
-		st.sequence = r.sequence
+	if r.hasSeq {
+		st.seq = r.seq
 	}
 
 	for _, p := range r.compactPointers {

@@ -41,8 +41,8 @@ func testSingleKey(t *testing.T, key string, seq uint64, vtype vType) {
 		t.Errorf("user key does not equal, got %v, want %v", string(pk.ukey), key)
 	}
 
-	if pk.sequence != seq {
-		t.Errorf("sequence number does not equal, got %v, want %v", pk.sequence, seq)
+	if pk.seq != seq {
+		t.Errorf("seq number does not equal, got %v, want %v", pk.seq, seq)
 	}
 
 	if pk.vtype != vtype {

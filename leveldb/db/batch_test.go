@@ -20,7 +20,7 @@ import (
 
 func TestBatch(t *testing.T) {
 	b1 := new(Batch)
-	b1.sequence = 10009
+	b1.seq = 10009
 	b1.Put([]byte("key1"), []byte("value1"))
 	b1.Put([]byte("key2"), []byte("value2"))
 	b1.Delete([]byte("key1"))
@@ -31,12 +31,12 @@ func TestBatch(t *testing.T) {
 	buf := b1.encode()
 	b2 := new(Batch)
 	var n uint32
-	err := decodeBatchHeader(buf, &b2.sequence, &n)
+	err := decodeBatchHeader(buf, &b2.seq, &n)
 	if err != nil {
 		t.Error("error when decoding batch header: ", err)
 	}
-	if b1.sequence != b2.sequence {
-		t.Errorf("invalid sequence number want %d, got %d", b1.sequence, b2.sequence)
+	if b1.seq != b2.seq {
+		t.Errorf("invalid seq number want %d, got %d", b1.seq, b2.seq)
 	}
 	if len(b1.rec) != int(n) {
 		t.Errorf("invalid record length (in header) want %d, got %d", len(b1.rec), n)
@@ -45,8 +45,8 @@ func TestBatch(t *testing.T) {
 	if err != nil {
 		t.Error("error when replaying batch: ", err)
 	}
-	if uint64(n) != n2-b2.sequence {
-		t.Errorf("invalid record length (replayBatch ret) want %d, got %d", n, n2-b2.sequence)
+	if uint64(n) != n2-b2.seq {
+		t.Errorf("invalid record length (replayBatch ret) want %d, got %d", n, n2-b2.seq)
 	}
 	if len(b1.rec) != len(b2.rec) {
 		t.Errorf("invalid record length want %d, got %d", len(b1.rec), len(b2.rec))
