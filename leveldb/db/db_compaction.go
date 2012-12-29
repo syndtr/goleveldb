@@ -128,7 +128,7 @@ func (d *DB) memCompaction() {
 	})
 
 	d.transact(func() (err error) {
-		return c.commit(d.logFile.Number(), d.fSeq)
+		return c.commit(d.logf.Number(), d.fseq)
 	})
 
 	// drop frozen mem

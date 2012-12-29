@@ -31,19 +31,19 @@ func (d *DB) newMem() (err error) {
 		return
 	}
 	d.log = log.NewWriter(w)
-	if d.logWriter != nil {
-		d.logWriter.Close()
+	if d.logw != nil {
+		d.logw.Close()
 	}
-	d.logWriter = w
+	d.logw = w
 
-	d.fLogFile = d.logFile
-	d.logFile = file
+	d.flogf = d.logf
+	d.logf = file
 
 	// new mem
 	d.fmem = d.mem
 	d.mem = memdb.New(s.cmp)
 
-	d.fSeq = d.seq
+	d.fseq = d.seq
 
 	return
 }
@@ -59,8 +59,8 @@ func (d *DB) dropFrozenMem() {
 	defer d.mu.Unlock()
 	d.fmem = nil
 
-	d.fLogFile.Remove()
-	d.fLogFile = nil
+	d.flogf.Remove()
+	d.flogf = nil
 }
 
 func (d *DB) setError(err error) {

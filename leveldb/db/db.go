@@ -34,17 +34,15 @@ type DB struct {
 	wch  chan *Batch
 	eack chan struct{}
 
-	mu        sync.RWMutex
-	mem, fmem *memdb.DB
-	log       *log.Writer
-	logWriter descriptor.Writer
-	logFile   descriptor.File
-	fLogFile  descriptor.File
-	seq       uint64
-	fSeq      uint64
-	snapshots list.List
-	err       error
-	closed    bool
+	mu          sync.RWMutex
+	mem, fmem   *memdb.DB
+	log         *log.Writer
+	logw        descriptor.Writer
+	logf, flogf descriptor.File
+	seq, fseq   uint64
+	snapshots   list.List
+	err         error
+	closed      bool
 }
 
 func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
@@ -90,7 +88,7 @@ func (d *DB) recoverLog() (err error) {
 
 	s.printf("LogRecovery: started, min=%d", s.st.logNum)
 
-	var fLogFile descriptor.File
+	var flogf descriptor.File
 	ff := files(s.getFiles(descriptor.TypeLog))
 	ff.sort()
 
@@ -114,7 +112,7 @@ func (d *DB) recoverLog() (err error) {
 		}
 
 		if mb.mem != nil {
-			d.fSeq = d.seq
+			d.fseq = d.seq
 
 			if mb.mem.Len() > 0 {
 				err = cm.flush(mb.mem, 0)
@@ -123,15 +121,15 @@ func (d *DB) recoverLog() (err error) {
 				}
 			}
 
-			err = cm.commit(file.Number(), d.fSeq)
+			err = cm.commit(file.Number(), d.fseq)
 			if err != nil {
 				return
 			}
 
 			cm.reset()
 
-			fLogFile.Remove()
-			fLogFile = nil
+			flogf.Remove()
+			flogf = nil
 		}
 
 		mb.mem = memdb.New(icmp)
@@ -161,7 +159,7 @@ func (d *DB) recoverLog() (err error) {
 		}
 
 		r.Close()
-		fLogFile = file
+		flogf = file
 	}
 
 	// create new log
@@ -177,15 +175,15 @@ func (d *DB) recoverLog() (err error) {
 		}
 	}
 
-	d.fSeq = d.seq
+	d.fseq = d.seq
 
-	err = cm.commit(d.logFile.Number(), d.fSeq)
+	err = cm.commit(d.logf.Number(), d.fseq)
 	if err != nil {
 		return
 	}
 
-	if fLogFile != nil {
-		fLogFile.Remove()
+	if flogf != nil {
+		flogf.Remove()
 	}
 
 	return
@@ -277,7 +275,7 @@ func (d *DB) write() {
 		}
 
 		if b.sync {
-			err = d.logWriter.Sync()
+			err = d.logw.Sync()
 			if err != nil {
 				b.done(err)
 				continue
@@ -442,8 +440,8 @@ func (d *DB) Close() error {
 	d.s.tops.purgeCache()
 	d.s.opt.GetBlockCache().Purge(nil)
 
-	if d.logWriter != nil {
-		d.logWriter.Close()
+	if d.logw != nil {
+		d.logw.Close()
 	}
 	if d.s.manifestWriter != nil {
 		d.s.manifestWriter.Close()
