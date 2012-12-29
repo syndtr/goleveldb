@@ -14,9 +14,9 @@
 package memdb
 
 import (
-	"bytes"
 	"leveldb"
 	"math/rand"
+	"sync"
 	"unsafe"
 )
 
@@ -39,14 +39,6 @@ type mNode struct {
 	next  []*mNode
 }
 
-func (p *mNode) Next(n int) *mNode {
-	return p.next[n]
-}
-
-func (p *mNode) SetNext(n int, x *mNode) {
-	p.next[n] = x
-}
-
 type DB struct {
 	cmp       leveldb.BasicComparer
 	rnd       *rand.Rand
@@ -54,6 +46,9 @@ type DB struct {
 	maxHeight int
 	memSize   int
 	n         int
+
+	mu   sync.RWMutex
+	prev [tMaxHeight]*mNode
 }
 
 func New(cmp leveldb.BasicComparer) *DB {
@@ -67,39 +62,66 @@ func New(cmp leveldb.BasicComparer) *DB {
 }
 
 func (p *DB) Put(key []byte, value []byte) {
-	prev := make([]*mNode, tMaxHeight)
-	x := p.findGreaterOrEqual(key, prev)
-	n := p.randHeight()
-	if n > p.maxHeight {
-		for i := p.maxHeight; i < n; i++ {
-			prev[i] = p.head
+	p.mu.Lock()
+	p.findGreaterOrEqual(key, true)
+
+	h := p.randHeight()
+	if h > p.maxHeight {
+		for i := p.maxHeight; i < h; i++ {
+			p.prev[i] = p.head
 		}
-		p.maxHeight = n
+		p.maxHeight = h
 	}
 
-	x = p.newNode(key, value, n)
-	for i := 0; i < n; i++ {
-		x.SetNext(i, prev[i].Next(i))
-		prev[i].SetNext(i, x)
+	x := p.newNode(key, value, h)
+	for i, n := range p.prev[:h] {
+		x.next[i] = n.next[i]
+		n.next[i] = x
 	}
 
+	p.memSize += mNodeSize + (mPtrSize * h)
+	p.memSize += len(key) + len(value)
 	p.n++
+	p.mu.Unlock()
+}
+
+func (p *DB) Remove(key []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	x := p.findGreaterOrEqual(key, true)
+	if x == nil || x == p.head || p.cmp.Compare(x.key, key) != 0 {
+		return
+	}
+
+	h := len(x.next)
+	for i, n := range p.prev[:h] {
+		n.next[i] = n.next[i].next[i]
+	}
+
+	p.memSize -= mNodeSize + (mPtrSize * h)
+	p.memSize -= len(x.key) + len(x.value)
+	p.n--
 }
 
 func (p *DB) Contains(key []byte) bool {
-	x := p.findGreaterOrEqual(key, nil)
-	if x != nil && bytes.Equal(x.key, key) {
+	p.mu.RLock()
+	x := p.findGreaterOrEqual(key, false)
+	p.mu.RUnlock()
+	if x != nil && x != p.head && p.cmp.Compare(x.key, key) == 0 {
 		return true
 	}
 	return false
 }
 
 func (p *DB) Get(key []byte) (rkey, value []byte, err error) {
-	i := p.NewIterator()
-	if !i.Seek(key) {
-		return nil, nil, leveldb.ErrNotFound
+	p.mu.RLock()
+	node := p.findGreaterOrEqual(key, false)
+	p.mu.RUnlock()
+	if node == nil || node == p.head {
+		err = leveldb.ErrNotFound
+		return
 	}
-	return i.Key(), i.Value(), nil
+	return node.key, node.value, nil
 }
 
 func (p *DB) NewIterator() *Iterator {
@@ -107,30 +129,32 @@ func (p *DB) NewIterator() *Iterator {
 }
 
 func (p *DB) Size() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.memSize
 }
 
 func (p *DB) Len() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	return p.n
 }
 
 func (p *DB) newNode(key, value []byte, height int) *mNode {
-	p.memSize += mNodeSize + (mPtrSize * height)
-	p.memSize += len(key) + len(value)
 	return &mNode{key, value, make([]*mNode, height)}
 }
 
-func (p *DB) findGreaterOrEqual(key []byte, prev []*mNode) *mNode {
+func (p *DB) findGreaterOrEqual(key []byte, prev bool) *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.Next(n)
+		next := x.next[n]
 		if next != nil && p.cmp.Compare(next.key, key) < 0 {
 			// Keep searching in this list
 			x = next
 		} else {
-			if prev != nil {
-				prev[n] = x
+			if prev {
+				p.prev[n] = x
 			}
 			if n == 0 {
 				return next
@@ -145,7 +169,7 @@ func (p *DB) findLessThan(key []byte) *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.Next(n)
+		next := x.next[n]
 		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
 			if n == 0 {
 				return x
@@ -162,7 +186,7 @@ func (p *DB) findLast() *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.Next(n)
+		next := x.next[n]
 		if next == nil {
 			if n == 0 {
 				return x
@@ -195,17 +219,23 @@ func (i *Iterator) Valid() bool {
 }
 
 func (i *Iterator) First() bool {
-	i.node = i.p.head.Next(0)
+	i.p.mu.RLock()
+	i.node = i.p.head.next[0]
+	i.p.mu.RUnlock()
 	return i.Valid()
 }
 
 func (i *Iterator) Last() bool {
+	i.p.mu.RLock()
 	i.node = i.p.findLast()
+	i.p.mu.RUnlock()
 	return i.Valid()
 }
 
 func (i *Iterator) Seek(key []byte) (r bool) {
-	i.node = i.p.findGreaterOrEqual(key, nil)
+	i.p.mu.RLock()
+	i.node = i.p.findGreaterOrEqual(key, false)
+	i.p.mu.RUnlock()
 	return i.Valid()
 }
 
@@ -213,7 +243,9 @@ func (i *Iterator) Next() bool {
 	if i.node == nil {
 		return i.First()
 	}
-	i.node = i.node.Next(0)
+	i.p.mu.RLock()
+	i.node = i.node.next[0]
+	i.p.mu.RUnlock()
 	res := i.Valid()
 	if !res {
 		i.onLast = true
@@ -228,7 +260,9 @@ func (i *Iterator) Prev() bool {
 		}
 		return false
 	}
+	i.p.mu.RLock()
 	i.node = i.p.findLessThan(i.node.key)
+	i.p.mu.RUnlock()
 	if i.node == i.p.head {
 		i.node = nil
 	}
