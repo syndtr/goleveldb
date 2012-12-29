@@ -28,7 +28,7 @@ type snapEntry struct {
 	ref  int
 }
 
-func (d *DB) getSnapshot() (p *snapEntry) {
+func (d *DB) acquireSnapshot() (p *snapEntry) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	back := d.snapshots.Back()
@@ -68,6 +68,10 @@ type Snapshot struct {
 	d        *DB
 	entry    *snapEntry
 	released uint32
+}
+
+func (d *DB) newSnapshot() *Snapshot {
+	return &Snapshot{d: d, entry: d.acquireSnapshot()}
 }
 
 // Get get value for given key of this snapshot of database.

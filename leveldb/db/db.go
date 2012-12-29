@@ -351,10 +351,7 @@ func (d *DB) Write(b *Batch, wo *leveldb.WriteOptions) (err error) {
 
 // Get get value for given key of the latest snapshot of database.
 func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
-	p, err := d.GetSnapshot()
-	if err != nil {
-		return
-	}
+	p := d.newSnapshot()
 	defer p.Release()
 	return p.Get(key, ro)
 }
@@ -381,11 +378,17 @@ func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 // database. The result of NewIterator() is initially invalid (caller must
 // call Next or one of Seek method, ie First, Last or Seek).
 func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
-	p, err := d.GetSnapshot()
-	if err != nil {
-		return &leveldb.EmptyIterator{err}
+	p := d.newSnapshot()
+	iter := p.NewIterator(ro)
+	x, ok := iter.(*DBIter)
+	if ok {
+		runtime.SetFinalizer(x, func(x *DBIter) {
+			p.Release()
+		})
+	} else {
+		p.Release()
 	}
-	return p.NewIterator(ro)
+	return iter
 }
 
 // GetSnapshot return a handle to the current DB state.
@@ -396,7 +399,11 @@ func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 	if d.getClosed() {
 		return nil, ErrClosed
 	}
-	return &Snapshot{d: d, entry: d.getSnapshot()}, nil
+	snapshot = d.newSnapshot()
+	runtime.SetFinalizer(snapshot, func(x *Snapshot) {
+		x.Release()
+	})
+	return
 }
 
 // GetProperty used to query exported database state.
