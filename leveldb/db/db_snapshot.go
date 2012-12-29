@@ -61,13 +61,15 @@ func (d *DB) minSnapshot() uint64 {
 	return back.Value.(*snapEntry).seq
 }
 
-type snapshot struct {
+// Snapshot represent a database snapshot.
+type Snapshot struct {
 	d        *DB
 	entry    *snapEntry
 	released uint32
 }
 
-func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
+// Get get value for given key of this snapshot of database.
+func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
 	d := p.d
 	s := d.s
 
@@ -119,7 +121,10 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 	return
 }
 
-func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+// NewIterator return an iterator over the contents of this snapshot of
+// database. The result of NewIterator() is initially invalid (caller must
+// call Next or one of Seek method, ie First, Last or Seek).
+func (p *Snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	d := p.d
 	s := d.s
 
@@ -130,7 +135,9 @@ func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	return newDBIter(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
 }
 
-func (p *snapshot) Release() {
+// Release release the snapshot. The caller must not use the snapshot
+// after this call.
+func (p *Snapshot) Release() {
 	if atomic.CompareAndSwapUint32(&p.released, 0, 1) {
 		p.d.releaseSnapshot(p.entry)
 	}

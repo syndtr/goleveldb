@@ -27,6 +27,31 @@ import (
 
 var ErrClosed = leveldb.ErrInvalid("database closed")
 
+// Reader implemented by both *DB and *Snapshot.
+type Reader interface {
+	Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error)
+	NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator
+}
+
+// Range represent key range.
+type Range struct {
+	// Start key, include in the range
+	Start []byte
+
+	// Limit, not include in the range
+	Limit []byte
+}
+
+type Sizes []uint64
+
+func (p Sizes) Sum() (n uint64) {
+	for _, s := range p {
+		n += s
+	}
+	return
+}
+
+// DB represent a database session.
 type DB struct {
 	s    *session
 	cch  chan cSignal
@@ -45,6 +70,7 @@ type DB struct {
 	closed      bool
 }
 
+// Open open or create database from given desc.
 func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 	s := newSession(desc, opt)
 
@@ -294,27 +320,26 @@ func (d *DB) write() {
 	}
 }
 
+// Put set the database entry for "key" to "value".
 func (d *DB) Put(key, value []byte, wo *leveldb.WriteOptions) error {
 	b := new(Batch)
 	b.Put(key, value)
 	return d.Write(b, wo)
 }
 
+// Delete remove the database entry (if any) for "key". It is not an error
+// if "key" did not exist in the database.
 func (d *DB) Delete(key []byte, wo *leveldb.WriteOptions) error {
 	b := new(Batch)
 	b.Delete(key)
 	return d.Write(b, wo)
 }
 
-func (d *DB) Write(w leveldb.Batch, wo *leveldb.WriteOptions) (err error) {
+// Write apply the specified batch to the database.
+func (d *DB) Write(b *Batch, wo *leveldb.WriteOptions) (err error) {
 	err = d.ok()
 	if err != nil {
 		return
-	}
-
-	b, ok := w.(*Batch)
-	if !ok {
-		return leveldb.ErrInvalid("not a *Batch")
 	}
 
 	rch := b.init(wo.HasFlag(leveldb.WFSync))
@@ -324,6 +349,7 @@ func (d *DB) Write(w leveldb.Batch, wo *leveldb.WriteOptions) (err error) {
 	return
 }
 
+// Get get value for given key of the latest snapshot of database.
 func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
 	p, err := d.GetSnapshot()
 	if err != nil {
@@ -333,6 +359,8 @@ func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) 
 	return p.Get(key, ro)
 }
 
+// newRawIterator return merged interators of current version, current frozen memdb
+// and current memdb.
 func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	s := d.s
 
@@ -349,6 +377,9 @@ func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	return leveldb.NewMergedIterator(ii, s.cmp)
 }
 
+// NewIterator return an iterator over the contents of the latest snapshot of
+// database. The result of NewIterator() is initially invalid (caller must
+// call Next or one of Seek method, ie First, Last or Seek).
 func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	p, err := d.GetSnapshot()
 	if err != nil {
@@ -357,13 +388,27 @@ func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	return p.NewIterator(ro)
 }
 
-func (d *DB) GetSnapshot() (s leveldb.Snapshot, err error) {
+// GetSnapshot return a handle to the current DB state.
+// Iterators created with this handle will all observe a stable snapshot
+// of the current DB state. The caller must call *Snapshot.Release() when the
+// snapshot is no longer needed.
+func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 	if d.getClosed() {
 		return nil, ErrClosed
 	}
-	return &snapshot{d: d, entry: d.getSnapshot()}, nil
+	return &Snapshot{d: d, entry: d.getSnapshot()}, nil
 }
 
+// GetProperty used to query exported database state.
+//
+// Valid property names include:
+//
+//  "leveldb.num-files-at-level<N>" - return the number of files at level <N>,
+//     where <N> is an ASCII representation of a level number (e.g. "0").
+//  "leveldb.stats" - returns a multi-line string that describes statistics
+//     about the internal operation of the DB.
+//  "leveldb.sstables" - returns a multi-line string that describes all
+//     of the sstables that make up the db contents.
 func (d *DB) GetProperty(property string) (value string, err error) {
 	if d.getClosed() {
 		return "", ErrClosed
@@ -371,13 +416,20 @@ func (d *DB) GetProperty(property string) (value string, err error) {
 	return
 }
 
-func (d *DB) GetApproximateSizes(rr []leveldb.Range) (sizes leveldb.Sizes, err error) {
+// GetApproximateSizes calculate approximate sizes of given ranges.
+//
+// Note that the returned sizes measure file system space usage, so
+// if the user data compresses by a factor of ten, the returned
+// sizes will be one-tenth the size of the corresponding user data size.
+//
+// The results may not include the sizes of recently written data.
+func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
 	if d.getClosed() {
 		return nil, ErrClosed
 	}
 
 	v := d.s.version()
-	sizes = make(leveldb.Sizes, 0, len(rr))
+	sizes = make(Sizes, 0, len(rr))
 	for _, r := range rr {
 		min := newIKey(r.Start, kMaxSeq, tSeek)
 		max := newIKey(r.Limit, kMaxSeq, tSeek)
@@ -399,17 +451,26 @@ func (d *DB) GetApproximateSizes(rr []leveldb.Range) (sizes leveldb.Sizes, err e
 	return
 }
 
-func (d *DB) CompactRange(r *leveldb.Range) error {
+// CompactRange compact the underlying storage for the key range.
+//
+// In particular, deleted and overwritten versions are discarded,
+// and the data is rearranged to reduce the cost of operations
+// needed to access the data.  This operation should typically only
+// be invoked by users who understand the underlying implementation.
+//
+// Range.Start==nil is treated as a key before all keys in the database.
+// Range.Limit==nil is treated as a key after all keys in the database.
+// Therefore calling with Start==nil and Limit==nil will compact entire
+// database.
+func (d *DB) CompactRange(r Range) error {
 	err := d.ok()
 	if err != nil {
 		return err
 	}
 
 	req := &cReq{level: -1}
-	if r != nil {
-		req.min = r.Start
-		req.max = r.Limit
-	}
+	req.min = r.Start
+	req.max = r.Limit
 
 	d.creq <- req
 	d.cch <- cWait
@@ -417,6 +478,8 @@ func (d *DB) CompactRange(r *leveldb.Range) error {
 	return d.ok()
 }
 
+// Close closes the database. Snapshot and iterator are invalid
+// after this call
 func (d *DB) Close() error {
 	d.mu.Lock()
 	if d.closed {

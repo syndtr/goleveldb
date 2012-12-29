@@ -122,7 +122,7 @@ func (h *dbHarness) delete(key string) {
 	}
 }
 
-func (h *dbHarness) getr(db leveldb.Reader, key string, expectFound bool) (found bool, v []byte) {
+func (h *dbHarness) getr(db Reader, key string, expectFound bool) (found bool, v []byte) {
 	t := h.t
 	v, err := db.Get([]byte(key), h.ro)
 	switch err {
@@ -145,7 +145,7 @@ func (h *dbHarness) get(key string, expectFound bool) (found bool, v []byte) {
 	return h.getr(h.db, key, expectFound)
 }
 
-func (h *dbHarness) getValr(db leveldb.Reader, key, value string) {
+func (h *dbHarness) getValr(db Reader, key, value string) {
 	t := h.t
 	found, r := h.getr(db, key, true)
 	if !found {
@@ -275,7 +275,7 @@ func (h *dbHarness) compactRange(min, max string) {
 	t := h.t
 	db := h.db
 
-	r := new(leveldb.Range)
+	var r Range
 	if min != "" {
 		r.Start = []byte(min)
 	}
@@ -292,8 +292,8 @@ func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	t := h.t
 	db := h.db
 
-	s, err := db.GetApproximateSizes([]leveldb.Range{
-		leveldb.Range{[]byte(start), []byte(limit)},
+	s, err := db.GetApproximateSizes([]Range{
+		Range{[]byte(start), []byte(limit)},
 	})
 	if err != nil {
 		t.Error("GetApproximateSizes: got error: ", err)
@@ -304,7 +304,7 @@ func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	}
 }
 
-func (h *dbHarness) getSnapshot() (s leveldb.Snapshot) {
+func (h *dbHarness) getSnapshot() (s *Snapshot) {
 	s, err := h.db.GetSnapshot()
 	if err != nil {
 		h.t.Fatal("GetSnapshot: got error: ", err)
