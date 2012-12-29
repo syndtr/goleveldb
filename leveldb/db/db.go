@@ -153,6 +153,7 @@ func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
 
 func (d *DB) recoverLog() (err error) {
 	s := d.s
+	icmp := s.cmp
 
 	var mem *memdb.DB
 	mb := &memBatch{&mem}
@@ -204,7 +205,7 @@ func (d *DB) recoverLog() (err error) {
 			fLogFile = nil
 		}
 
-		mem = memdb.New(s.icmp)
+		mem = memdb.New(icmp)
 
 		lr := log.NewReader(r, true)
 		for lr.Next() {
@@ -221,7 +222,7 @@ func (d *DB) recoverLog() (err error) {
 				}
 
 				// create new memdb
-				mem = memdb.New(s.icmp)
+				mem = memdb.New(icmp)
 			}
 		}
 
@@ -284,7 +285,7 @@ func (d *DB) newMem() (err error) {
 
 	// new mem
 	d.fmem = d.mem
-	d.mem = memdb.New(s.icmp)
+	d.mem = memdb.New(s.cmp)
 
 	d.fSequence = d.sequence
 
@@ -437,7 +438,7 @@ func (d *DB) memCompaction() {
 
 func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	s := d.s
-	ucmp := s.cmp
+	ucmp := s.cmp.cmp
 
 	s.printf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
 		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
@@ -692,7 +693,7 @@ func (d *DB) compaction() {
 				v := s.version()
 				maxLevel := 1
 				for i, tt := range v.tables[1:] {
-					if tt.isOverlaps(creq.min, creq.max, true, s.icmp) {
+					if tt.isOverlaps(creq.min, creq.max, true, s.cmp) {
 						maxLevel = i + 1
 					}
 				}
@@ -881,7 +882,7 @@ func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	ii = append(ii, ti...)
 	d.mu.RUnlock()
 
-	return leveldb.NewMergedIterator(ii, s.icmp)
+	return leveldb.NewMergedIterator(ii, s.cmp)
 }
 
 func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
@@ -1001,6 +1002,7 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 		return nil, ErrClosed
 	}
 
+	ucmp := s.cmp.cmp
 	ikey := newIKey(key, p.entry.sequence, tSeek)
 	memGet := func(m *memdb.DB) bool {
 		var k []byte
@@ -1009,7 +1011,7 @@ func (p *snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 			return false
 		}
 		ik := iKey(k)
-		if s.cmp.Compare(ik.ukey(), key) != 0 {
+		if ucmp.Compare(ik.ukey(), key) != 0 {
 			return false
 		}
 		valid, _, vt := ik.sequenceAndType()
@@ -1052,7 +1054,7 @@ func (p *snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 		return &leveldb.EmptyIterator{ErrClosed}
 	}
 
-	return newDBIter(p.entry.sequence, d.newRawIterator(ro), s.cmp)
+	return newDBIter(p.entry.sequence, d.newRawIterator(ro), s.cmp.cmp)
 }
 
 func (p *snapshot) Release() {

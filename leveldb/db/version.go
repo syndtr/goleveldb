@@ -48,6 +48,9 @@ type version struct {
 
 func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState bool, err error) {
 	s := v.s
+	icmp := s.cmp
+	ucmp := icmp.cmp
+
 	ukey := key.ukey()
 
 	var fLevel int
@@ -67,8 +70,8 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 			// overlap user_key and process them in order from newest to
 			var tmp tFiles
 			for _, t := range ts {
-				if s.cmp.Compare(ukey, t.smallest.ukey()) >= 0 &&
-					s.cmp.Compare(ukey, t.largest.ukey()) <= 0 {
+				if ucmp.Compare(ukey, t.smallest.ukey()) >= 0 &&
+					ucmp.Compare(ukey, t.largest.ukey()) <= 0 {
 					tmp = append(tmp, t)
 				}
 			}
@@ -80,8 +83,8 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 			tmp.sort(tFileSorterNewest(nil))
 			ts = tmp
 		} else {
-			i := ts.search(key, s.icmp)
-			if i >= len(ts) || s.cmp.Compare(ukey, ts[i].smallest.ukey()) < 0 {
+			i := ts.search(key, icmp)
+			if i >= len(ts) || ucmp.Compare(ukey, ts[i].smallest.ukey()) < 0 {
 				continue
 			}
 
@@ -121,7 +124,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 				err = leveldb.ErrCorrupt("internal key corrupted")
 				return
 			}
-			if s.cmp.Compare(ukey, pk.ukey) == 0 {
+			if ucmp.Compare(ukey, pk.ukey) == 0 {
 				switch pk.vtype {
 				case tVal:
 					value = rval
@@ -141,6 +144,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 
 func (v *version) getIterators(ro *leveldb.ReadOptions) (iters []leveldb.Iterator) {
 	s := v.s
+	icmp := s.cmp
 
 	// Merge all level zero files together since they may overlap
 	for _, t := range v.tables[0] {
@@ -153,7 +157,7 @@ func (v *version) getIterators(ro *leveldb.ReadOptions) (iters []leveldb.Iterato
 			continue
 		}
 
-		iter := leveldb.NewIndexedIterator(tt.newIndexIterator(s.tops, s.icmp, ro))
+		iter := leveldb.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
 		iters = append(iters, iter)
 	}
 
@@ -184,7 +188,7 @@ func (v *version) tLen(level int) int {
 }
 
 func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
-	icmp := v.s.icmp
+	icmp := v.s.cmp
 	tops := v.s.tops
 
 	for level, tt := range v.tables {
@@ -217,7 +221,7 @@ func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
 }
 
 func (v *version) pickLevel(min, max []byte) (level int) {
-	icmp := v.s.icmp
+	icmp := v.s.cmp
 	ucmp := icmp.cmp
 
 	if !v.tables[0].isOverlaps(min, max, false, icmp) {
@@ -319,7 +323,7 @@ func (p *versionStaging) finish() *version {
 
 	// build new version
 	nv := &version{s: s}
-	sorter := &tFileSorterKey{cmp: s.icmp}
+	sorter := &tFileSorterKey{cmp: s.cmp}
 	for level, tm := range p.tables {
 		bt := btt[level]
 

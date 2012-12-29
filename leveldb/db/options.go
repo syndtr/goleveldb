@@ -16,44 +16,45 @@ package db
 import "leveldb"
 
 type iOptions struct {
-	s *session
+	s   *session
+	opt leveldb.OptionsInterface
 }
 
 func (o *iOptions) GetComparer() leveldb.Comparer {
-	return o.s.icmp
+	return o.s.cmp
 }
 
 func (o *iOptions) HasFlag(flag leveldb.OptionsFlag) bool {
-	return o.s.opt.HasFlag(flag)
+	return o.opt.HasFlag(flag)
 }
 
 func (o *iOptions) GetWriteBuffer() int {
-	return o.s.opt.GetWriteBuffer()
+	return o.opt.GetWriteBuffer()
 }
 
 func (o *iOptions) GetMaxOpenFiles() int {
-	return o.s.opt.GetMaxOpenFiles()
+	return o.opt.GetMaxOpenFiles()
 }
 
 func (o *iOptions) GetBlockCache() leveldb.Cache {
-	return o.s.opt.GetBlockCache()
+	return o.opt.GetBlockCache()
 }
 
 func (o *iOptions) GetBlockSize() int {
-	return o.s.opt.GetBlockSize()
+	return o.opt.GetBlockSize()
 }
 
 func (o *iOptions) GetBlockRestartInterval() int {
-	return o.s.opt.GetBlockRestartInterval()
+	return o.opt.GetBlockRestartInterval()
 }
 
 func (o *iOptions) GetCompressionType() leveldb.Compression {
-	return o.s.opt.GetCompressionType()
+	return o.opt.GetCompressionType()
 }
 
 func (o *iOptions) GetFilter() leveldb.Filter {
-	if o.s.ifilter == nil {
+	if o.s.filter == nil {
 		return nil
 	}
-	return o.s.ifilter
+	return o.s.filter
 }

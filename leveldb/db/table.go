@@ -303,7 +303,7 @@ func (t *tOps) create() (w *tWriter, err error) {
 		t:    t,
 		file: file,
 		w:    fw,
-		tw:   table.NewWriter(fw, t.s.iopt),
+		tw:   table.NewWriter(fw, t.s.opt),
 	}, nil
 }
 
@@ -395,7 +395,7 @@ func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
 			return
 		}
 		var p *table.Reader
-		p, err = table.NewReader(r, f.size, t.s.iopt, f.file.Number())
+		p, err = table.NewReader(r, f.size, t.s.opt, f.file.Number())
 		if err != nil {
 			return
 		}
