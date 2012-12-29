@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 )
 
+var ErrSnapshotReleased = leveldb.ErrInvalid("snapshot released")
+
 type snapEntry struct {
 	elem *list.Element
 	seq  uint64
@@ -70,6 +72,10 @@ type Snapshot struct {
 
 // Get get value for given key of this snapshot of database.
 func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
+	if atomic.LoadUint32(&p.released) != 0 {
+		return nil, ErrSnapshotReleased
+	}
+
 	d := p.d
 	s := d.s
 
@@ -125,6 +131,10 @@ func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 // database. The result of NewIterator() is initially invalid (caller must
 // call Next or one of Seek method, ie First, Last or Seek).
 func (p *Snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+	if atomic.LoadUint32(&p.released) != 0 {
+		return &leveldb.EmptyIterator{ErrSnapshotReleased}
+	}
+
 	d := p.d
 	s := d.s
 
@@ -140,5 +150,7 @@ func (p *Snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 func (p *Snapshot) Release() {
 	if atomic.CompareAndSwapUint32(&p.released, 0, 1) {
 		p.d.releaseSnapshot(p.entry)
+		p.d = nil
+		p.entry = nil
 	}
 }
