@@ -254,9 +254,30 @@ func (d *DB) flush() (err error) {
 }
 
 func (d *DB) write() {
+	lch := make(chan *Batch)
+	lack := make(chan error)
+	go func() {
+		for b := range lch {
+			if b == nil {
+				close(lch)
+				close(lack)
+				return
+			}
+
+			// write log
+			err := d.log.Append(b.encode())
+			if err == nil && b.sync {
+				err = d.logw.Sync()
+			}
+
+			lack <- err
+		}
+	}()
+
 	for {
 		b := <-d.wch
 		if b == nil && d.getClosed() {
+			lch <- nil
 			d.eack <- struct{}{}
 			close(d.wch)
 			return
@@ -286,32 +307,25 @@ func (d *DB) write() {
 		}
 
 		// set batch first seq number relative from last seq
-		// don't hold lock here, since this goroutine
-		// is the only one that modify the seq number
 		seq := d.seq
 		b.seq = seq + 1
 
 		// write log
-		// don't hold lock here, since this goroutine
-		// is the only one that modify and write to log
-		err = d.log.Append(b.encode())
+		lch <- b
+
+		// replay batch to memdb
+		b.memReplay(d.mem)
+
+		// wait for log
+		err = <-lack
 		if err != nil {
+			b.revertMemReplay(d.mem)
 			b.done(err)
 			continue
 		}
 
-		if b.sync {
-			err = d.logw.Sync()
-			if err != nil {
-				b.done(err)
-				continue
-			}
-		}
-
-		d.mu.Lock()
-		// replay batch to memdb
-		b.memReplay(d.mem)
 		// set last seq number
+		d.mu.Lock()
 		d.seq = seq + uint64(b.len())
 		d.mu.Unlock()
 

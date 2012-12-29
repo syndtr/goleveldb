@@ -203,6 +203,13 @@ func (b *Batch) memReplay(to *memdb.DB) {
 	}
 }
 
+func (b *Batch) revertMemReplay(to *memdb.DB) {
+	for i, rec := range b.rec {
+		ikey := newIKey(rec.key, b.seq+uint64(i), rec.t)
+		to.Remove(ikey)
+	}
+}
+
 func decodeBatchHeader(b []byte, seq *uint64, n *uint32) (err error) {
 	if len(b) < 12 {
 		return errBatchTooShort
