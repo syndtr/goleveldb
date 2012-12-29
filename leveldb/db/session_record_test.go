@@ -60,7 +60,7 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 		v.addCompactPointer(int(i), newIKey([]byte("x"), big+900+1, tVal))
 	}
 
-	v.setComparator("foo")
+	v.setComparer("foo")
 	v.setLogNum(big + 100)
 	v.setNextNum(big + 200)
 	v.setSequence(big + 1000)

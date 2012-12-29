@@ -48,7 +48,7 @@ func (p *mNode) SetNext(n int, x *mNode) {
 }
 
 type DB struct {
-	cmp       leveldb.BasicComparator
+	cmp       leveldb.BasicComparer
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int
@@ -56,7 +56,7 @@ type DB struct {
 	n         int
 }
 
-func New(cmp leveldb.BasicComparator) *DB {
+func New(cmp leveldb.BasicComparer) *DB {
 	p := &DB{
 		cmp:       cmp,
 		rnd:       rand.New(rand.NewSource(0xdeadbeef)),

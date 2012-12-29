@@ -23,7 +23,7 @@ type Filter interface {
 	Name() string
 
 	// keys[0,n-1] contains a list of keys (potentially with duplicates)
-	// that are ordered according to the user supplied comparator.
+	// that are ordered according to the user supplied comparer.
 	// Return a filter that summarizes keys[0,n-1].
 	CreateFilter(keys [][]byte, buf io.Writer)
 

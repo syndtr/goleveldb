@@ -15,15 +15,15 @@ package db
 
 import "leveldb"
 
-type iKeyComparator struct {
-	cmp leveldb.Comparator
+type iComparer struct {
+	cmp leveldb.Comparer
 }
 
-func (p *iKeyComparator) Name() string {
-	return "leveldb.InternalKeyComparator"
+func (p *iComparer) Name() string {
+	return p.cmp.Name()
 }
 
-func (p *iKeyComparator) Compare(a, b []byte) int {
+func (p *iComparer) Compare(a, b []byte) int {
 	ia, ib := iKey(a), iKey(b)
 	r := p.cmp.Compare(ia.ukey(), ib.ukey())
 	if r == 0 {
@@ -37,7 +37,7 @@ func (p *iKeyComparator) Compare(a, b []byte) int {
 	return r
 }
 
-func (p *iKeyComparator) FindShortestSeparator(a, b []byte) []byte {
+func (p *iComparer) FindShortestSeparator(a, b []byte) []byte {
 	ua, ub := iKey(a).ukey(), iKey(b).ukey()
 	r := p.cmp.FindShortestSeparator(ua, ub)
 	if len(r) < len(ua) && p.cmp.Compare(ua, r) < 0 {
@@ -49,7 +49,7 @@ func (p *iKeyComparator) FindShortestSeparator(a, b []byte) []byte {
 	return append(r, a[len(r):]...)
 }
 
-func (p *iKeyComparator) FindShortSuccessor(b []byte) []byte {
+func (p *iComparer) FindShortSuccessor(b []byte) []byte {
 	ub := iKey(b).ukey()
 	r := p.cmp.FindShortSuccessor(ub)
 	if len(r) < len(ub) && p.cmp.Compare(ub, r) < 0 {

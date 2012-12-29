@@ -54,14 +54,14 @@ func NewReader(buf []byte) (b *Reader, err error) {
 	return
 }
 
-func (b *Reader) NewIterator(cmp leveldb.Comparator) *Iterator {
+func (b *Reader) NewIterator(cmp leveldb.Comparer) *Iterator {
 	if b.restartStart == 0 {
 		return new(Iterator)
 	}
 	return &Iterator{b: b, cmp: cmp, rd: bytes.NewReader(b.rbuf)}
 }
 
-func (b *Reader) InitIterator(iter *Iterator, cmp leveldb.Comparator) {
+func (b *Reader) InitIterator(iter *Iterator, cmp leveldb.Comparer) {
 	if b.restartStart == 0 {
 		iter.b = nil
 	} else {
@@ -209,7 +209,7 @@ func (r *restartRange) value() []byte {
 
 type Iterator struct {
 	b   *Reader
-	cmp leveldb.Comparator
+	cmp leveldb.Comparer
 
 	err error
 	ri  int           // restart index

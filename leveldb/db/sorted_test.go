@@ -68,7 +68,7 @@ func (p *stConstructor_Block) finish() (size int, err error) {
 }
 
 func (p *stConstructor_Block) newIterator() leveldb.Iterator {
-	return p.br.NewIterator(leveldb.DefaultComparator)
+	return p.br.NewIterator(leveldb.DefaultComparer)
 }
 
 func (p *stConstructor_Block) customTest(h *stHarness) {}
@@ -159,7 +159,7 @@ type stConstructor_MemDB struct {
 func (p *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
-	p.mem = memdb.New(leveldb.DefaultComparator)
+	p.mem = memdb.New(leveldb.DefaultComparer)
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (p *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
 	for i := range p.mem {
-		p.mem[i] = memdb.New(leveldb.DefaultComparator)
+		p.mem[i] = memdb.New(leveldb.DefaultComparer)
 	}
 	return nil
 }
@@ -211,7 +211,7 @@ func (p *stConstructor_MergedMemDB) newIterator() leveldb.Iterator {
 	for _, m := range p.mem {
 		iters = append(iters, m.NewIterator())
 	}
-	return leveldb.NewMergedIterator(iters, leveldb.DefaultComparator)
+	return leveldb.NewMergedIterator(iters, leveldb.DefaultComparer)
 }
 
 func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}

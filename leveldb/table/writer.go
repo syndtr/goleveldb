@@ -23,7 +23,7 @@ import (
 type Writer struct {
 	w   descriptor.Writer
 	o   leveldb.OptionsInterface
-	cmp leveldb.Comparator
+	cmp leveldb.Comparer
 
 	dataBlock   *block.Writer
 	indexBlock  *block.Writer
@@ -38,7 +38,7 @@ type Writer struct {
 }
 
 func NewWriter(w descriptor.Writer, o leveldb.OptionsInterface) *Writer {
-	t := &Writer{w: w, o: o, cmp: o.GetComparator()}
+	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
 	// Creating blocks
 	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
 	t.indexBlock = block.NewWriter(1)

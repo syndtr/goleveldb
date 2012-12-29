@@ -23,7 +23,7 @@ import (
 // These numbers are written to disk and should not be changed.
 const (
 	_ uint64 = iota
-	tagComparator
+	tagComparer
 	tagLogNum
 	tagNextNum
 	tagSequence
@@ -72,8 +72,8 @@ type dtRecord struct {
 }
 
 type sessionRecord struct {
-	hasComparator bool
-	comparator    string
+	hasComparer bool
+	comparer    string
 
 	hasLogNum bool
 	logNum    uint64
@@ -89,9 +89,9 @@ type sessionRecord struct {
 	deletedTables   []dtRecord
 }
 
-func (p *sessionRecord) setComparator(name string) {
-	p.hasComparator = true
-	p.comparator = name
+func (p *sessionRecord) setComparer(name string) {
+	p.hasComparer = true
+	p.comparer = name
 }
 
 func (p *sessionRecord) setLogNum(num uint64) {
@@ -146,12 +146,12 @@ func (p *sessionRecord) encodeTo(w io.Writer) (err error) {
 		return
 	}
 
-	if p.hasComparator {
-		_, err = w.Write(tagBytesCache[tagComparator])
+	if p.hasComparer {
+		_, err = w.Write(tagBytesCache[tagComparer])
 		if err != nil {
 			return
 		}
-		err = putBytes([]byte(p.comparator))
+		err = putBytes([]byte(p.comparer))
 		if err != nil {
 			return
 		}
@@ -268,12 +268,12 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 		}
 
 		switch tag {
-		case tagComparator:
+		case tagComparer:
 			var cmp []byte
 			cmp, err = readBytes(r)
 			if err == nil {
-				p.comparator = string(cmp)
-				p.hasComparator = true
+				p.comparer = string(cmp)
+				p.hasComparer = true
 			}
 		case tagLogNum:
 			p.logNum, err = binary.ReadUvarint(r)

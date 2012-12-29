@@ -152,7 +152,7 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 	}
 
 	if snapshot {
-		r.setComparator(s.cmp.Name())
+		r.setComparer(s.cmp.Name())
 	}
 }
 

@@ -204,7 +204,7 @@ func (i *IndexedIterator) setData() bool {
 }
 
 type MergedIterator struct {
-	cmp   Comparator
+	cmp   Comparer
 	iters []Iterator
 
 	iter     Iterator
@@ -213,7 +213,7 @@ type MergedIterator struct {
 	err      error
 }
 
-func NewMergedIterator(iters []Iterator, cmp Comparator) *MergedIterator {
+func NewMergedIterator(iters []Iterator, cmp Comparer) *MergedIterator {
 	return &MergedIterator{iters: iters, cmp: cmp}
 }
 

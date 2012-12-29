@@ -44,7 +44,7 @@ const (
 )
 
 type OptionsInterface interface {
-	GetComparator() Comparator
+	GetComparer() Comparer
 	HasFlag(flag OptionsFlag) bool
 	GetWriteBuffer() int
 	GetMaxOpenFiles() int
@@ -59,13 +59,13 @@ type OptionsInterface interface {
 type Options struct {
 	mu sync.Mutex
 
-	// Comparator used to define the order of keys in the table.
-	// Default: a comparator that uses lexicographic byte-wise ordering
+	// Comparer used to define the order of keys in the table.
+	// Default: a comparer that uses lexicographic byte-wise ordering
 	//
-	// REQUIRES: The client must ensure that the comparator supplied
+	// REQUIRES: The client must ensure that the comparer supplied
 	// here has the same name and orders keys *exactly* the same as the
-	// comparator provided to previous open calls on the same DB.
-	Comparator Comparator
+	// comparer provided to previous open calls on the same DB.
+	Comparer Comparer
 
 	// Specify the database flag.
 	Flag OptionsFlag
@@ -136,11 +136,11 @@ type Options struct {
 	Filter Filter
 }
 
-func (o *Options) GetComparator() Comparator {
-	if o == nil || o.Comparator == nil {
-		return DefaultComparator
+func (o *Options) GetComparer() Comparer {
+	if o == nil || o.Comparer == nil {
+		return DefaultComparer
 	}
-	return o.Comparator
+	return o.Comparer
 }
 
 func (o *Options) HasFlag(flag OptionsFlag) bool {

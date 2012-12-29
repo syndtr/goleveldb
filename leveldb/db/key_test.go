@@ -19,7 +19,7 @@ import (
 	"testing"
 )
 
-var icmp = &iKeyComparator{leveldb.BytewiseComparator{}}
+var icmp = &iComparer{leveldb.BytesComparer{}}
 
 func ikey(key string, seq uint64, t vType) iKey {
 	return newIKey([]byte(key), uint64(seq), t)

@@ -19,7 +19,7 @@ type iOptions struct {
 	s *session
 }
 
-func (o *iOptions) GetComparator() leveldb.Comparator {
+func (o *iOptions) GetComparer() leveldb.Comparer {
 	return o.s.icmp
 }
 

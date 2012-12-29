@@ -26,8 +26,8 @@ type session struct {
 	desc    descriptor.Descriptor
 	opt     *leveldb.Options
 	iopt    *iOptions
-	cmp     leveldb.Comparator
-	icmp    *iKeyComparator
+	cmp     leveldb.Comparer
+	icmp    *iComparer
 	filter  leveldb.Filter
 	ifilter *iFilter
 	tops    *tOps
@@ -50,11 +50,11 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 	s := &session{
 		desc:   desc,
 		opt:    opt,
-		cmp:    opt.GetComparator(),
+		cmp:    opt.GetComparer(),
 		filter: opt.GetFilter(),
 	}
 	s.iopt = &iOptions{s}
-	s.icmp = &iKeyComparator{s.cmp}
+	s.icmp = &iComparer{s.cmp}
 	if s.filter != nil {
 		s.ifilter = &iFilter{s.filter}
 	}
@@ -99,10 +99,10 @@ func (s *session) recover() (err error) {
 			continue
 		}
 
-		if rec.hasComparator && rec.comparator != cmpName {
-			return leveldb.ErrInvalid("invalid comparator, " +
+		if rec.hasComparer && rec.comparer != cmpName {
+			return leveldb.ErrInvalid("invalid comparer, " +
 				"want '" + cmpName + "', " +
-				"got '" + rec.comparator + "'")
+				"got '" + rec.comparer + "'")
 		}
 
 		// save compact pointers

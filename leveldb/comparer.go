@@ -15,7 +15,7 @@ package leveldb
 
 import "bytes"
 
-type BasicComparator interface {
+type BasicComparer interface {
 	// Three-way comparison.
 	//
 	// Returns value:
@@ -25,15 +25,15 @@ type BasicComparator interface {
 	Compare(a, b []byte) int
 }
 
-type Comparator interface {
-	BasicComparator
+type Comparer interface {
+	BasicComparer
 
-	// The name of the comparator.  Used to check for comparator
-	// mismatches (i.e., a DB created with one comparator is
-	// accessed using a different comparator.
+	// The name of the comparer.  Used to check for comparer
+	// mismatches (i.e., a DB created with one comparer is
+	// accessed using a different comparer.
 	//
 	// The client of this package should switch to a new name whenever
-	// the comparator implementation changes in a way that will cause
+	// the comparer implementation changes in a way that will cause
 	// the relative ordering of any two keys to change.
 	//
 	// Names starting with "leveldb." are reserved and should not be used
@@ -44,33 +44,33 @@ type Comparator interface {
 	// for internal data structures like index blocks.
 
 	// If 'a' < 'b', changes 'a' to a short string in [a,b).
-	// Simple comparator implementations may return with 'a' unchanged,
+	// Simple comparer implementations may return with 'a' unchanged,
 	// i.e., an implementation of this method that does nothing is correct.
 	// NOTE: Don't modify content of either 'a' or 'b', if modification
 	// is necessary copy it first. It is ok to return slice of it.
 	FindShortestSeparator(a, b []byte) []byte
 
 	// Changes 'b' to a short string >= 'b'.
-	// Simple comparator implementations may return with 'b' unchanged,
+	// Simple comparer implementations may return with 'b' unchanged,
 	// i.e., an implementation of this method that does nothing is correct.
 	// NOTE: Don't modify content of 'b', if modification is necessary
 	// copy it first. It is ok to return slice of it.
 	FindShortSuccessor(b []byte) []byte
 }
 
-var DefaultComparator = BytewiseComparator{}
+var DefaultComparer = BytesComparer{}
 
-type BytewiseComparator struct{}
+type BytesComparer struct{}
 
-func (BytewiseComparator) Compare(a, b []byte) int {
+func (BytesComparer) Compare(a, b []byte) int {
 	return bytes.Compare(a, b)
 }
 
-func (BytewiseComparator) Name() string {
+func (BytesComparer) Name() string {
 	return "leveldb.BytewiseComparator"
 }
 
-func (BytewiseComparator) FindShortestSeparator(a, b []byte) []byte {
+func (BytesComparer) FindShortestSeparator(a, b []byte) []byte {
 	i, n := 0, len(a)
 	if n > len(b) {
 		n = len(b)
@@ -90,7 +90,7 @@ func (BytewiseComparator) FindShortestSeparator(a, b []byte) []byte {
 	return a
 }
 
-func (BytewiseComparator) FindShortSuccessor(b []byte) []byte {
+func (BytesComparer) FindShortSuccessor(b []byte) []byte {
 	var res []byte
 	for _, c := range b {
 		if c != 0xff {

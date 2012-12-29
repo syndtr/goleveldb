@@ -32,12 +32,12 @@ type tFile struct {
 }
 
 // test if key is after t
-func (t *tFile) isAfter(key []byte, cmp leveldb.BasicComparator) bool {
+func (t *tFile) isAfter(key []byte, cmp leveldb.BasicComparer) bool {
 	return key != nil && cmp.Compare(key, t.largest.ukey()) > 0
 }
 
 // test if key is before t
-func (t *tFile) isBefore(key []byte, cmp leveldb.BasicComparator) bool {
+func (t *tFile) isBefore(key []byte, cmp leveldb.BasicComparer) bool {
 	return key != nil && cmp.Compare(key, t.smallest.ukey()) < 0
 }
 
@@ -84,13 +84,13 @@ func (p tFiles) sort(s tFileSorter) {
 	sort.Sort(s.getSorter(p))
 }
 
-func (p tFiles) search(key iKey, cmp *iKeyComparator) int {
+func (p tFiles) search(key iKey, cmp *iComparer) int {
 	return sort.Search(len(p), func(i int) bool {
 		return cmp.Compare(p[i].largest, key) >= 0
 	})
 }
 
-func (p tFiles) isOverlaps(min, max []byte, disjSorted bool, cmp *iKeyComparator) bool {
+func (p tFiles) isOverlaps(min, max []byte, disjSorted bool, cmp *iComparer) bool {
 	ucmp := cmp.cmp
 
 	if !disjSorted {
@@ -116,7 +116,7 @@ func (p tFiles) isOverlaps(min, max []byte, disjSorted bool, cmp *iKeyComparator
 	return !p[idx].isBefore(max, ucmp)
 }
 
-func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp leveldb.BasicComparator) {
+func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp leveldb.BasicComparer) {
 	for i := 0; i < len(p); {
 		t := p[i]
 		i++
@@ -143,7 +143,7 @@ func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp le
 	return
 }
 
-func (p tFiles) getRange(cmp *iKeyComparator) (min, max iKey) {
+func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 	for i, t := range p {
 		if i == 0 {
 			min, max = t.smallest, t.largest
@@ -159,13 +159,13 @@ func (p tFiles) getRange(cmp *iKeyComparator) (min, max iKey) {
 	return
 }
 
-func (p tFiles) newIndexIterator(tops *tOps, cmp *iKeyComparator, ro *leveldb.ReadOptions) *tFilesIter {
+func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *leveldb.ReadOptions) *tFilesIter {
 	return &tFilesIter{tops, cmp, ro, p, -1}
 }
 
 type tFilesIter struct {
 	tops *tOps
-	cmp  *iKeyComparator
+	cmp  *iComparer
 	ro   *leveldb.ReadOptions
 	tt   tFiles
 	pos  int
@@ -240,7 +240,7 @@ type tFileSorter interface {
 
 // sort table files by key
 type tFileSorterKey struct {
-	cmp *iKeyComparator
+	cmp *iComparer
 	ff  tFiles
 }
 

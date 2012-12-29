@@ -57,7 +57,7 @@ func TestBlock(t *testing.T) {
 		t.Error(err)
 	}
 
-	iter := br.NewIterator(leveldb.DefaultComparator)
+	iter := br.NewIterator(leveldb.DefaultComparer)
 
 	for i := 1; i < len(cases)+1; i++ {
 		for j := 0; j < i; j++ {

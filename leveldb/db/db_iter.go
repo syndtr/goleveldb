@@ -18,7 +18,7 @@ import "leveldb"
 var errIKeyCorrupt = leveldb.ErrCorrupt("internal key corrupted")
 
 type DBIter struct {
-	cmp  leveldb.BasicComparator
+	cmp  leveldb.BasicComparer
 	iter leveldb.Iterator
 	seq  uint64
 
@@ -30,7 +30,7 @@ type DBIter struct {
 	err      error
 }
 
-func newDBIter(seq uint64, iter leveldb.Iterator, cmp leveldb.BasicComparator) *DBIter {
+func newDBIter(seq uint64, iter leveldb.Iterator, cmp leveldb.BasicComparer) *DBIter {
 	return &DBIter{cmp: cmp, iter: iter, seq: seq}
 }
 
