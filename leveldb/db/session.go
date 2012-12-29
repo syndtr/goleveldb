@@ -28,8 +28,8 @@ type session struct {
 	iopt    *iOptions
 	cmp     leveldb.Comparator
 	icmp    *iKeyComparator
-	filter  leveldb.FilterPolicy
-	ifilter *iFilterPolicy
+	filter  leveldb.Filter
+	ifilter *iFilter
 	tops    *tOps
 
 	manifest       *log.Writer
@@ -51,12 +51,12 @@ func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
 		desc:   desc,
 		opt:    opt,
 		cmp:    opt.GetComparator(),
-		filter: opt.GetFilterPolicy(),
+		filter: opt.GetFilter(),
 	}
 	s.iopt = &iOptions{s}
 	s.icmp = &iKeyComparator{s.cmp}
 	if s.filter != nil {
-		s.ifilter = &iFilterPolicy{s.filter}
+		s.ifilter = &iFilter{s.filter}
 	}
 	s.tops = newTableOps(s, s.opt.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})

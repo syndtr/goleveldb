@@ -18,15 +18,15 @@ import (
 	"leveldb"
 )
 
-type iFilterPolicy struct {
-	filter leveldb.FilterPolicy
+type iFilter struct {
+	filter leveldb.Filter
 }
 
-func (p *iFilterPolicy) Name() string {
+func (p *iFilter) Name() string {
 	return p.filter.Name()
 }
 
-func (p *iFilterPolicy) CreateFilter(keys [][]byte, buf io.Writer) {
+func (p *iFilter) CreateFilter(keys [][]byte, buf io.Writer) {
 	nkeys := make([][]byte, len(keys))
 	for i := range keys {
 		nkeys[i] = iKey(keys[i]).ukey()
@@ -34,6 +34,6 @@ func (p *iFilterPolicy) CreateFilter(keys [][]byte, buf io.Writer) {
 	p.filter.CreateFilter(nkeys, buf)
 }
 
-func (p *iFilterPolicy) KeyMayMatch(key, filter []byte) bool {
+func (p *iFilter) KeyMayMatch(key, filter []byte) bool {
 	return p.filter.KeyMayMatch(iKey(key).ukey(), filter)
 }

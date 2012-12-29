@@ -42,7 +42,7 @@ func NewWriter(w descriptor.Writer, o leveldb.OptionsInterface) *Writer {
 	// Creating blocks
 	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
 	t.indexBlock = block.NewWriter(1)
-	filterPolicy := o.GetFilterPolicy()
+	filterPolicy := o.GetFilter()
 	if filterPolicy != nil {
 		t.filterBlock = block.NewFilterWriter(filterPolicy)
 		t.filterBlock.StartBlock(0)
@@ -123,7 +123,7 @@ func (t *Writer) Finish() (err error) {
 	// Write meta block
 	metaBlock := block.NewWriter(t.o.GetBlockRestartInterval())
 	if t.filterBlock != nil {
-		filterPolicy := t.o.GetFilterPolicy()
+		filterPolicy := t.o.GetFilter()
 		key := []byte("filter." + filterPolicy.Name())
 		metaBlock.Add(key, fi.encode())
 	}

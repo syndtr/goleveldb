@@ -52,7 +52,7 @@ type OptionsInterface interface {
 	GetBlockSize() int
 	GetBlockRestartInterval() int
 	GetCompressionType() Compression
-	GetFilterPolicy() FilterPolicy
+	GetFilter() Filter
 }
 
 // Database options
@@ -130,10 +130,10 @@ type Options struct {
 
 	// If non-NULL, use the specified filter policy to reduce disk reads.
 	// Many applications will benefit from passing the result of
-	// NewBloomFilterPolicy() here.
+	// NewBloomFilter() here.
 	//
 	// Default: NULL
-	FilterPolicy FilterPolicy
+	Filter Filter
 }
 
 func (o *Options) GetComparator() Comparator {
@@ -197,11 +197,11 @@ func (o *Options) GetCompressionType() Compression {
 	return o.CompressionType
 }
 
-func (o *Options) GetFilterPolicy() FilterPolicy {
+func (o *Options) GetFilter() Filter {
 	if o == nil {
 		return nil
 	}
-	return o.FilterPolicy
+	return o.Filter
 }
 
 // Read flag

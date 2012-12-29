@@ -52,7 +52,7 @@ func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cac
 	dataEnd := mi.offset
 
 	var filter *block.FilterReader
-	filterPolicy := o.GetFilterPolicy()
+	filterPolicy := o.GetFilter()
 	if filterPolicy != nil {
 		bb, err = mi.readAll(r, true)
 		if err != nil {

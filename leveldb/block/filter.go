@@ -26,14 +26,14 @@ var (
 )
 
 type FilterWriter struct {
-	policy leveldb.FilterPolicy
+	policy leveldb.Filter
 
 	buf     *bytes.Buffer
 	keys    [][]byte
 	offsets []uint32
 }
 
-func NewFilterWriter(policy leveldb.FilterPolicy) *FilterWriter {
+func NewFilterWriter(policy leveldb.Filter) *FilterWriter {
 	return &FilterWriter{
 		policy: policy,
 		buf:    new(bytes.Buffer),
@@ -83,7 +83,7 @@ func (b *FilterWriter) generateFilter() {
 }
 
 type FilterReader struct {
-	policy leveldb.FilterPolicy
+	policy leveldb.Filter
 	buf    []byte
 
 	baseLg       uint
@@ -93,7 +93,7 @@ type FilterReader struct {
 	or *bytes.Reader // offset reader
 }
 
-func NewFilterReader(buf []byte, policy leveldb.FilterPolicy) (b *FilterReader, err error) {
+func NewFilterReader(buf []byte, policy leveldb.Filter) (b *FilterReader, err error) {
 	// 4 bytes for offset start and 1 byte for baseLg
 	if len(buf) < 5 {
 		err = leveldb.ErrCorrupt("filter block to short")

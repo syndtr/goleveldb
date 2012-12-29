@@ -51,7 +51,7 @@ func (o *iOptions) GetCompressionType() leveldb.Compression {
 	return o.s.opt.GetCompressionType()
 }
 
-func (o *iOptions) GetFilterPolicy() leveldb.FilterPolicy {
+func (o *iOptions) GetFilter() leveldb.Filter {
 	if o.s.ifilter == nil {
 		return nil
 	}

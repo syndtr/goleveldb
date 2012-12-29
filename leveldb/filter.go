@@ -15,7 +15,7 @@ package leveldb
 
 import "io"
 
-type FilterPolicy interface {
+type Filter interface {
 	// Return the name of this policy.  Note that if the filter encoding
 	// changes in an incompatible way, the name returned by this method
 	// must be changed.  Otherwise, old incompatible filters may be

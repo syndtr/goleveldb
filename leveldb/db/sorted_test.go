@@ -121,7 +121,7 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 	p.r, _ = p.file.Open()
 	o := &leveldb.Options{
 		BlockRestartInterval: 3,
-		FilterPolicy:         leveldb.NewBloomFilter(10),
+		Filter:               leveldb.NewBloomFilter(10),
 	}
 	p.tr, err = table.NewReader(p.r, fsize, o, 0)
 	return int(fsize), nil
