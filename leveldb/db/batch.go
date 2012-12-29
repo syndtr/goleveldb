@@ -31,6 +31,20 @@ type batchReplay interface {
 	delete(key []byte, seq uint64)
 }
 
+type memBatch struct {
+	mem *memdb.DB
+}
+
+func (p *memBatch) put(key, value []byte, seq uint64) {
+	ikey := newIKey(key, seq, tVal)
+	p.mem.Put(ikey, value)
+}
+
+func (p *memBatch) delete(key []byte, seq uint64) {
+	ikey := newIKey(key, seq, tDel)
+	p.mem.Put(ikey, nil)
+}
+
 type batchRecord struct {
 	t          vType
 	key, value []byte

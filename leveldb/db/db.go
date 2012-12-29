@@ -27,20 +27,6 @@ import (
 
 var ErrClosed = leveldb.ErrInvalid("database closed")
 
-type memBatch struct {
-	mem **memdb.DB
-}
-
-func (p *memBatch) put(key, value []byte, seq uint64) {
-	ikey := newIKey(key, seq, tVal)
-	(*(p.mem)).Put(ikey, value)
-}
-
-func (p *memBatch) delete(key []byte, seq uint64) {
-	ikey := newIKey(key, seq, tDel)
-	(*(p.mem)).Put(ikey, nil)
-}
-
 type DB struct {
 	s    *session
 	cch  chan cSignal
@@ -99,8 +85,7 @@ func (d *DB) recoverLog() (err error) {
 	s := d.s
 	icmp := s.cmp
 
-	var mem *memdb.DB
-	mb := &memBatch{&mem}
+	mb := new(memBatch)
 	cm := newCMem(s)
 
 	s.printf("LogRecovery: started, min=%d", s.st.logNum)
@@ -128,11 +113,11 @@ func (d *DB) recoverLog() (err error) {
 			return
 		}
 
-		if mem != nil {
+		if mb.mem != nil {
 			d.fSeq = d.seq
 
-			if mem.Len() > 0 {
-				err = cm.flush(mem, 0)
+			if mb.mem.Len() > 0 {
+				err = cm.flush(mb.mem, 0)
 				if err != nil {
 					return
 				}
@@ -149,7 +134,7 @@ func (d *DB) recoverLog() (err error) {
 			fLogFile = nil
 		}
 
-		mem = memdb.New(icmp)
+		mb.mem = memdb.New(icmp)
 
 		lr := log.NewReader(r, true)
 		for lr.Next() {
@@ -158,15 +143,15 @@ func (d *DB) recoverLog() (err error) {
 				return
 			}
 
-			if mem.Size() > s.opt.GetWriteBuffer() {
+			if mb.mem.Size() > s.opt.GetWriteBuffer() {
 				// flush to table
-				err = cm.flush(mem, 0)
+				err = cm.flush(mb.mem, 0)
 				if err != nil {
 					return
 				}
 
 				// create new memdb
-				mem = memdb.New(icmp)
+				mb.mem = memdb.New(icmp)
 			}
 		}
 
@@ -185,8 +170,8 @@ func (d *DB) recoverLog() (err error) {
 		return
 	}
 
-	if mem != nil && mem.Len() > 0 {
-		err = cm.flush(mem, 0)
+	if mb.mem != nil && mb.mem.Len() > 0 {
+		err = cm.flush(mb.mem, 0)
 		if err != nil {
 			return
 		}
@@ -245,8 +230,6 @@ func (d *DB) flush() (err error) {
 }
 
 func (d *DB) write() {
-	mb := &memBatch{&d.mem}
-
 	for {
 		b := <-d.wch
 		if b == nil && d.getClosed() {
@@ -303,7 +286,7 @@ func (d *DB) write() {
 
 		d.mu.Lock()
 		// replay batch to memdb
-		b.replay(mb)
+		b.memReplay(d.mem)
 		// set last seq number
 		d.seq = seq + uint64(b.len())
 		d.mu.Unlock()
