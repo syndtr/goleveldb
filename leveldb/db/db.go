@@ -338,7 +338,7 @@ func (d *DB) Delete(key []byte, wo *leveldb.WriteOptions) error {
 // Write apply the specified batch to the database.
 func (d *DB) Write(b *Batch, wo *leveldb.WriteOptions) (err error) {
 	err = d.ok()
-	if err != nil {
+	if err != nil || b == nil || b.len() == 0 {
 		return
 	}
 

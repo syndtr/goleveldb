@@ -395,6 +395,19 @@ func TestDb_PutDeleteGet(t *testing.T) {
 	h.close()
 }
 
+func TestDb_EmptyBatch(t *testing.T) {
+	h := newDbHarness(t)
+	h.get("foo", false)
+
+	err := h.db.Write(new(Batch), h.wo)
+	if err != nil {
+		t.Error("writing empty batch yield error: ", err)
+	}
+	h.get("foo", false)
+
+	h.close()
+}
+
 func TestDb_GetFromFrozen(t *testing.T) {
 	h := newDbHarness(t)
 	h.opt.WriteBuffer = 100000
