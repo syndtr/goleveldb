@@ -70,8 +70,8 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 			// overlap user_key and process them in order from newest to
 			var tmp tFiles
 			for _, t := range ts {
-				if ucmp.Compare(ukey, t.smallest.ukey()) >= 0 &&
-					ucmp.Compare(ukey, t.largest.ukey()) <= 0 {
+				if ucmp.Compare(ukey, t.min.ukey()) >= 0 &&
+					ucmp.Compare(ukey, t.max.ukey()) <= 0 {
 					tmp = append(tmp, t)
 				}
 			}
@@ -84,7 +84,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 			ts = tmp
 		} else {
 			i := ts.search(key, icmp)
-			if i >= len(ts) || ucmp.Compare(ukey, ts[i].smallest.ukey()) < 0 {
+			if i >= len(ts) || ucmp.Compare(ukey, ts[i].min.ukey()) < 0 {
 				continue
 			}
 
@@ -193,13 +193,13 @@ func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
 
 	for level, tt := range v.tables {
 		for _, t := range tt {
-			if icmp.Compare(t.largest, key) <= 0 {
+			if icmp.Compare(t.max, key) <= 0 {
 				// Entire file is before "key", so just add the file size
 				n += t.size
-			} else if icmp.Compare(t.smallest, key) > 0 {
+			} else if icmp.Compare(t.min, key) > 0 {
 				// Entire file is after "key", so ignore
 				if level > 0 {
-					// Files other than level 0 are sorted by meta->smallest, so
+					// Files other than level 0 are sorted by meta->min, so
 					// no further files in this level will contain data for
 					// "key".
 					break

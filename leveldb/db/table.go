@@ -27,26 +27,25 @@ type tFile struct {
 	file     descriptor.File
 	seekLeft int32
 	size     uint64
-	smallest iKey
-	largest  iKey
+	min, max iKey
 }
 
 // test if key is after t
 func (t *tFile) isAfter(key []byte, cmp leveldb.BasicComparer) bool {
-	return key != nil && cmp.Compare(key, t.largest.ukey()) > 0
+	return key != nil && cmp.Compare(key, t.max.ukey()) > 0
 }
 
 // test if key is before t
 func (t *tFile) isBefore(key []byte, cmp leveldb.BasicComparer) bool {
-	return key != nil && cmp.Compare(key, t.smallest.ukey()) < 0
+	return key != nil && cmp.Compare(key, t.min.ukey()) < 0
 }
 
-func newTFile(file descriptor.File, size uint64, smallest, largest iKey) *tFile {
+func newTFile(file descriptor.File, size uint64, min, max iKey) *tFile {
 	f := &tFile{
-		file:     file,
-		size:     size,
-		smallest: smallest,
-		largest:  largest,
+		file: file,
+		size: size,
+		min:  min,
+		max:  max,
 	}
 
 	// We arrange to automatically compact this file after
@@ -86,7 +85,7 @@ func (p tFiles) sort(s tFileSorter) {
 
 func (p tFiles) search(key iKey, cmp *iComparer) int {
 	return sort.Search(len(p), func(i int) bool {
-		return cmp.Compare(p[i].largest, key) >= 0
+		return cmp.Compare(p[i].max, key) >= 0
 	})
 }
 
@@ -128,12 +127,12 @@ func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp le
 		if !disjSorted {
 			// Level-0 files may overlap each other.  So check if the newly
 			// added file has expanded the range.  If so, restart search.
-			if min != nil && ucmp.Compare(t.smallest.ukey(), min) < 0 {
-				min = t.smallest.ukey()
+			if min != nil && ucmp.Compare(t.min.ukey(), min) < 0 {
+				min = t.min.ukey()
 				*r = nil
 				i = 0
-			} else if max != nil && ucmp.Compare(t.largest.ukey(), max) > 0 {
-				max = t.largest.ukey()
+			} else if max != nil && ucmp.Compare(t.max.ukey(), max) > 0 {
+				max = t.max.ukey()
 				*r = nil
 				i = 0
 			}
@@ -146,14 +145,14 @@ func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp le
 func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 	for i, t := range p {
 		if i == 0 {
-			min, max = t.smallest, t.largest
+			min, max = t.min, t.max
 			continue
 		}
-		if cmp.Compare(t.smallest, min) < 0 {
-			min = t.smallest
+		if cmp.Compare(t.min, min) < 0 {
+			min = t.min
 		}
-		if cmp.Compare(t.largest, max) > 0 {
-			max = t.largest
+		if cmp.Compare(t.max, max) > 0 {
+			max = t.max
 		}
 	}
 	return
@@ -255,7 +254,7 @@ func (p *tFileSorterKey) Len() int {
 
 func (p *tFileSorterKey) Less(i, j int) bool {
 	a, b := p.ff[i], p.ff[j]
-	n := p.cmp.Compare(a.smallest, b.smallest)
+	n := p.cmp.Compare(a.min, b.min)
 	if n == 0 {
 		return a.file.Number() < b.file.Number()
 	}

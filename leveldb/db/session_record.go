@@ -55,15 +55,15 @@ type cpRecord struct {
 }
 
 type ntRecord struct {
-	level    int
-	num      uint64
-	size     uint64
-	smallest iKey
-	largest  iKey
+	level int
+	num   uint64
+	size  uint64
+	min   iKey
+	max   iKey
 }
 
 func (r ntRecord) makeFile(s *session) *tFile {
-	return newTFile(s.getTableFile(r.num), r.size, r.smallest, r.largest)
+	return newTFile(s.getTableFile(r.num), r.size, r.min, r.max)
 }
 
 type dtRecord struct {
@@ -113,12 +113,12 @@ func (p *sessionRecord) addCompactPointer(level int, key iKey) {
 	p.compactPointers = append(p.compactPointers, cpRecord{level, key})
 }
 
-func (p *sessionRecord) addTable(level int, num, size uint64, smallest, largest iKey) {
-	p.newTables = append(p.newTables, ntRecord{level, num, size, smallest, largest})
+func (p *sessionRecord) addTable(level int, num, size uint64, min, max iKey) {
+	p.newTables = append(p.newTables, ntRecord{level, num, size, min, max})
 }
 
 func (p *sessionRecord) addTableFile(level int, t *tFile) {
-	p.addTable(level, t.file.Number(), t.size, t.smallest, t.largest)
+	p.addTable(level, t.file.Number(), t.size, t.min, t.max)
 }
 
 func (p *sessionRecord) deleteTable(level int, num uint64) {
@@ -237,11 +237,11 @@ func (p *sessionRecord) encodeTo(w io.Writer) (err error) {
 		if err != nil {
 			return
 		}
-		err = putBytes(p.smallest)
+		err = putBytes(p.min)
 		if err != nil {
 			return
 		}
-		err = putBytes(p.largest)
+		err = putBytes(p.max)
 		if err != nil {
 			return
 		}
@@ -326,13 +326,13 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 			if err != nil {
 				break
 			}
-			smallest := iKey(b)
+			min := iKey(b)
 			b, err = readBytes(r)
 			if err != nil {
 				break
 			}
-			largest := iKey(b)
-			p.addTable(int(level), num, size, smallest, largest)
+			max := iKey(b)
+			p.addTable(int(level), num, size, min, max)
 		case tagDeletedTable:
 			var level, num uint64
 			level, err = binary.ReadUvarint(r)

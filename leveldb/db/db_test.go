@@ -98,7 +98,7 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 		next := v.tables[level+1]
 		for _, t := range tt {
 			var r tFiles
-			min, max := t.smallest.ukey(), t.largest.ukey()
+			min, max := t.min.ukey(), t.max.ukey()
 			next.getOverlaps(min, max, &r, true, ucmp)
 			sum := r.size()
 			if sum > res {
@@ -1026,7 +1026,7 @@ func TestDb_OverlapInLevel0(t *testing.T) {
 	// Make files spanning the following ranges in level-0:
 	//  files[0]  200 .. 900
 	//  files[1]  300 .. 500
-	// Note that files are sorted by smallest key.
+	// Note that files are sorted by min key.
 	h.put("300", "v300")
 	h.put("500", "v500")
 	h.compactMem()

@@ -188,7 +188,7 @@ func (s *session) pickCompaction() (c *compaction) {
 		cp := s.st.compactPointers[level]
 		tt := v.tables[level]
 		for _, t := range tt {
-			if cp == nil || icmp.Compare(t.largest, cp) > 0 {
+			if cp == nil || icmp.Compare(t.max, cp) > 0 {
 				t0 = append(t0, t)
 				break
 			}
@@ -307,9 +307,9 @@ func (c *compaction) isBaseLevelForKey(key []byte) bool {
 	for level, tt := range v.tables[c.level+2:] {
 		for c.tPtrs[level] < len(tt) {
 			t := tt[c.tPtrs[level]]
-			if ucmp.Compare(key, t.largest.ukey()) <= 0 {
+			if ucmp.Compare(key, t.max.ukey()) <= 0 {
 				// We've advanced far enough
-				if ucmp.Compare(key, t.smallest.ukey()) >= 0 {
+				if ucmp.Compare(key, t.min.ukey()) >= 0 {
 					// Key falls in this file's range, so definitely not base level
 					return false
 				}
@@ -325,7 +325,7 @@ func (c *compaction) shouldStopBefore(key iKey) bool {
 	icmp := c.s.cmp
 	for ; c.gpidx < len(c.gp); c.gpidx++ {
 		gp := c.gp[c.gpidx]
-		if icmp.Compare(key, gp.largest) <= 0 {
+		if icmp.Compare(key, gp.max) <= 0 {
 			break
 		}
 		if c.seenKey {
