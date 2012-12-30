@@ -14,36 +14,40 @@
 package leveldb
 
 type Cache interface {
+	// Get caches namespace for given id.
+	GetNamespace(id uint64) CacheNamespace
+
+	// Delete all caches. Note that the caches will be kept around until all
+	// of its existing handles have been released and the finalizer will
+	// finally be executed.
+	Purge(finalizer func())
+}
+
+type CacheNamespace interface {
 	// Insert a mapping from key->value into the cache and assign it
 	// the specified charge against the total cache capacity.
 	//
 	// Return a cache object that corresponds to the mapping.
 	// The caller must call obj.Release() when the returned mapping is no
 	// longer needed.
-	Set(key []byte, value interface{}, charge int, finalizer func()) CacheObject
+	Set(key uint64, value interface{}, charge int, finalizer func()) CacheObject
 
 	// If the cache has no mapping for "key", returns nil, false.
 	//
 	// Else return a cache object that corresponds to the mapping.
 	// The caller must call obj.Release() when the returned mapping is no
 	// longer needed.
-	Get(key []byte) (ret CacheObject, ok bool)
+	Get(key uint64) (obj CacheObject, ok bool)
 
 	// If the cache contains entry for key, delete it.  Note that the
 	// underlying entry will be kept around until all existing handles
 	// to it have been released and the finalizer will finally be executed.
-	Delete(key []byte, finalizer func()) bool
+	Delete(key uint64, finalizer func()) bool
 
 	// Delete all caches. Note that the caches will be kept around until all
 	// of its existing handles have been released and the finalizer will
 	// finally be executed.
 	Purge(finalizer func())
-
-	// Return a new numeric id.  May be used by multiple clients who are
-	// sharing the same cache to partition the key space.  Typically the
-	// client will allocate a new id at startup and prepend the id to
-	// its cache keys.
-	NewId() uint64
 }
 
 type CacheObject interface {

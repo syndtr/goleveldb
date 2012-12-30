@@ -13,46 +13,39 @@
 
 package leveldb
 
-import (
-	"testing"
-)
-
-func TestCache_NewId(t *testing.T) {
-	c := NewLRUCache(1000, nil)
-	a, b := c.NewId(), c.NewId()
-	if a == b {
-		t.Errorf("generated id are equal, %d == %d", a, b)
-	}
-}
+import "testing"
 
 func TestCache_HitMiss(t *testing.T) {
-	cases := []struct{ key, value string }{
-		{"a", "vvvvvvvvv"},
-		{"k1", "v1"},
-		{"xk", "v2"},
-		{"bcdef", "v3"},
-		{"fpqwe", "v4"},
-		{"zzzz", "v5"},
-		{"kx", "v6"},
-		{"o", "v7"},
-		{"z", "v8"},
-		{"aaaaa", "v9"},
+	cases := []struct {
+		key   uint64
+		value string
+	}{
+		{1, "vvvvvvvvv"},
+		{100, "v1"},
+		{0, "v2"},
+		{12346, "v3"},
+		{777, "v4"},
+		{999, "v5"},
+		{7654, "v6"},
+		{2, "v7"},
+		{3, "v8"},
+		{9, "v9"},
 	}
 
 	setfin := 0
-	c := NewLRUCache(1000, nil)
+	c := NewLRUCache(1000)
+	ns := c.GetNamespace(0)
 	for i, x := range cases {
-		c.Set([]byte(x.key), x.value, len(x.value), func() {
+		ns.Set(x.key, x.value, len(x.value), func() {
 			setfin++
 		}).Release()
 		for j, y := range cases {
-			r, ok := c.Get([]byte(y.key))
+			r, ok := ns.Get(y.key)
 			if j <= i {
 				// should hit
 				if !ok {
 					t.Errorf("case '%d' iteration '%d' is miss", i, j)
-				}
-				if r.Value().(string) != y.value {
+				} else if r.Value().(string) != y.value {
 					t.Errorf("case '%d' iteration '%d' has invalid value got '%s', want '%s'", i, j, r.Value().(string), y.value)
 				}
 			} else {
@@ -69,7 +62,7 @@ func TestCache_HitMiss(t *testing.T) {
 
 	for i, x := range cases {
 		finalizerOk := false
-		c.Delete([]byte(x.key), func() {
+		ns.Delete(x.key, func() {
 			finalizerOk = true
 		})
 
@@ -78,13 +71,12 @@ func TestCache_HitMiss(t *testing.T) {
 		}
 
 		for j, y := range cases {
-			r, ok := c.Get([]byte(y.key))
+			r, ok := ns.Get(y.key)
 			if j > i {
 				// should hit
 				if !ok {
 					t.Errorf("case '%d' iteration '%d' is miss", i, j)
-				}
-				if r.Value().(string) != y.value {
+				} else if r.Value().(string) != y.value {
 					t.Errorf("case '%d' iteration '%d' has invalid value got '%s', want '%s'", i, j, r.Value().(string), y.value)
 				}
 			} else {
@@ -105,36 +97,52 @@ func TestCache_HitMiss(t *testing.T) {
 }
 
 func TestLRUCache_Eviction(t *testing.T) {
-	c := NewLRUCache(12, nil)
-	c.Set([]byte("a"), "va", 1, nil).Release()
-	c.Set([]byte("b"), "vb", 1, nil).Release()
-	c.Set([]byte("c"), "vc", 1, nil).Release()
-	c.Set([]byte("d"), "vd", 1, nil).Release()
-	c.Set([]byte("e"), "ve", 1, nil).Release()
-	r, _ := c.Get([]byte("b"))
-	r.Release()
-	c.Set([]byte("x"), "vx", 10, nil).Release()
+	c := NewLRUCache(12)
+	ns := c.GetNamespace(0)
+	ns.Set(1, 1, 1, nil).Release()
+	ns.Set(2, 2, 1, nil).Release()
+	ns.Set(3, 3, 1, nil).Release()
+	ns.Set(4, 4, 1, nil).Release()
+	ns.Set(5, 5, 1, nil).Release()
+	if r, ok := ns.Get(2); ok {
+		r.Release()
+	}
+	ns.Set(9, 9, 10, nil).Release()
+	// 	c.esched <- true
 
-	for _, x := range []string{"b", "e", "x"} {
-		r, ok := c.Get([]byte(x))
+	for _, x := range []uint64{2, 5, 9} {
+		r, ok := ns.Get(x)
 		if !ok {
-			t.Errorf("miss for key '%s'", x)
+			t.Errorf("miss for key '%d'", x)
 		} else {
-			if r.Value().(string) != "v"+x {
-				t.Errorf("invalid value for key '%s' want 'v%s', got '%s'", x, x, r.Value().(string))
+			if r.Value().(int) != int(x) {
+				t.Errorf("invalid value for key '%d' want '%d', got '%d'", x, x, r.Value().(int))
 			}
 			r.Release()
 		}
 	}
 
-	for _, x := range []string{"a", "c", "d"} {
-		r, ok := c.Get([]byte(x))
+	for _, x := range []uint64{1, 3, 4} {
+		r, ok := ns.Get(x)
 		if ok {
-			t.Errorf("hit for key '%s'", x)
-			if r.Value().(string) != "v"+x {
-				t.Errorf("invalid value for key '%s' want 'v%s', got '%s'", x, x, r.Value().(string))
+			t.Errorf("hit for key '%d'", x)
+			if r.Value().(int) != int(x) {
+				t.Errorf("invalid value for key '%d' want '%d', got '%d'", x, x, r.Value().(int))
 			}
 			r.Release()
 		}
+	}
+}
+
+func BenchmarkLRUCache_SetRelease(b *testing.B) {
+	capacity := b.N / 100
+	if capacity <= 0 {
+		capacity = 10
+	}
+	c := NewLRUCache(capacity)
+	ns := c.GetNamespace(0)
+	b.ResetTimer()
+	for i := uint64(0); i < uint64(b.N); i++ {
+		ns.Set(i, nil, 1, nil).Release()
 	}
 }

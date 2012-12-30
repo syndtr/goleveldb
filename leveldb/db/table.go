@@ -14,7 +14,6 @@
 package db
 
 import (
-	"encoding/binary"
 	"leveldb"
 	"leveldb/descriptor"
 	"leveldb/table"
@@ -284,12 +283,15 @@ func (p tFileSorterNewest) Swap(i, j int) {
 
 // table cache
 type tOps struct {
-	s     *session
-	cache leveldb.Cache
+	s       *session
+	cache   leveldb.Cache
+	cachens leveldb.CacheNamespace
 }
 
 func newTableOps(s *session, cacheCap int) *tOps {
-	return &tOps{s, leveldb.NewLRUCache(cacheCap, nil)}
+	cache := leveldb.NewLRUCache(cacheCap)
+	cachens := cache.GetNamespace(0)
+	return &tOps{s, cache, cachens}
 }
 
 func (t *tOps) create() (w *tWriter, err error) {
@@ -342,7 +344,9 @@ func (t *tOps) newIterator(f *tFile, ro *leveldb.ReadOptions) leveldb.Iterator {
 	}
 	iter := c.Value().(*table.Reader).NewIterator(ro)
 	if p, ok := iter.(*leveldb.IndexedIterator); ok {
-		setTableIterFinalizer(p, c)
+		runtime.SetFinalizer(p, func(x *leveldb.IndexedIterator) {
+			c.Release()
+		})
 	} else {
 		panic("not reached")
 	}
@@ -369,11 +373,19 @@ func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
 }
 
 func (t *tOps) remove(f *tFile) {
-	cacheKey := make([]byte, 8)
-	binary.LittleEndian.PutUint64(cacheKey, f.file.Number())
+	num := f.file.Number()
 
-	t.cache.Delete(cacheKey, func() {
+	var ns leveldb.CacheNamespace
+	bc := t.s.opt.GetBlockCache()
+	if bc != nil {
+		ns = bc.GetNamespace(num)
+	}
+
+	t.cachens.Delete(num, func() {
 		f.file.Remove()
+		if ns != nil {
+			ns.Purge(nil)
+		}
 	})
 }
 
@@ -382,33 +394,36 @@ func (t *tOps) purgeCache() {
 }
 
 func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
-	cacheKey := make([]byte, 8)
-	binary.LittleEndian.PutUint64(cacheKey, f.file.Number())
+	num := f.file.Number()
 
 	var ok bool
-	c, ok = t.cache.Get(cacheKey)
+	c, ok = t.cachens.Get(num)
 	if !ok {
 		var r descriptor.Reader
 		r, err = f.file.Open()
 		if err != nil {
 			return
 		}
+
+		opt := t.s.opt
+
+		var ns leveldb.CacheNamespace
+		bc := opt.GetBlockCache()
+		if bc != nil {
+			ns = bc.GetNamespace(num)
+		}
+
 		var p *table.Reader
-		p, err = table.NewReader(r, f.size, t.s.opt, f.file.Number())
+		p, err = table.NewReader(r, f.size, t.s.opt, ns)
 		if err != nil {
 			return
 		}
-		c = t.cache.Set(cacheKey, p, 1, func() {
+
+		c = t.cachens.Set(num, p, 1, func() {
 			r.Close()
 		})
 	}
 	return
-}
-
-func setTableIterFinalizer(x *leveldb.IndexedIterator, cache leveldb.CacheObject) {
-	runtime.SetFinalizer(x, func(x *leveldb.IndexedIterator) {
-		cache.Release()
-	})
 }
 
 type tWriter struct {

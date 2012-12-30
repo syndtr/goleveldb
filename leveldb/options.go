@@ -171,7 +171,7 @@ func (o *Options) GetBlockCache() Cache {
 		return nil
 	}
 	if o.BlockCache == nil {
-		o.BlockCache = NewLRUCache(8<<20, nil)
+		o.BlockCache = NewLRUCache(8 << 20)
 	}
 	return o.BlockCache
 }

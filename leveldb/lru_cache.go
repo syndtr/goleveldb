@@ -14,83 +14,126 @@
 package leveldb
 
 import (
-	"bytes"
 	"sync"
+	"sync/atomic"
 )
-
-func lruHash(data []byte) uint32 {
-	return Hash(data, 0)
-}
 
 type LRUCache struct {
 	sync.Mutex
 
-	hash     func([]byte) uint32
 	root     lruElem
-	table    map[uint32]*lruElem
+	table    map[uint64]*lruNs
 	capacity int
 	size     int
-	id       uint64
 }
 
-func NewLRUCache(capacity int, hash func([]byte) uint32) Cache {
-	c := &LRUCache{hash: lruHash, capacity: capacity}
-	if hash != nil {
-		c.hash = hash
+func NewLRUCache(capacity int) *LRUCache {
+	c := &LRUCache{
+		table:    make(map[uint64]*lruNs),
+		capacity: capacity,
 	}
 	c.root.mNext = &c.root
 	c.root.mPrev = &c.root
-	c.table = make(map[uint32]*lruElem)
 	return c
 }
 
-func (c *LRUCache) Set(key []byte, value interface{}, charge int, finalizer func()) CacheObject {
+func (c *LRUCache) GetNamespace(id uint64) CacheNamespace {
 	c.Lock()
 	defer c.Unlock()
 
-	e, created, _, _ := c.lookup(key, true)
-	c.size += charge - e.charge
+	if p, ok := c.table[id]; ok {
+		return p
+	}
+
+	p := &lruNs{
+		lru:   c,
+		table: make(map[uint64]*lruElem),
+	}
+	c.table[id] = p
+	return p
+}
+
+func (c *LRUCache) Purge(finalizer func()) {
+	c.Lock()
+	top := &c.root
+	for e := c.root.mPrev; e != top; {
+		e.deleted = true
+		e.mRemove()
+		e.delFinalizer = finalizer
+		e.evict()
+		e = c.root.mPrev
+	}
+	c.Unlock()
+}
+
+func (c *LRUCache) evict() {
+	top := c.root.mNext
+	for e := c.root.mPrev; c.size > c.capacity && e != top; {
+		e.mRemove()
+		e.evict()
+		e = c.root.mPrev
+	}
+}
+
+type lruNs struct {
+	lru   *LRUCache
+	table map[uint64]*lruElem
+}
+
+func (p *lruNs) Set(key uint64, value interface{}, charge int, finalizer func()) CacheObject {
+	lru := p.lru
+	lru.Lock()
+
+	e, ok := p.table[key]
+	if !ok {
+		e = &lruElem{ns: p, key: key}
+		p.table[key] = e
+	} else {
+		e.mRemove()
+		lru.size -= e.charge
+	}
 	e.value = value
 	e.charge = charge
 	e.deleted = false
 	e.setFinalizer = finalizer
 	e.delFinalizer = nil
-	if !created {
-		e.mRemove()
-	}
-	// insert to front
-	e.mInsert(&c.root)
+	e.mInsert(&lru.root)
 
-	// evict least used elem
-	c.evict()
+	lru.size += charge
+	lru.evict()
+	lru.Unlock()
 
 	return e.makeObject()
 }
 
-func (c *LRUCache) Get(key []byte) (ret CacheObject, ok bool) {
-	c.Lock()
-	defer c.Unlock()
+func (p *lruNs) Get(key uint64) (obj CacheObject, ok bool) {
+	lru := p.lru
+	lru.Lock()
 
-	e, _, _, _ := c.lookup(key, false)
-	if e == nil {
+	e, ok := p.table[key]
+	if !ok {
+		lru.Unlock()
 		return
 	}
 
 	if !e.deleted {
 		// bump to front
 		e.mRemove()
-		e.mInsert(&c.root)
+		e.mInsert(&lru.root)
 	}
 
-	return e.makeObject(), true
+	lru.Unlock()
+	obj = e.makeObject()
+	return
 }
 
-func (c *LRUCache) Delete(key []byte, finalizer func()) bool {
-	c.Lock()
-	defer c.Unlock()
+func (p *lruNs) Delete(key uint64, finalizer func()) bool {
+	lru := p.lru
+	lru.Lock()
 
-	e, _, prev, hash := c.lookup(key, false)
-	if e == nil {
+	e, ok := p.table[key]
+	if !ok {
+		lru.Unlock()
 		if finalizer != nil {
 			finalizer()
 		}
@@ -98,104 +141,38 @@ func (c *LRUCache) Delete(key []byte, finalizer func()) bool {
 	}
 
 	if e.deleted {
+		lru.Unlock()
 		return false
 	}
 
 	e.deleted = true
-
-	// remove from lru list
 	e.mRemove()
-
-	// set finalizer
 	e.delFinalizer = finalizer
+	e.evict()
 
-	// evict elem if no one use it
-	if e.ref == 0 {
-		if prev == nil {
-			if e.tNext == nil {
-				delete(c.table, hash)
-			} else {
-				c.table[hash] = e.tNext
-			}
-		} else {
-			prev.tNext = e.tNext
-		}
-		c.size -= e.charge
-		if e.setFinalizer != nil {
-			e.setFinalizer()
-			e.setFinalizer = nil
-		}
-		if e.delFinalizer != nil {
-			e.delFinalizer()
-			e.delFinalizer = nil
-		}
-	}
-
+	lru.Unlock()
 	return true
 }
 
-func (c *LRUCache) Purge(finalizer func()) {
-	top := &c.root
-	for n := c.root.mPrev; n != top; n = c.root.mPrev {
-		// set finalizer
-		n.delFinalizer = finalizer
-		// remove from lru list
-		n.mRemove()
-		// evict elem if no one use it
-		n.evict()
-	}
-}
-
-func (c *LRUCache) NewId() (id uint64) {
-	c.Lock()
-	id = c.id
-	c.id++
-	c.Unlock()
-	return
-}
-
-func (c *LRUCache) lookup(key []byte, create bool) (e *lruElem, created bool, prev *lruElem, hash uint32) {
-	hash = c.hash(key)
-	e = c.table[hash]
-
-	// iterate over linked-list
-	for ; e != nil; e = e.tNext {
-		if bytes.Equal(key, e.key) {
-			break
+func (p *lruNs) Purge(finalizer func()) {
+	p.lru.Lock()
+	for _, e := range p.table {
+		if e.deleted {
+			continue
 		}
-		prev = e
+		e.mRemove()
+		e.delFinalizer = finalizer
+		e.evict()
 	}
-
-	// create elem
-	if e == nil && create {
-		e = &lruElem{lru: c, key: key}
-		if prev == nil {
-			c.table[hash] = e
-		} else {
-			prev.tNext = e
-		}
-		created = true
-	}
-	return
-}
-
-func (c *LRUCache) evict() {
-	top := c.root.mNext
-	for n := c.root.mPrev; c.size > c.capacity && n != top; n = c.root.mPrev {
-		// remove from lru list
-		n.mRemove()
-		// evict elem if no one use it
-		n.evict()
-	}
+	p.lru.Unlock()
 }
 
 type lruElem struct {
-	lru *LRUCache
+	ns *lruNs
 
 	mNext, mPrev *lruElem
-	tNext        *lruElem
 
-	key          []byte
+	key          uint64
 	value        interface{}
 	charge       int
 	ref          uint
@@ -204,64 +181,58 @@ type lruElem struct {
 	delFinalizer func()
 }
 
-func (p *lruElem) mInsert(at *lruElem) {
+func (e *lruElem) mInsert(at *lruElem) {
 	n := at.mNext
-	at.mNext = p
-	p.mPrev = at
-	p.mNext = n
-	n.mPrev = p
-	p.ref++
+	at.mNext = e
+	e.mPrev = at
+	e.mNext = n
+	n.mPrev = e
+	e.ref++
 }
 
-func (p *lruElem) mRemove() {
+func (e *lruElem) mRemove() {
 	// only remove if not already removed
-	if p.mPrev == nil {
+	if e.mPrev == nil {
 		return
 	}
 
-	p.mPrev.mNext = p.mNext
-	p.mNext.mPrev = p.mPrev
-	p.mPrev = nil
-	p.mNext = nil
-	p.ref--
+	e.mPrev.mNext = e.mNext
+	e.mNext.mPrev = e.mPrev
+	e.mPrev = nil
+	e.mNext = nil
+	e.ref--
 }
 
-func (p *lruElem) makeObject() *lruObject {
-	p.ref++
-	return &lruObject{e: p}
-}
-
-func (p *lruElem) evict() {
-	if p.ref == 0 {
-		lru := p.lru
-		hash := lru.hash(p.key)
-		x := lru.table[hash]
-		if x == p {
-			if p.tNext == nil {
-				delete(lru.table, hash)
-			} else {
-				lru.table[hash] = p.tNext
-			}
-		} else {
-			for ; x.tNext == p; x = x.tNext {
-			}
-			x.tNext = p.tNext
-		}
-		lru.size -= p.charge
-		if p.setFinalizer != nil {
-			p.setFinalizer()
-			p.setFinalizer = nil
-		}
-		if p.delFinalizer != nil {
-			p.delFinalizer()
-			p.delFinalizer = nil
-		}
+func (e *lruElem) evict() {
+	if e.ref != 0 {
+		return
 	}
+
+	ns := e.ns
+
+	// remove elem
+	delete(ns.table, e.key)
+	ns.lru.size -= e.charge
+
+	// execute finalizer
+	if e.setFinalizer != nil {
+		e.setFinalizer()
+		e.setFinalizer = nil
+	}
+	if e.delFinalizer != nil {
+		e.delFinalizer()
+		e.delFinalizer = nil
+	}
+}
+
+func (e *lruElem) makeObject() (obj *lruObject) {
+	e.ref++
+	return &lruObject{e: e}
 }
 
 type lruObject struct {
 	e    *lruElem
-	once bool
+	once uint32
 }
 
 func (p *lruObject) Value() interface{} {
@@ -269,11 +240,14 @@ func (p *lruObject) Value() interface{} {
 }
 
 func (p *lruObject) Release() {
-	p.e.lru.Lock()
-	if !p.once {
-		p.once = true
-		p.e.ref--
-		p.e.evict()
+	if !atomic.CompareAndSwapUint32(&p.once, 0, 1) {
+		return
 	}
-	p.e.lru.Unlock()
+
+	e := p.e
+	lru := e.ns.lru
+	lru.Lock()
+	e.ref--
+	e.evict()
+	lru.Unlock()
 }

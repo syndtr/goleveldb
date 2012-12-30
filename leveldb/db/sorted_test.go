@@ -123,7 +123,7 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 		BlockRestartInterval: 3,
 		Filter:               leveldb.NewBloomFilter(10),
 	}
-	p.tr, err = table.NewReader(p.r, fsize, o, 0)
+	p.tr, err = table.NewReader(p.r, fsize, o, nil)
 	return int(fsize), nil
 }
 
@@ -336,6 +336,16 @@ func (h *stHarness) test(name string, c stConstructor) {
 
 func (h *stHarness) testScan(name string, c stConstructor) {
 	iter := c.newIterator()
+
+	for i := 0; i < 3; i++ {
+		if iter.Prev() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (iter=%d)", i)
+		} else if iter.Valid() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (iter=%d)", i)
+		}
+	}
+
+	iter = c.newIterator()
 	var first, last bool
 
 first:

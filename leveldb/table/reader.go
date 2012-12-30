@@ -14,7 +14,6 @@
 package table
 
 import (
-	"encoding/binary"
 	"leveldb"
 	"leveldb/block"
 	"leveldb/descriptor"
@@ -30,10 +29,10 @@ type Reader struct {
 	filter *block.FilterReader
 
 	dataEnd uint64
-	cacheId uint64
+	cache   leveldb.CacheNamespace
 }
 
-func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cacheId uint64) (t *Reader, err error) {
+func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cache leveldb.CacheNamespace) (t *Reader, err error) {
 	mi, ii, err := readFooter(r, size)
 	if err != nil {
 		return
@@ -94,7 +93,7 @@ func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cac
 		index:   index,
 		filter:  filter,
 		dataEnd: dataEnd,
-		cacheId: cacheId,
+		cache:   cache,
 	}
 	return
 }
@@ -158,14 +157,9 @@ func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leve
 	}
 
 	var cacheObj leveldb.CacheObject
-	cache := t.o.GetBlockCache()
-	if cache != nil {
-		cacheKey := make([]byte, 16)
-		binary.LittleEndian.PutUint64(cacheKey, t.cacheId)
-		binary.LittleEndian.PutUint64(cacheKey[8:], bi.offset)
-
+	if t.cache != nil {
 		var ok bool
-		cacheObj, ok = cache.Get(cacheKey)
+		cacheObj, ok = t.cache.Get(bi.offset)
 		if ok {
 			b = cacheObj.Value().(*block.Reader)
 		} else {
@@ -173,7 +167,7 @@ func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leve
 			if err != nil {
 				return
 			}
-			cacheObj = cache.Set(cacheKey, b, int(bi.size), nil)
+			cacheObj = t.cache.Set(bi.offset, b, int(bi.size), nil)
 		}
 	} else {
 		newBlock()
@@ -184,7 +178,9 @@ func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leve
 
 	biter := b.NewIterator(t.o.GetComparer())
 	if cacheObj != nil {
-		setCacheFinalizer(biter, cacheObj)
+		runtime.SetFinalizer(biter, func(x *block.Iterator) {
+			cacheObj.Release()
+		})
 	}
 	return biter, nil
 }
@@ -204,10 +200,4 @@ func (i *indexIter) Get() (iter leveldb.Iterator, err error) {
 	}
 
 	return i.t.getBlock(bi, i.ro)
-}
-
-func setCacheFinalizer(x *block.Iterator, cache leveldb.CacheObject) {
-	runtime.SetFinalizer(x, func(x *block.Iterator) {
-		cache.Release()
-	})
 }

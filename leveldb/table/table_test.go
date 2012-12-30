@@ -57,7 +57,7 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 	}
 	size := w.Len()
 	r := &reader{*bytes.NewReader(w.Bytes())}
-	tr, err := NewReader(r, uint64(size), o, 0)
+	tr, err := NewReader(r, uint64(size), o, nil)
 	if err != nil {
 		t.Fatal("error when creating table reader instance:", err.Error())
 	}
