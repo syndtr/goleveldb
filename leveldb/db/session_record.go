@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/errors"
 )
 
 // These numbers are written to disk and should not be changed.
@@ -281,7 +281,7 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 				p.hasLogNum = true
 			}
 		case tagPrevLogNum:
-			err = leveldb.ErrInvalid("unsupported db format")
+			err = errors.ErrInvalid("unsupported db format")
 			break
 		case tagNextNum:
 			p.nextNum, err = binary.ReadUvarint(r)

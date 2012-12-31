@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+package hash
 
 import (
 	"hash"
@@ -20,13 +20,15 @@ import (
 
 var crc32tab = crc32.MakeTable(crc32.Castagnoli)
 
+// New creates a new hash.Hash32 computing the CRC-32 checksum using
+// Castagnoli's polynomial.
 func NewCRC32C() hash.Hash32 {
 	return crc32.New(crc32tab)
 }
 
 var crcMaskDelta uint32 = 0xa282ead8
 
-// Return a masked representation of crc.
+// MaskCRC32 return a masked representation of crc.
 //
 // Motivation: it is problematic to compute the CRC of a string that
 // contains embedded CRCs.  Therefore we recommend that CRCs stored
@@ -36,7 +38,7 @@ func MaskCRC32(crc uint32) uint32 {
 	return ((crc >> 15) | (crc << 17)) + crcMaskDelta
 }
 
-// Return the crc whose masked representation is masked_crc.
+// UnmaskCRC32 return the crc whose masked representation is masked_crc.
 func UnmaskCRC32(masked_crc uint32) uint32 {
 	rot := masked_crc - crcMaskDelta
 	return ((rot >> 17) | (rot << 15))

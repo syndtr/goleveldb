@@ -17,13 +17,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/errors"
 	"leveldb/memdb"
 )
 
 var (
-	errBatchTooShort  = leveldb.ErrCorrupt("batch in too short")
-	errBatchBadRecord = leveldb.ErrCorrupt("bad record in batch")
+	errBatchTooShort  = errors.ErrCorrupt("batch in too short")
+	errBatchBadRecord = errors.ErrCorrupt("bad record in batch")
 )
 
 type batchReplay interface {
@@ -50,6 +50,7 @@ type batchRecord struct {
 	key, value []byte
 }
 
+// Batch represent a write batch.
 type Batch struct {
 	rec    []batchRecord
 	seq    uint64
@@ -58,16 +59,19 @@ type Batch struct {
 	sync   bool
 }
 
+// Put put given key/value to the batch for insert operation.
 func (b *Batch) Put(key, value []byte) {
 	b.rec = append(b.rec, batchRecord{tVal, key, value})
 	b.kvSize += len(key) + len(value)
 }
 
+// Delete put given key to the batch for delete operation.
 func (b *Batch) Delete(key []byte) {
 	b.rec = append(b.rec, batchRecord{tDel, key, nil})
 	b.kvSize += len(key)
 }
 
+// Reset reset contents of the batch.
 func (b *Batch) Reset() {
 	b.rec = b.rec[:0]
 	b.seq = 0
@@ -237,7 +241,7 @@ func replayBatch(b []byte, to batchReplay) (seq uint64, err error) {
 	for ; len(b) > 0; seq++ {
 		t := vType(b[0])
 		if t > tVal {
-			err = leveldb.ErrCorrupt("invalid batch record type in batch")
+			err = errors.ErrCorrupt("invalid batch record type in batch")
 			return
 		}
 
@@ -265,7 +269,7 @@ func replayBatch(b []byte, to batchReplay) (seq uint64, err error) {
 	}
 
 	if seq-fseq != uint64(rn) {
-		err = leveldb.ErrCorrupt("invalid batch record length")
+		err = errors.ErrCorrupt("invalid batch record length")
 	}
 
 	return

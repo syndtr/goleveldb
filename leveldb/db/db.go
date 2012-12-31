@@ -11,26 +11,28 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package db provide implementation of LevelDB database.
 package db
 
 import (
 	"container/list"
-	"leveldb"
 	"leveldb/descriptor"
+	"leveldb/errors"
+	"leveldb/iter"
 	"leveldb/log"
 	"leveldb/memdb"
+	"leveldb/opt"
 	"os"
 	"runtime"
 	"sync"
 	"time"
 )
 
-var ErrClosed = leveldb.ErrInvalid("database closed")
-
-// Reader implemented by both *DB and *Snapshot.
+// Reader is the interface that wraps basic Get and NewIterator methods.
+// This interface implemented by both *DB and *Snapshot.
 type Reader interface {
-	Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error)
-	NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator
+	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
+	NewIterator(ro *opt.ReadOptions) iter.Iterator
 }
 
 // Range represent key range.
@@ -44,6 +46,7 @@ type Range struct {
 
 type Sizes []uint64
 
+// Sum return sum of the sizes.
 func (p Sizes) Sum() (n uint64) {
 	for _, s := range p {
 		n += s
@@ -71,14 +74,13 @@ type DB struct {
 }
 
 // Open open or create database from given desc.
-func Open(desc descriptor.Descriptor, opt *leveldb.Options) (d *DB, err error) {
-	s := newSession(desc, opt)
+func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
+	s := newSession(desc, o)
 
 	err = s.recover()
-	if os.IsNotExist(err) && opt.HasFlag(leveldb.OFCreateIfMissing) {
+	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
 		err = s.create()
-	} else if err == nil && opt.HasFlag(leveldb.OFErrorIfExist) {
-		println(opt.HasFlag(leveldb.OFErrorIfExist))
+	} else if err == nil && o.HasFlag(opt.OFErrorIfExist) {
 		err = os.ErrExist
 	}
 	if err != nil {
@@ -167,7 +169,7 @@ func (d *DB) recoverLog() (err error) {
 				return
 			}
 
-			if mb.mem.Size() > s.opt.GetWriteBuffer() {
+			if mb.mem.Size() > s.o.GetWriteBuffer() {
 				// flush to table
 				err = cm.flush(mb.mem, 0)
 				if err != nil {
@@ -226,7 +228,7 @@ func (d *DB) flush() (err error) {
 			delayed = true
 			time.Sleep(1000 * time.Microsecond)
 			continue
-		case d.mem.Size() <= s.opt.GetWriteBuffer():
+		case d.mem.Size() <= s.o.GetWriteBuffer():
 			// still room
 			return
 		case d.hasFrozenMem():
@@ -335,7 +337,7 @@ func (d *DB) write() {
 }
 
 // Put set the database entry for "key" to "value".
-func (d *DB) Put(key, value []byte, wo *leveldb.WriteOptions) error {
+func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Put(key, value)
 	return d.Write(b, wo)
@@ -343,20 +345,20 @@ func (d *DB) Put(key, value []byte, wo *leveldb.WriteOptions) error {
 
 // Delete remove the database entry (if any) for "key". It is not an error
 // if "key" did not exist in the database.
-func (d *DB) Delete(key []byte, wo *leveldb.WriteOptions) error {
+func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Delete(key)
 	return d.Write(b, wo)
 }
 
 // Write apply the specified batch to the database.
-func (d *DB) Write(b *Batch, wo *leveldb.WriteOptions) (err error) {
+func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	err = d.ok()
 	if err != nil || b == nil || b.len() == 0 {
 		return
 	}
 
-	rch := b.init(wo.HasFlag(leveldb.WFSync))
+	rch := b.init(wo.HasFlag(opt.WFSync))
 	d.wch <- b
 	err = <-rch
 	close(rch)
@@ -364,7 +366,7 @@ func (d *DB) Write(b *Batch, wo *leveldb.WriteOptions) (err error) {
 }
 
 // Get get value for given key of the latest snapshot of database.
-func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
+func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	p := d.newSnapshot()
 	defer p.Release()
 	return p.Get(key, ro)
@@ -372,12 +374,12 @@ func (d *DB) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) 
 
 // newRawIterator return merged interators of current version, current frozen memdb
 // and current memdb.
-func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+func (d *DB) newRawIterator(ro *opt.ReadOptions) iter.Iterator {
 	s := d.s
 
 	d.mu.RLock()
 	ti := s.version().getIterators(ro)
-	ii := make([]leveldb.Iterator, 0, len(ti)+2)
+	ii := make([]iter.Iterator, 0, len(ti)+2)
 	ii = append(ii, d.mem.NewIterator())
 	if d.fmem != nil {
 		ii = append(ii, d.fmem.NewIterator())
@@ -385,24 +387,24 @@ func (d *DB) newRawIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 	ii = append(ii, ti...)
 	d.mu.RUnlock()
 
-	return leveldb.NewMergedIterator(ii, s.cmp)
+	return iter.NewMergedIterator(ii, s.cmp)
 }
 
 // NewIterator return an iterator over the contents of the latest snapshot of
 // database. The result of NewIterator() is initially invalid (caller must
 // call Next or one of Seek method, ie First, Last or Seek).
-func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+func (d *DB) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 	p := d.newSnapshot()
-	iter := p.NewIterator(ro)
-	x, ok := iter.(*DBIter)
+	i := p.NewIterator(ro)
+	x, ok := i.(*Iterator)
 	if ok {
-		runtime.SetFinalizer(x, func(x *DBIter) {
+		runtime.SetFinalizer(x, func(x *Iterator) {
 			p.Release()
 		})
 	} else {
 		p.Release()
 	}
-	return iter
+	return i
 }
 
 // GetSnapshot return a handle to the current DB state.
@@ -411,7 +413,7 @@ func (d *DB) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
 // snapshot is no longer needed.
 func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 	if d.getClosed() {
-		return nil, ErrClosed
+		return nil, errors.ErrClosed
 	}
 	snapshot = d.newSnapshot()
 	runtime.SetFinalizer(snapshot, func(x *Snapshot) {
@@ -432,7 +434,7 @@ func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 //     of the sstables that make up the db contents.
 func (d *DB) GetProperty(property string) (value string, err error) {
 	if d.getClosed() {
-		return "", ErrClosed
+		return "", errors.ErrClosed
 	}
 	return
 }
@@ -446,7 +448,7 @@ func (d *DB) GetProperty(property string) (value string, err error) {
 // The results may not include the sizes of recently written data.
 func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
 	if d.getClosed() {
-		return nil, ErrClosed
+		return nil, errors.ErrClosed
 	}
 
 	v := d.s.version()
@@ -505,7 +507,7 @@ func (d *DB) Close() error {
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
-		return ErrClosed
+		return errors.ErrClosed
 	}
 	d.closed = true
 	d.mu.Unlock()
@@ -522,7 +524,7 @@ func (d *DB) Close() error {
 	}
 
 	d.s.tops.purgeCache()
-	d.s.opt.GetBlockCache().Purge(nil)
+	d.s.o.GetBlockCache().Purge(nil)
 
 	if d.logw != nil {
 		d.logw.Close()

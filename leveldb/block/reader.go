@@ -11,27 +11,31 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package block allows read and write sorted key/value.
 package block
 
 import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/comparer"
+	"leveldb/errors"
 )
 
-const maxInt = int(^uint(0) >> 1)
-
+// Reader represent a block reader.
 type Reader struct {
+	cmp comparer.BasicComparer
+
 	buf, rbuf []byte
 
 	restartLen   int
 	restartStart int
 }
 
-func NewReader(buf []byte) (b *Reader, err error) {
+// NewReader create new initialized block reader.
+func NewReader(buf []byte, cmp comparer.BasicComparer) (b *Reader, err error) {
 	if len(buf) < 8 {
-		err = leveldb.ErrCorrupt("block to short")
+		err = errors.ErrCorrupt("block to short")
 		return
 	}
 
@@ -41,11 +45,12 @@ func NewReader(buf []byte) (b *Reader, err error) {
 	// Calculate restart start offset
 	restartStart := len(buf) - int(restartLen)*4 - 4
 	if restartStart >= len(buf)-4 {
-		err = leveldb.ErrCorrupt("bad restart offset in block")
+		err = errors.ErrCorrupt("bad restart offset in block")
 		return
 	}
 
 	b = &Reader{
+		cmp:          cmp,
 		buf:          buf,
 		rbuf:         buf[restartStart : len(buf)-4],
 		restartLen:   int(restartLen),
@@ -54,24 +59,24 @@ func NewReader(buf []byte) (b *Reader, err error) {
 	return
 }
 
-func (b *Reader) NewIterator(cmp leveldb.Comparer) *Iterator {
+// NewIterator create new iterator over the block.
+func (b *Reader) NewIterator() *Iterator {
 	if b.restartStart == 0 {
 		return new(Iterator)
 	}
-	return &Iterator{b: b, cmp: cmp, rd: bytes.NewReader(b.rbuf)}
+	return &Iterator{b: b}
 }
 
-func (b *Reader) InitIterator(iter *Iterator, cmp leveldb.Comparer) {
+// InitIterator initialize given block iterator.
+func (b *Reader) InitIterator(i *Iterator) {
 	if b.restartStart == 0 {
-		iter.b = nil
+		i.b = nil
 	} else {
-		iter.b = b
-		iter.cmp = cmp
-		iter.rd = bytes.NewReader(b.rbuf)
+		i.b = b
 	}
-	iter.err = nil
-	iter.ri = 0
-	iter.rr = nil
+	i.err = nil
+	i.ri = 0
+	i.rr = nil
 }
 
 type keyVal struct {
@@ -140,7 +145,7 @@ func (r *restartRange) next() (err error) {
 	return
 
 corrupt:
-	return leveldb.ErrCorrupt("bad entry in block")
+	return errors.ErrCorrupt("bad entry in block")
 }
 
 func (r *restartRange) prev() (err error) {
@@ -209,12 +214,77 @@ func (r *restartRange) value() []byte {
 
 type Iterator struct {
 	b   *Reader
-	cmp leveldb.Comparer
-
 	err error
 	ri  int           // restart index
 	rr  *restartRange // restart range
-	rd  *bytes.Reader // restart reader
+}
+
+func (i *Iterator) getRestartOffset(idx int) (offset int, err error) {
+	if idx >= i.b.restartLen {
+		panic("out of range")
+	}
+
+	offset = int(binary.LittleEndian.Uint32(i.b.rbuf[idx*4:]))
+	return
+}
+
+func (i *Iterator) getRestartKey(idx int) (key []byte, err error) {
+	offset, err := i.getRestartOffset(idx)
+	if err != nil {
+		return
+	}
+
+	buf := i.b.buf[offset:]
+	shared, n := binary.Uvarint(buf) // shared key
+	buf = buf[n:]
+	nonShared, n := binary.Uvarint(buf) // non-shared key
+	buf = buf[n:]
+	valueLen, n := binary.Uvarint(buf) // value len
+	buf = buf[n:]
+
+	if shared > 0 || nonShared+valueLen > uint64(len(buf)) {
+		err = errors.ErrCorrupt("bad entry in block")
+		return
+	}
+
+	key = buf[:nonShared]
+	return
+}
+
+func (i *Iterator) getRestartRange(idx int) (r *restartRange, err error) {
+	var start, end int
+	start, err = i.getRestartOffset(idx)
+	if err != nil {
+		return
+	}
+	if start >= i.b.restartStart {
+		goto corrupt
+	}
+
+	if idx+1 < i.b.restartLen {
+		end, err = i.getRestartOffset(idx + 1)
+		if err != nil {
+			return
+		}
+		if end >= i.b.restartStart {
+			goto corrupt
+		}
+	} else {
+		end = i.b.restartStart
+	}
+
+	if start < end {
+		r = &restartRange{raw: i.b.buf[start:end]}
+		r.buf = bytes.NewBuffer(r.raw)
+		return
+	}
+
+corrupt:
+	return nil, errors.ErrCorrupt("bad restart range in block")
+}
+
+func (i *Iterator) setRestartRange() {
+	i.rr, i.err = i.getRestartRange(i.ri)
 }
 
 func (i *Iterator) Empty() bool {
@@ -248,7 +318,9 @@ func (i *Iterator) Seek(key []byte) (r bool) {
 		return false
 	}
 
-	j, k := 0, i.b.restartLen-1
+	b := i.b
+
+	j, k := 0, b.restartLen-1
 	for j < k {
 		h := j + (k-j+1)/2
 
@@ -258,7 +330,7 @@ func (i *Iterator) Seek(key []byte) (r bool) {
 			return false
 		}
 
-		if i.cmp.Compare(rkey, key) < 0 {
+		if b.cmp.Compare(rkey, key) < 0 {
 			j = h
 		} else {
 			k = h - 1
@@ -270,7 +342,7 @@ func (i *Iterator) Seek(key []byte) (r bool) {
 
 	// linear scan for first 'key' >= 'target'
 	for i.Next() {
-		if i.cmp.Compare(i.rr.key(), key) >= 0 {
+		if b.cmp.Compare(i.rr.key(), key) >= 0 {
 			return true
 		}
 	}
@@ -355,77 +427,3 @@ func (i *Iterator) Value() []byte {
 }
 
 func (i *Iterator) Error() error { return i.err }
-
-func (i *Iterator) getRestartOffset(idx int) (offset int, err error) {
-	if idx >= i.b.restartLen {
-		panic("out of range")
-	}
-
-	_, err = i.rd.Seek(int64(idx)*4, 0)
-	if err != nil {
-		return
-	}
-	var tmp uint32
-	err = binary.Read(i.rd, binary.LittleEndian, &tmp)
-	offset = int(tmp)
-	return
-}
-
-func (i *Iterator) getRestartKey(idx int) (key []byte, err error) {
-	offset, err := i.getRestartOffset(idx)
-	if err != nil {
-		return
-	}
-
-	buf := i.b.buf[offset:]
-	shared, n := binary.Uvarint(buf) // shared key
-	buf = buf[n:]
-	nonShared, n := binary.Uvarint(buf) // non-shared key
-	buf = buf[n:]
-	valueLen, n := binary.Uvarint(buf) // value len
-	buf = buf[n:]
-
-	if shared > 0 || nonShared+valueLen > uint64(len(buf)) {
-		err = leveldb.ErrCorrupt("bad entry in block")
-		return
-	}
-
-	key = buf[:nonShared]
-	return
-}
-
-func (i *Iterator) getRestartRange(idx int) (r *restartRange, err error) {
-	var start, end int
-	start, err = i.getRestartOffset(idx)
-	if err != nil {
-		return
-	}
-	if start >= i.b.restartStart {
-		goto corrupt
-	}
-
-	if idx+1 < i.b.restartLen {
-		end, err = i.getRestartOffset(idx + 1)
-		if err != nil {
-			return
-		}
-		if end >= i.b.restartStart {
-			goto corrupt
-		}
-	} else {
-		end = i.b.restartStart
-	}
-
-	if start < end {
-		r = &restartRange{raw: i.b.buf[start:end]}
-		r.buf = bytes.NewBuffer(r.raw)
-		return
-	}
-
-corrupt:
-	return nil, leveldb.ErrCorrupt("bad restart range in block")
-}
-
-func (i *Iterator) setRestartRange() {
-	i.rr, i.err = i.getRestartRange(i.ri)
-}

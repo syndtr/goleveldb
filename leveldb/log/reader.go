@@ -11,15 +11,17 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package log allows read and write sequence of data block.
 package log
 
 import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/hash"
 )
 
+// Reader represent a log reader.
 type Reader struct {
 	r        io.ReadSeeker
 	checksum bool
@@ -29,6 +31,7 @@ type Reader struct {
 	err    error
 }
 
+// NewReader create new initialized log reader.
 func NewReader(r io.ReadSeeker, checksum bool) *Reader {
 	return &Reader{
 		r:        r,
@@ -37,6 +40,7 @@ func NewReader(r io.ReadSeeker, checksum bool) *Reader {
 	}
 }
 
+// Skip allow skip given number bytes, rounded by single block.
 func (l *Reader) Skip(skip int) error {
 	if skip > 0 {
 		rest := skip % kBlockSize
@@ -55,6 +59,8 @@ func (l *Reader) Skip(skip int) error {
 	return nil
 }
 
+// Next read the next return, return true if there is next record,
+// otherwise return false.
 func (l *Reader) Next() bool {
 	if l.err != nil {
 		return false
@@ -116,10 +122,12 @@ func (l *Reader) Next() bool {
 	return false
 }
 
+// Record return current record.
 func (l *Reader) Record() []byte {
 	return l.record
 }
 
+// Error return any record produced by previous operation.
 func (l *Reader) Error() error {
 	return l.err
 }
@@ -149,7 +157,7 @@ func (l *Reader) read() (ret []byte, rtype uint, err error) {
 		if err != nil {
 			return
 		}
-		recCrc = leveldb.UnmaskCRC32(recCrc)
+		recCrc = hash.UnmaskCRC32(recCrc)
 	} else {
 		_, err = l.r.Seek(4, 0)
 		if err != nil {
@@ -187,7 +195,7 @@ func (l *Reader) read() (ret []byte, rtype uint, err error) {
 	l.bleft -= recLen
 
 	if l.checksum {
-		crc := leveldb.NewCRC32C()
+		crc := hash.NewCRC32C()
 		crc.Write([]byte{byte(rtype)})
 		crc.Write(ret)
 		if crc.Sum32() != recCrc {

@@ -11,13 +11,14 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+package cache
 
 import (
 	"sync"
 	"sync/atomic"
 )
 
+// LRUCache represent a LRU cache state.
 type LRUCache struct {
 	sync.Mutex
 
@@ -27,6 +28,7 @@ type LRUCache struct {
 	size     int
 }
 
+// NewLRUCache create new initialized LRU cache.
 func NewLRUCache(capacity int) *LRUCache {
 	c := &LRUCache{
 		table:    make(map[uint64]*lruNs),
@@ -37,6 +39,7 @@ func NewLRUCache(capacity int) *LRUCache {
 	return c
 }
 
+// GetNamespace return namespace object for given id.
 func (c *LRUCache) GetNamespace(id uint64) CacheNamespace {
 	c.Lock()
 	defer c.Unlock()
@@ -53,6 +56,7 @@ func (c *LRUCache) GetNamespace(id uint64) CacheNamespace {
 	return p
 }
 
+// Purge purge entire cache.
 func (c *LRUCache) Purge(finalizer func()) {
 	c.Lock()
 	top := &c.root
@@ -223,6 +227,8 @@ func (e *lruElem) evict() {
 		e.delFinalizer()
 		e.delFinalizer = nil
 	}
+
+	e.value = nil
 }
 
 func (e *lruElem) makeObject() (obj *lruObject) {

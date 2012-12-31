@@ -11,28 +11,5 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package leveldb implements LevelDB key/value database.
 package leveldb
-
-import "errors"
-
-var (
-	ErrNotFound = errors.New("not found")
-)
-
-type ErrInvalid string
-
-func (e ErrInvalid) Error() string {
-	if e == "" {
-		return "invalid argument"
-	}
-	return "invalid argument: " + string(e)
-}
-
-type ErrCorrupt string
-
-func (e ErrCorrupt) Error() string {
-	if e == "" {
-		return "leveldb corrupted"
-	}
-	return "leveldb corrupted: " + string(e)
-}

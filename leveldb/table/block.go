@@ -16,7 +16,9 @@ package table
 import (
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/errors"
+	"leveldb/hash"
+	"leveldb/opt"
 )
 
 // bInfo holds information about where and how long a block is
@@ -31,7 +33,7 @@ func (p *bInfo) decodeFrom(b []byte) (int, error) {
 		p.size, m = binary.Uvarint(b[n:])
 	}
 	if n <= 0 || m <= 0 {
-		return 0, leveldb.ErrCorrupt("bad block handle")
+		return 0, errors.ErrCorrupt("bad block handle")
 	}
 	return n + m, nil
 }
@@ -66,6 +68,7 @@ func readFullAt(r io.ReaderAt, buf []byte, off int64) (n int, err error) {
 	return
 }
 
+// readAll read entire referenced block.
 func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 	raw := make([]byte, p.size+5)
 	_, err = readFullAt(r, raw, int64(p.offset))
@@ -78,21 +81,21 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 
 	if checksum {
 		sum := binary.LittleEndian.Uint32(crcb)
-		sum = leveldb.UnmaskCRC32(sum)
-		crc := leveldb.NewCRC32C()
+		sum = hash.UnmaskCRC32(sum)
+		crc := hash.NewCRC32C()
 		crc.Write(raw)
 		if crc.Sum32() != sum {
-			err = leveldb.ErrCorrupt("block checksum mismatch")
+			err = errors.ErrCorrupt("block checksum mismatch")
 			return
 		}
 	}
 
-	compression := leveldb.Compression(raw[len(raw)-1])
+	compression := opt.Compression(raw[len(raw)-1])
 	b = raw[:len(raw)-1]
 
 	switch compression {
-	case leveldb.SnappyCompression:
-		compression = leveldb.NoCompression
+	case opt.SnappyCompression:
+		compression = opt.NoCompression
 	}
 
 	return

@@ -13,14 +13,19 @@
 
 package db
 
-import "leveldb"
+import (
+	"leveldb/comparer"
+	"leveldb/errors"
+	"leveldb/iter"
+)
 
-var errIKeyCorrupt = leveldb.ErrCorrupt("internal key corrupted")
+var errIKeyCorrupt = errors.ErrCorrupt("internal key corrupted")
 
-type DBIter struct {
-	cmp  leveldb.BasicComparer
-	iter leveldb.Iterator
-	seq  uint64
+// Iterator represent an interator states over a database session.
+type Iterator struct {
+	cmp comparer.BasicComparer
+	it  iter.Iterator
+	seq uint64
 
 	valid    bool
 	backward bool
@@ -30,20 +35,20 @@ type DBIter struct {
 	err      error
 }
 
-func newDBIter(seq uint64, iter leveldb.Iterator, cmp leveldb.BasicComparer) *DBIter {
-	return &DBIter{cmp: cmp, iter: iter, seq: seq}
+func newIterator(seq uint64, it iter.Iterator, cmp comparer.BasicComparer) *Iterator {
+	return &Iterator{cmp: cmp, it: it, seq: seq}
 }
 
-func (i *DBIter) clear() {
+func (i *Iterator) clear() {
 	i.skey, i.sval = nil, nil
 }
 
-func (i *DBIter) scanNext(skip []byte) {
+func (i *Iterator) scanNext(skip []byte) {
 	cmp := i.cmp
-	iter := i.iter
+	it := i.it
 
 	for {
-		pkey := iKey(iter.Key()).parse()
+		pkey := iKey(it.Key()).parse()
 		if pkey == nil {
 			i.err = errIKeyCorrupt
 			i.valid = false
@@ -60,7 +65,7 @@ func (i *DBIter) scanNext(skip []byte) {
 				}
 			}
 		}
-		if !iter.Next() {
+		if !it.Next() {
 			break
 		}
 	}
@@ -68,14 +73,14 @@ func (i *DBIter) scanNext(skip []byte) {
 	i.valid = false
 }
 
-func (i *DBIter) scanPrev() {
+func (i *Iterator) scanPrev() {
 	cmp := i.cmp
-	iter := i.iter
+	it := i.it
 
 	vtype := tDel
-	if iter.Valid() {
+	if it.Valid() {
 		for {
-			pkey := iKey(iter.Key()).parse()
+			pkey := iKey(it.Key()).parse()
 			if pkey == nil {
 				i.err = errIKeyCorrupt
 				i.valid = false
@@ -91,10 +96,10 @@ func (i *DBIter) scanPrev() {
 					i.skey = nil
 				} else {
 					i.skey = pkey.ukey
-					i.sval = iter.Value()
+					i.sval = it.Value()
 				}
 			}
-			if !iter.Prev() {
+			if !it.Prev() {
 				break
 			}
 		}
@@ -109,15 +114,15 @@ func (i *DBIter) scanPrev() {
 	}
 }
 
-func (i *DBIter) Valid() bool {
+func (i *Iterator) Valid() bool {
 	return i.valid
 }
 
-func (i *DBIter) First() bool {
+func (i *Iterator) First() bool {
 	i.clear()
 	i.last = false
 	i.backward = false
-	if i.iter.First() {
+	if i.it.First() {
 		i.scanNext(nil)
 	} else {
 		i.valid = false
@@ -126,11 +131,11 @@ func (i *DBIter) First() bool {
 	return i.valid
 }
 
-func (i *DBIter) Last() bool {
+func (i *Iterator) Last() bool {
 	i.clear()
 	i.last = false
 	i.backward = true
-	if i.iter.Last() {
+	if i.it.Last() {
 		i.scanPrev()
 	} else {
 		i.valid = false
@@ -139,12 +144,12 @@ func (i *DBIter) Last() bool {
 	return i.valid
 }
 
-func (i *DBIter) Seek(key []byte) bool {
+func (i *Iterator) Seek(key []byte) bool {
 	i.clear()
 	i.last = false
 	i.backward = false
 	ikey := newIKey(key, i.seq, tSeek)
-	if i.iter.Seek(ikey) {
+	if i.it.Seek(ikey) {
 		i.scanNext(nil)
 	} else {
 		i.valid = false
@@ -153,8 +158,8 @@ func (i *DBIter) Seek(key []byte) bool {
 	return i.valid
 }
 
-func (i *DBIter) Next() bool {
-	iter := i.iter
+func (i *Iterator) Next() bool {
+	it := i.it
 
 	if !i.valid {
 		if !i.last {
@@ -166,21 +171,21 @@ func (i *DBIter) Next() bool {
 	if i.backward {
 		i.clear()
 		i.backward = false
-		if !iter.Next() {
+		if !it.Next() {
 			i.valid = false
 			return false
 		}
 	}
 
-	ikey := iKey(iter.Key())
+	ikey := iKey(it.Key())
 	i.scanNext(ikey.ukey())
 	i.last = !i.valid
 	return i.valid
 }
 
-func (i *DBIter) Prev() bool {
+func (i *Iterator) Prev() bool {
 	cmp := i.cmp
-	iter := i.iter
+	it := i.it
 
 	if !i.valid {
 		if i.last {
@@ -190,13 +195,13 @@ func (i *DBIter) Prev() bool {
 	}
 
 	if !i.backward {
-		lkey := iKey(iter.Key()).ukey()
+		lkey := iKey(it.Key()).ukey()
 		for {
-			if !iter.Prev() {
+			if !it.Prev() {
 				i.valid = false
 				return false
 			}
-			ukey := iKey(iter.Key()).ukey()
+			ukey := iKey(it.Key()).ukey()
 			if cmp.Compare(ukey, lkey) < 0 {
 				break
 			}
@@ -208,29 +213,29 @@ func (i *DBIter) Prev() bool {
 	return i.valid
 }
 
-func (i *DBIter) Key() []byte {
+func (i *Iterator) Key() []byte {
 	if !i.valid {
 		return nil
 	}
 	if i.backward {
 		return i.skey
 	}
-	return iKey(i.iter.Key()).ukey()
+	return iKey(i.it.Key()).ukey()
 }
 
-func (i *DBIter) Value() []byte {
+func (i *Iterator) Value() []byte {
 	if !i.valid {
 		return nil
 	}
 	if i.backward {
 		return i.sval
 	}
-	return i.iter.Value()
+	return i.it.Value()
 }
 
-func (i *DBIter) Error() error {
+func (i *Iterator) Error() error {
 	if i.err != nil {
 		return i.err
 	}
-	return i.iter.Error()
+	return i.it.Error()
 }

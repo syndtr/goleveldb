@@ -14,9 +14,11 @@
 package db
 
 import (
-	"leveldb"
 	"leveldb/descriptor"
+	"leveldb/errors"
+	"leveldb/iter"
 	"leveldb/log"
+	"leveldb/opt"
 	"sync"
 )
 
@@ -24,7 +26,7 @@ type session struct {
 	sync.RWMutex
 
 	desc   descriptor.Descriptor
-	opt    *iOptions
+	o      *iOptions
 	cmp    *iComparer
 	filter *iFilter
 	tops   *tOps
@@ -43,16 +45,16 @@ type session struct {
 	}
 }
 
-func newSession(desc descriptor.Descriptor, opt *leveldb.Options) *session {
+func newSession(desc descriptor.Descriptor, o *opt.Options) *session {
 	s := new(session)
 	s.desc = desc
-	s.opt = &iOptions{s, opt}
-	s.cmp = &iComparer{opt.GetComparer()}
-	filter := opt.GetFilter()
+	s.o = &iOptions{s, o}
+	s.cmp = &iComparer{o.GetComparer()}
+	filter := o.GetFilter()
 	if filter != nil {
 		s.filter = &iFilter{filter}
 	}
-	s.tops = newTableOps(s, s.opt.GetMaxOpenFiles())
+	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
 	return s
 }
@@ -94,7 +96,7 @@ func (s *session) recover() (err error) {
 		}
 
 		if rec.hasComparer && rec.comparer != cmpName {
-			return leveldb.ErrInvalid("invalid comparer, " +
+			return errors.ErrInvalid("invalid comparer, " +
 				"want '" + cmpName + "', " +
 				"got '" + rec.comparer + "'")
 		}
@@ -125,11 +127,11 @@ func (s *session) recover() (err error) {
 
 	switch false {
 	case srec.hasNextNum:
-		err = leveldb.ErrCorrupt("manifest missing next file number")
+		err = errors.ErrCorrupt("manifest missing next file number")
 	case srec.hasLogNum:
-		err = leveldb.ErrCorrupt("manifest missing log file number")
+		err = errors.ErrCorrupt("manifest missing log file number")
 	case srec.hasSeq:
-		err = leveldb.ErrCorrupt("manifest missing seq number")
+		err = errors.ErrCorrupt("manifest missing seq number")
 	}
 	if err != nil {
 		return
@@ -342,7 +344,7 @@ func (c *compaction) shouldStopBefore(key iKey) bool {
 	return false
 }
 
-func (c *compaction) newIterator() leveldb.Iterator {
+func (c *compaction) newIterator() iter.Iterator {
 	s := c.s
 	icmp := s.cmp
 
@@ -351,9 +353,9 @@ func (c *compaction) newIterator() leveldb.Iterator {
 	if c.level == 0 {
 		icap = len(c.tables[0]) + 1
 	}
-	iters := make([]leveldb.Iterator, 0, icap)
+	its := make([]iter.Iterator, 0, icap)
 
-	ro := &leveldb.ReadOptions{}
+	ro := &opt.ReadOptions{}
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {
@@ -362,13 +364,13 @@ func (c *compaction) newIterator() leveldb.Iterator {
 
 		if level+i == 0 {
 			for _, t := range tt {
-				iters = append(iters, s.tops.newIterator(t, ro))
+				its = append(its, s.tops.newIterator(t, ro))
 			}
 		} else {
-			iter := leveldb.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
-			iters = append(iters, iter)
+			it := iter.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
+			its = append(its, it)
 		}
 	}
 
-	return leveldb.NewMergedIterator(iters, icmp)
+	return iter.NewMergedIterator(its, icmp)
 }

@@ -11,7 +11,16 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+// Package filter provides interface and implementation of probabilistic
+// data structure.
+//
+// The filter is resposible for creating small filter from a set of a key.
+// These filter will then used to test whether a key is a member of a set.
+// In many cases, a filter can cut down the number of disk seeks form a
+// handful to a single disk seek per DB.Get() call.
+//
+// Most people will want to use the builtin bloom filter support.
+package filter
 
 import "io"
 
@@ -24,7 +33,7 @@ type Filter interface {
 
 	// keys[0,n-1] contains a list of keys (potentially with duplicates)
 	// that are ordered according to the user supplied comparer.
-	// Return a filter that summarizes keys[0,n-1].
+	// Write the filter that summarizes keys[0,n-1] to buf.
 	CreateFilter(keys [][]byte, buf io.Writer)
 
 	// "filter" contains the data appended by a preceding call to

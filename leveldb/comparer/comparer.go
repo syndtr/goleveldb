@@ -11,10 +11,11 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+// Package comparer provides interface and implementation for ordering
+// sets of data.
+package comparer
 
-import "bytes"
-
+// BasicComparer is the interface that wraps the basic Compare method.
 type BasicComparer interface {
 	// Three-way comparison.
 	//
@@ -48,56 +49,15 @@ type Comparer interface {
 	// i.e., an implementation of this method that does nothing is correct.
 	// NOTE: Don't modify content of either 'a' or 'b', if modification
 	// is necessary copy it first. It is ok to return slice of it.
-	FindShortestSeparator(a, b []byte) []byte
+	Separator(a, b []byte) []byte
 
 	// Changes 'b' to a short string >= 'b'.
 	// Simple comparer implementations may return with 'b' unchanged,
 	// i.e., an implementation of this method that does nothing is correct.
 	// NOTE: Don't modify content of 'b', if modification is necessary
 	// copy it first. It is ok to return slice of it.
-	FindShortSuccessor(b []byte) []byte
+	Successor(b []byte) []byte
 }
 
+// DefaultComparer are default comparer used by LevelDB.
 var DefaultComparer = BytesComparer{}
-
-type BytesComparer struct{}
-
-func (BytesComparer) Compare(a, b []byte) int {
-	return bytes.Compare(a, b)
-}
-
-func (BytesComparer) Name() string {
-	return "leveldb.BytewiseComparator"
-}
-
-func (BytesComparer) FindShortestSeparator(a, b []byte) []byte {
-	i, n := 0, len(a)
-	if n > len(b) {
-		n = len(b)
-	}
-	for i < n && a[i] == b[i] {
-		i++
-	}
-
-	if i >= n {
-		// Do not shorten if one string is a prefix of the other
-	} else if c := a[i]; c < 0xff && c+1 < b[i] {
-		r := make([]byte, i+1)
-		copy(r, a)
-		r[i]++
-		return r
-	}
-	return a
-}
-
-func (BytesComparer) FindShortSuccessor(b []byte) []byte {
-	var res []byte
-	for _, c := range b {
-		if c != 0xff {
-			res = append(res, c+1)
-			return res
-		}
-		res = append(res, c)
-	}
-	return b
-}

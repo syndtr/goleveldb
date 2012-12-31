@@ -16,10 +16,13 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"leveldb"
 	"leveldb/block"
+	"leveldb/comparer"
 	"leveldb/descriptor"
+	"leveldb/filter"
+	"leveldb/iter"
 	"leveldb/memdb"
+	"leveldb/opt"
 	"leveldb/table"
 	"math/rand"
 	"runtime"
@@ -30,7 +33,7 @@ type stConstructor interface {
 	init(t *testing.T, ho *stHarnessOpt) error
 	add(key, value string) error
 	finish() (int, error)
-	newIterator() leveldb.Iterator
+	newIterator() iter.Iterator
 	customTest(h *stHarness)
 }
 
@@ -63,12 +66,12 @@ func (p *stConstructor_Block) finish() (size int, err error) {
 		p.t.Errorf("block: calculated size doesn't equal with actual size, %d != %d", csize, size)
 	}
 
-	p.br, err = block.NewReader(buf)
+	p.br, err = block.NewReader(buf, comparer.BytesComparer{})
 	return
 }
 
-func (p *stConstructor_Block) newIterator() leveldb.Iterator {
-	return p.br.NewIterator(leveldb.DefaultComparer)
+func (p *stConstructor_Block) newIterator() iter.Iterator {
+	return p.br.NewIterator()
 }
 
 func (p *stConstructor_Block) customTest(h *stHarness) {}
@@ -89,7 +92,7 @@ func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 	p.file = newTestDesc(nil).GetFile(0, descriptor.TypeTable)
 	p.w, _ = p.file.Create()
 
-	o := &leveldb.Options{
+	o := &opt.Options{
 		BlockSize:            512,
 		BlockRestartInterval: 3,
 	}
@@ -119,20 +122,20 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 	}
 
 	p.r, _ = p.file.Open()
-	o := &leveldb.Options{
+	o := &opt.Options{
 		BlockRestartInterval: 3,
-		Filter:               leveldb.NewBloomFilter(10),
+		Filter:               filter.NewBloomFilter(10),
 	}
 	p.tr, err = table.NewReader(p.r, fsize, o, nil)
 	return int(fsize), nil
 }
 
-func (p *stConstructor_Table) newIterator() leveldb.Iterator {
-	return p.tr.NewIterator(&leveldb.ReadOptions{})
+func (p *stConstructor_Table) newIterator() iter.Iterator {
+	return p.tr.NewIterator(&opt.ReadOptions{})
 }
 
 func (p *stConstructor_Table) customTest(h *stHarness) {
-	ro := &leveldb.ReadOptions{}
+	ro := &opt.ReadOptions{}
 	for i := range h.keys {
 		rkey, rval, err := p.tr.Get([]byte(h.keys[i]), ro)
 		if err != nil {
@@ -159,7 +162,7 @@ type stConstructor_MemDB struct {
 func (p *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
-	p.mem = memdb.New(leveldb.DefaultComparer)
+	p.mem = memdb.New(comparer.BytesComparer{})
 	return nil
 }
 
@@ -172,7 +175,7 @@ func (p *stConstructor_MemDB) finish() (size int, err error) {
 	return int(p.mem.Size()), nil
 }
 
-func (p *stConstructor_MemDB) newIterator() leveldb.Iterator {
+func (p *stConstructor_MemDB) newIterator() iter.Iterator {
 	return p.mem.NewIterator()
 }
 
@@ -188,7 +191,7 @@ func (p *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
 	for i := range p.mem {
-		p.mem[i] = memdb.New(leveldb.DefaultComparer)
+		p.mem[i] = memdb.New(comparer.BytesComparer{})
 	}
 	return nil
 }
@@ -206,12 +209,12 @@ func (p *stConstructor_MergedMemDB) finish() (size int, err error) {
 	return
 }
 
-func (p *stConstructor_MergedMemDB) newIterator() leveldb.Iterator {
-	var iters []leveldb.Iterator
+func (p *stConstructor_MergedMemDB) newIterator() iter.Iterator {
+	var its []iter.Iterator
 	for _, m := range p.mem {
-		iters = append(iters, m.NewIterator())
+		its = append(its, m.NewIterator())
 	}
-	return leveldb.NewMergedIterator(iters, leveldb.DefaultComparer)
+	return iter.NewMergedIterator(its, comparer.BytesComparer{})
 }
 
 func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}
@@ -220,8 +223,8 @@ type stConstructor_DB struct {
 	t *testing.T
 
 	desc *testDesc
-	ro   *leveldb.ReadOptions
-	wo   *leveldb.WriteOptions
+	ro   *opt.ReadOptions
+	wo   *opt.WriteOptions
 	db   *DB
 }
 
@@ -229,13 +232,13 @@ func (p *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 	ho.Randomize = true
 	p.t = t
 	p.desc = newTestDesc(nil)
-	opt := &leveldb.Options{
-		Flag:        leveldb.OFCreateIfMissing,
+	o := &opt.Options{
+		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,
 	}
-	p.ro = &leveldb.ReadOptions{}
-	p.wo = &leveldb.WriteOptions{}
-	p.db, err = Open(p.desc, opt)
+	p.ro = &opt.ReadOptions{}
+	p.wo = &opt.WriteOptions{}
+	p.db, err = Open(p.desc, o)
 	return
 }
 
@@ -248,7 +251,7 @@ func (p *stConstructor_DB) finish() (size int, err error) {
 	return p.desc.Sizes(), nil
 }
 
-func (p *stConstructor_DB) newIterator() leveldb.Iterator {
+func (p *stConstructor_DB) newIterator() iter.Iterator {
 	return p.db.NewIterator(p.ro)
 }
 
@@ -335,27 +338,27 @@ func (h *stHarness) test(name string, c stConstructor) {
 }
 
 func (h *stHarness) testScan(name string, c stConstructor) {
-	iter := c.newIterator()
+	it := c.newIterator()
 
 	for i := 0; i < 3; i++ {
-		if iter.Prev() {
-			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (iter=%d)", i)
-		} else if iter.Valid() {
-			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (iter=%d)", i)
+		if it.Prev() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (it=%d)", i)
+		} else if it.Valid() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (it=%d)", i)
 		}
 	}
 
-	iter = c.newIterator()
+	it = c.newIterator()
 	var first, last bool
 
 first:
 	for i := range h.keys {
-		if !iter.Next() {
+		if !it.Next() {
 			h.t.Error(name + ": SortedTest: Scan: Forward: unxepected eof")
-		} else if !iter.Valid() {
+		} else if !it.Valid() {
 			h.t.Error(name + ": SortedTest: Scan: Forward: Valid != true")
 		}
-		rkey, rval := string(iter.Key()), string(iter.Value())
+		rkey, rval := string(it.Key()), string(it.Value())
 		if rkey != h.keys[i] {
 			h.t.Errorf(name+": SortedTest: Scan: Forward: key are invalid, got=%q want=%q",
 				shorten(rkey), shorten(h.keys[i]))
@@ -370,12 +373,12 @@ first:
 
 	if !first {
 		first = true
-		if !iter.First() {
+		if !it.First() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: unxepected eof")
-		} else if !iter.Valid() {
+		} else if !it.Valid() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: Valid != true")
 		}
-		rkey, rval := string(iter.Key()), string(iter.Value())
+		rkey, rval := string(it.Key()), string(it.Value())
 		if rkey != h.keys[0] {
 			h.t.Errorf(name+": SortedTest: Scan: ToFirst: key are invalid, got=%q want=%q",
 				shorten(rkey), shorten(h.keys[0]))
@@ -384,9 +387,9 @@ first:
 			h.t.Errorf(name+": SortedTest: Scan: ToFirst: value are invalid, got=%q want=%q",
 				shorten(rval), shorten(h.values[0]))
 		}
-		if iter.Prev() {
+		if it.Prev() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: expecting eof")
-		} else if iter.Valid() {
+		} else if it.Valid() {
 			h.t.Error(name + ": SortedTest: Scan: ToFirst: Valid != false")
 		}
 		goto first
@@ -394,20 +397,20 @@ first:
 
 last:
 	for i := 0; i < 3; i++ {
-		if iter.Next() {
-			h.t.Errorf(name+": SortedTest: Scan: Forward: expecting eof (iter=%d)", i)
-		} else if iter.Valid() {
-			h.t.Errorf(name+": SortedTest: Scan: Forward: Valid != false (iter=%d)", i)
+		if it.Next() {
+			h.t.Errorf(name+": SortedTest: Scan: Forward: expecting eof (it=%d)", i)
+		} else if it.Valid() {
+			h.t.Errorf(name+": SortedTest: Scan: Forward: Valid != false (it=%d)", i)
 		}
 	}
 
 	for i := len(h.keys) - 1; i >= 0; i-- {
-		if !iter.Prev() {
+		if !it.Prev() {
 			h.t.Error(name + ": SortedTest: Scan: Backward: unxepected eof")
-		} else if !iter.Valid() {
+		} else if !it.Valid() {
 			h.t.Error(name + ": SortedTest: Scan: Backward: Valid != true")
 		}
-		rkey, rval := string(iter.Key()), string(iter.Value())
+		rkey, rval := string(it.Key()), string(it.Value())
 		if rkey != h.keys[i] {
 			h.t.Errorf(name+": SortedTest: Scan: Backward: key are invalid, got=%q want=%q",
 				shorten(rkey), shorten(h.keys[i]))
@@ -420,13 +423,13 @@ last:
 
 	if !last {
 		last = true
-		if !iter.Last() {
+		if !it.Last() {
 			h.t.Error(name + ": SortedTest: Scan: ToLast: unxepected eof")
-		} else if !iter.Valid() {
+		} else if !it.Valid() {
 			h.t.Error(name + ": SortedTest: Scan: ToLast: Valid != true")
 		}
 		i := len(h.keys) - 1
-		rkey, rval := string(iter.Key()), string(iter.Value())
+		rkey, rval := string(it.Key()), string(it.Value())
 		if rkey != h.keys[i] {
 			h.t.Errorf(name+": SortedTest: Scan: ToLast: key are invalid, got=%q want=%q",
 				shorten(rkey), shorten(h.keys[i]))
@@ -439,28 +442,28 @@ last:
 	}
 
 	for i := 0; i < 3; i++ {
-		if iter.Prev() {
-			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (iter=%d)", i)
-		} else if iter.Valid() {
-			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (iter=%d)", i)
+		if it.Prev() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (it=%d)", i)
+		} else if it.Valid() {
+			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (it=%d)", i)
 		}
 	}
 }
 
 func (h *stHarness) testSeek(name string, c stConstructor) {
-	iter := c.newIterator()
+	it := c.newIterator()
 
 	for i, key := range h.keys {
-		if !iter.Seek([]byte(key)) {
+		if !it.Seek([]byte(key)) {
 			h.t.Errorf(name+": SortedTest: Seek: key %q is not found, err: %v",
-				shorten(key), iter.Error())
+				shorten(key), it.Error())
 			continue
-		} else if !iter.Valid() {
+		} else if !it.Valid() {
 			h.t.Error(name + ": SortedTest: Seek: Valid != true")
 		}
 
 		for j := i; j >= 0; j-- {
-			rkey, rval := string(iter.Key()), string(iter.Value())
+			rkey, rval := string(it.Key()), string(it.Value())
 			if rkey != h.keys[j] {
 				h.t.Errorf(name+": SortedTest: Seek: key are invalid, got=%q want=%q",
 					shorten(rkey), shorten(h.keys[j]))
@@ -469,11 +472,11 @@ func (h *stHarness) testSeek(name string, c stConstructor) {
 				h.t.Errorf(name+": SortedTest: Seek: value are invalid, got=%q want=%q",
 					shorten(rval), shorten(h.values[j]))
 			}
-			ret := iter.Prev()
+			ret := it.Prev()
 			if j == 0 && ret {
 				h.t.Error(name + ": SortedTest: Seek: Backward: expecting eof")
 			} else if j > 0 && !ret {
-				h.t.Error(name+": SortedTest: Seek: Backward: unxepected eof, err: ", iter.Error())
+				h.t.Error(name+": SortedTest: Seek: Backward: unxepected eof, err: ", it.Error())
 			}
 		}
 	}

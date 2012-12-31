@@ -11,13 +11,15 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+// Package hash provides hashing utilities used by leveldb.
+package hash
 
 import (
 	"bytes"
 	"encoding/binary"
 )
 
+// Hash return hash of the given data.
 func Hash(data []byte, seed uint32) uint32 {
 	// Similar to murmur hash
 	var m uint32 = 0xc6a4a793

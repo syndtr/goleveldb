@@ -14,6 +14,7 @@
 package db
 
 import (
+	"leveldb/errors"
 	"leveldb/log"
 	"leveldb/memdb"
 )
@@ -82,7 +83,7 @@ func (d *DB) ok() error {
 		return d.err
 	}
 	if d.closed {
-		return ErrClosed
+		return errors.ErrClosed
 	}
 	return nil
 }

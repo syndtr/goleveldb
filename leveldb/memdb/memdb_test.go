@@ -14,12 +14,12 @@
 package memdb
 
 import (
-	"leveldb"
+	"leveldb/comparer"
 	"testing"
 )
 
 func TestPutRemove(t *testing.T) {
-	p := New(leveldb.DefaultComparer)
+	p := New(comparer.BytesComparer{})
 
 	assertExist := func(key string, want bool) {
 		got := p.Contains([]byte(key))

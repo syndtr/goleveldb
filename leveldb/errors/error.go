@@ -11,29 +11,31 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package db
+// Package errors implements functions to manipulate errors.
+package errors
 
-import (
-	"io"
-	"leveldb/filter"
+import "errors"
+
+var (
+	ErrNotFound         = errors.New("not found")
+	ErrClosed           = ErrInvalid("database closed")
+	ErrSnapshotReleased = ErrInvalid("snapshot released")
 )
 
-type iFilter struct {
-	filter filter.Filter
-}
+type ErrInvalid string
 
-func (p *iFilter) Name() string {
-	return p.filter.Name()
-}
-
-func (p *iFilter) CreateFilter(keys [][]byte, buf io.Writer) {
-	nkeys := make([][]byte, len(keys))
-	for i := range keys {
-		nkeys[i] = iKey(keys[i]).ukey()
+func (e ErrInvalid) Error() string {
+	if e == "" {
+		return "invalid argument"
 	}
-	p.filter.CreateFilter(nkeys, buf)
+	return "invalid argument: " + string(e)
 }
 
-func (p *iFilter) KeyMayMatch(key, filter []byte) bool {
-	return p.filter.KeyMayMatch(iKey(key).ukey(), filter)
+type ErrCorrupt string
+
+func (e ErrCorrupt) Error() string {
+	if e == "" {
+		return "leveldb corrupted"
+	}
+	return "leveldb corrupted: " + string(e)
 }

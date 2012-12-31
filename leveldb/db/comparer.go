@@ -13,10 +13,10 @@
 
 package db
 
-import "leveldb"
+import "leveldb/comparer"
 
 type iComparer struct {
-	cmp leveldb.Comparer
+	cmp comparer.Comparer
 }
 
 func (p *iComparer) Name() string {
@@ -37,9 +37,9 @@ func (p *iComparer) Compare(a, b []byte) int {
 	return r
 }
 
-func (p *iComparer) FindShortestSeparator(a, b []byte) []byte {
+func (p *iComparer) Separator(a, b []byte) []byte {
 	ua, ub := iKey(a).ukey(), iKey(b).ukey()
-	r := p.cmp.FindShortestSeparator(ua, ub)
+	r := p.cmp.Separator(ua, ub)
 	if len(r) < len(ua) && p.cmp.Compare(ua, r) < 0 {
 		rr := make([]byte, len(r)+8)
 		copy(rr, r)
@@ -49,9 +49,9 @@ func (p *iComparer) FindShortestSeparator(a, b []byte) []byte {
 	return append(r, a[len(r):]...)
 }
 
-func (p *iComparer) FindShortSuccessor(b []byte) []byte {
+func (p *iComparer) Successor(b []byte) []byte {
 	ub := iKey(b).ukey()
-	r := p.cmp.FindShortSuccessor(ub)
+	r := p.cmp.Successor(ub)
 	if len(r) < len(ub) && p.cmp.Compare(ub, r) < 0 {
 		rr := make([]byte, len(r)+8)
 		copy(rr, r)

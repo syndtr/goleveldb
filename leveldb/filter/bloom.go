@@ -11,20 +11,24 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+package filter
 
 import (
 	"io"
+	"leveldb/hash"
 )
 
-func BloomHash(key []byte) uint32 {
-	return Hash(key, 0xbc9f1d34)
+func bloomHash(key []byte) uint32 {
+	return hash.Hash(key, 0xbc9f1d34)
 }
 
+// BloomFilter filter represent a bloom filter.
 type BloomFilter struct {
 	bitsPerKey, k uint32
 }
 
+// NewBloomFilter create new initialized bloom filter for given
+// bitsPerKey.
 func NewBloomFilter(bitsPerKey int) *BloomFilter {
 	// We intentionally round down to reduce probing cost a little bit
 	k := uint32(bitsPerKey) * 69 / 100 // 0.69 =~ ln(2)
@@ -36,10 +40,13 @@ func NewBloomFilter(bitsPerKey int) *BloomFilter {
 	return &BloomFilter{uint32(bitsPerKey), k}
 }
 
+// Name return the name of this filter. i.e. "leveldb.BuiltinBloomFilter".
 func (*BloomFilter) Name() string {
 	return "leveldb.BuiltinBloomFilter"
 }
 
+// CreateFilter generate filter for given set of keys and write it to
+// given buffer.
 func (p *BloomFilter) CreateFilter(keys [][]byte, buf io.Writer) {
 	// Compute bloom filter size (in both bits and bytes)
 	bits := uint32(len(keys)) * p.bitsPerKey
@@ -58,7 +65,7 @@ func (p *BloomFilter) CreateFilter(keys [][]byte, buf io.Writer) {
 	for _, key := range keys {
 		// Use double-hashing to generate a sequence of hash values.
 		// See analysis in [Kirsch,Mitzenmacher 2006].
-		h := BloomHash(key)
+		h := bloomHash(key)
 		delta := (h >> 17) | (h << 15) // Rotate right 17 bits
 		for i := uint32(0); i < p.k; i++ {
 			bitpos := h % bits
@@ -71,6 +78,7 @@ func (p *BloomFilter) CreateFilter(keys [][]byte, buf io.Writer) {
 	buf.Write([]byte{byte(p.k)})
 }
 
+// KeyMayMatch test whether given key on the list.
 func (p *BloomFilter) KeyMayMatch(key, filter []byte) bool {
 	l := uint32(len(filter))
 	if l < 2 {
@@ -88,7 +96,7 @@ func (p *BloomFilter) KeyMayMatch(key, filter []byte) bool {
 		return true
 	}
 
-	h := BloomHash(key)
+	h := bloomHash(key)
 	delta := (h >> 17) | (h << 15) // Rotate right 17 bits
 	for i := uint32(0); i < k; i++ {
 		bitpos := h % bits

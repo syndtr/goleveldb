@@ -15,8 +15,9 @@ package db
 
 import (
 	"fmt"
-	"leveldb"
 	"leveldb/descriptor"
+	"leveldb/errors"
+	"leveldb/opt"
 	"strings"
 	"testing"
 )
@@ -26,19 +27,19 @@ type dbHarness struct {
 
 	desc *testDesc
 	db   *DB
-	opt  *leveldb.Options
-	ro   *leveldb.ReadOptions
-	wo   *leveldb.WriteOptions
+	o    *opt.Options
+	ro   *opt.ReadOptions
+	wo   *opt.WriteOptions
 }
 
 func newDbHarness(t *testing.T) *dbHarness {
 	desc := newTestDesc(testDescPrint{})
-	opt := &leveldb.Options{
-		Flag: leveldb.OFCreateIfMissing,
+	o := &opt.Options{
+		Flag: opt.OFCreateIfMissing,
 	}
-	ro := &leveldb.ReadOptions{}
-	wo := &leveldb.WriteOptions{}
-	db, err := Open(desc, opt)
+	ro := &opt.ReadOptions{}
+	wo := &opt.WriteOptions{}
+	db, err := Open(desc, o)
 	if err != nil {
 		t.Fatal("Open: got error: ", err)
 	}
@@ -46,7 +47,7 @@ func newDbHarness(t *testing.T) *dbHarness {
 		t:    t,
 		desc: desc,
 		db:   db,
-		opt:  opt,
+		o:    o,
 		ro:   ro,
 		wo:   wo,
 	}
@@ -62,7 +63,7 @@ func (h *dbHarness) close() {
 func (h *dbHarness) reopen() {
 	h.close()
 	var err error
-	h.db, err = Open(h.desc, h.opt)
+	h.db, err = Open(h.desc, h.o)
 	if err != nil {
 		h.t.Fatal("Reopen: got error: ", err)
 	}
@@ -126,7 +127,7 @@ func (h *dbHarness) getr(db Reader, key string, expectFound bool) (found bool, v
 	t := h.t
 	v, err := db.Get([]byte(key), h.ro)
 	switch err {
-	case leveldb.ErrNotFound:
+	case errors.ErrNotFound:
 		if expectFound {
 			t.Errorf("Get: key '%s' not found, want found", key)
 		}
@@ -167,7 +168,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	ucmp := db.s.cmp.cmp
 
 	ikey := newIKey([]byte(key), kMaxSeq, tVal)
-	iter := db.newRawIterator(new(leveldb.ReadOptions))
+	iter := db.newRawIterator(new(opt.ReadOptions))
 	if !iter.Seek(ikey) && iter.Error() != nil {
 		t.Error("AllEntries: error during seek, err: ", iter.Error())
 		return
@@ -219,7 +220,7 @@ func (h *dbHarness) getKeyVal(want string) {
 		t.Fatal("GetSnapshot: got error: ", err)
 	}
 	res := ""
-	iter := s.NewIterator(new(leveldb.ReadOptions))
+	iter := s.NewIterator(new(opt.ReadOptions))
 	for iter.Next() {
 		res += fmt.Sprintf("(%s->%s)", string(iter.Key()), string(iter.Value()))
 	}
@@ -410,7 +411,7 @@ func TestDb_EmptyBatch(t *testing.T) {
 
 func TestDb_GetFromFrozen(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000
+	h.o.WriteBuffer = 100000
 
 	h.put("foo", "v1")
 	h.getVal("foo", "v1")
@@ -431,7 +432,7 @@ func TestDb_GetFromFrozen(t *testing.T) {
 
 func TestDb_GetFromTable(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000
+	h.o.WriteBuffer = 100000
 
 	h.put("foo", "v1")
 	h.put("bar", "v2")
@@ -458,7 +459,7 @@ func TestDb_GetFromTable(t *testing.T) {
 
 func TestDb_GetSnapshot(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000
+	h.o.WriteBuffer = 100000
 
 	bar := strings.Repeat("b", 200)
 	h.put("foo", "v1")
@@ -605,7 +606,7 @@ func TestDb_IterMultiWithDelete(t *testing.T) {
 	h.delete("b")
 	h.get("b", false)
 
-	iter := h.db.NewIterator(new(leveldb.ReadOptions))
+	iter := h.db.NewIterator(new(opt.ReadOptions))
 	iter.Seek([]byte("c"))
 	testKeyVal(t, iter, "c->vc")
 	iter.Prev()
@@ -620,7 +621,7 @@ func TestDb_IteratorPinsRef(t *testing.T) {
 	h.put("foo", "hello")
 
 	// Get iterator that will yield the current contents of the DB.
-	iter := h.db.NewIterator(new(leveldb.ReadOptions))
+	iter := h.db.NewIterator(new(opt.ReadOptions))
 
 	// Write to force compactions
 	h.put("foo", "newvalue1")
@@ -680,7 +681,7 @@ func TestDb_RecoverWithEmptyLog(t *testing.T) {
 
 func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 1000000
+	h.o.WriteBuffer = 1000000
 
 	h.desc.DelaySync(descriptor.TypeTable)
 	h.put("foo", "v1")
@@ -700,7 +701,7 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 
 func TestDb_MinorCompactionsHappen(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 10000
+	h.o.WriteBuffer = 10000
 
 	n := 500
 
@@ -732,7 +733,7 @@ func TestDb_RecoverWithLargeLog(t *testing.T) {
 	h.put("small3", strings.Repeat("3", 10))
 	h.put("small4", strings.Repeat("4", 10))
 
-	h.opt.WriteBuffer = 100000
+	h.o.WriteBuffer = 100000
 	h.reopen()
 	h.getVal("big1", strings.Repeat("1", 200000))
 	h.getVal("big2", strings.Repeat("2", 200000))
@@ -744,7 +745,7 @@ func TestDb_RecoverWithLargeLog(t *testing.T) {
 
 func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000000
+	h.o.WriteBuffer = 100000000
 
 	v := h.db.s.version()
 	if v.tLen(0) > 0 {
@@ -779,11 +780,11 @@ func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 
 func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000
+	h.o.WriteBuffer = 100000
 
 	maxTables := kNumLevels + kL0_StopWritesTrigger
 
-	value := strings.Repeat("v", 2*h.opt.WriteBuffer)
+	value := strings.Repeat("v", 2*h.o.WriteBuffer)
 	for i := 0; i < 5*maxTables; i++ {
 		h.put("key", value)
 		n := h.totalTables()
@@ -832,7 +833,7 @@ func TestDb_SparseMerge(t *testing.T) {
 
 func TestDb_ApproximateSizes(t *testing.T) {
 	h := newDbHarness(t)
-	h.opt.WriteBuffer = 100000000
+	h.o.WriteBuffer = 100000000
 
 	h.sizeAssert("", "xyz", 0, 0)
 	h.reopen()

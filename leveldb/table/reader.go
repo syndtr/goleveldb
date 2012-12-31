@@ -11,131 +11,150 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package table allows read and write sorted key/value.
 package table
 
 import (
-	"leveldb"
 	"leveldb/block"
+	"leveldb/cache"
+	"leveldb/comparer"
 	"leveldb/descriptor"
+	"leveldb/errors"
+	"leveldb/iter"
+	"leveldb/opt"
 	"runtime"
 )
 
+// Reader represent a table reader.
 type Reader struct {
 	r descriptor.Reader
-	o leveldb.OptionsInterface
+	o opt.OptionsGetter
 
 	meta   *block.Reader
 	index  *block.Reader
 	filter *block.FilterReader
 
 	dataEnd uint64
-	cache   leveldb.CacheNamespace
+	cache   cache.CacheNamespace
 }
 
-func NewReader(r descriptor.Reader, size uint64, o leveldb.OptionsInterface, cache leveldb.CacheNamespace) (t *Reader, err error) {
-	mi, ii, err := readFooter(r, size)
+// NewReader create new initialized table reader.
+func NewReader(r descriptor.Reader, size uint64, o opt.OptionsGetter, cache cache.CacheNamespace) (p *Reader, err error) {
+	mb, ib, err := readFooter(r, size)
 	if err != nil {
 		return
 	}
 
-	bb, err := ii.readAll(r, true)
+	t := &Reader{r: r, o: o, dataEnd: mb.offset, cache: cache}
+
+	// index block
+	buf, err := ib.readAll(r, true)
 	if err != nil {
 		return
 	}
-	var index *block.Reader
-	index, err = block.NewReader(bb)
+	t.index, err = block.NewReader(buf, o.GetComparer())
 	if err != nil {
 		return
 	}
 
-	dataEnd := mi.offset
+	// filter block
+	filter := o.GetFilter()
+	if filter != nil {
+		// we will ignore any errors at meta/filter block
+		// since it is not essential for operation
 
-	var filter *block.FilterReader
-	filterPolicy := o.GetFilter()
-	if filterPolicy != nil {
-		bb, err = mi.readAll(r, true)
+		// meta block
+		buf, err = mb.readAll(r, true)
 		if err != nil {
-			return
+			goto out
 		}
 		var meta *block.Reader
-		meta, err = block.NewReader(bb)
+		meta, err = block.NewReader(buf, comparer.BytesComparer{})
 		if err != nil {
-			return
+
+			goto out
 		}
-		iter := meta.NewIterator(o.GetComparer())
-		key := "filter." + filterPolicy.Name()
+
+		// check for filter name
+		iter := meta.NewIterator()
+		key := "filter." + filter.Name()
 		if iter.Seek([]byte(key)) && string(iter.Key()) == key {
-			fh := new(bInfo)
-			_, err = fh.decodeFrom(iter.Value())
+			fb := new(bInfo)
+			_, err = fb.decodeFrom(iter.Value())
 			if err != nil {
 				return
 			}
-			dataEnd = fh.offset
-			bb, err = fh.readAll(r, true)
+
+			// now the data end before filter block start offset
+			t.dataEnd = fb.offset
+
+			// filter block
+			buf, err = fb.readAll(r, true)
 			if err != nil {
-				return
+				goto out
 			}
-			filter, err = block.NewFilterReader(bb, filterPolicy)
+			t.filter, err = block.NewFilterReader(buf, filter)
 			if err != nil {
-				return
-			}
-		} else {
-			err = iter.Error()
-			if err != nil {
-				return
+				goto out
 			}
 		}
 	}
 
-	t = &Reader{
-		r:       r,
-		o:       o,
-		index:   index,
-		filter:  filter,
-		dataEnd: dataEnd,
-		cache:   cache,
-	}
-	return
+out:
+	return t, nil
 }
 
-func (t *Reader) NewIterator(ro leveldb.ReadOptionsInterface) leveldb.Iterator {
+// NewIterator create new iterator over the table.
+func (t *Reader) NewIterator(ro opt.ReadOptionsGetter) iter.Iterator {
 	index_iter := &indexIter{t: t, ro: ro}
-	t.index.InitIterator(&index_iter.Iterator, t.o.GetComparer())
-	return leveldb.NewIndexedIterator(index_iter)
+	t.index.InitIterator(&index_iter.Iterator)
+	return iter.NewIndexedIterator(index_iter)
 }
 
-func (t *Reader) Get(key []byte, ro leveldb.ReadOptionsInterface) (rkey, rvalue []byte, err error) {
-	index_iter := t.index.NewIterator(t.o.GetComparer())
+// Get lookup for given key on the table. Get returns errors.ErrNotFound if
+// given key did not exist.
+func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte, err error) {
+	// create an iterator of index block
+	index_iter := t.index.NewIterator()
 	if !index_iter.Seek(key) {
 		err = index_iter.Error()
 		if err == nil {
-			err = leveldb.ErrNotFound
+			err = errors.ErrNotFound
 		}
 		return
 	}
 
+	// decode data block info
 	bi := new(bInfo)
 	_, err = bi.decodeFrom(index_iter.Value())
 	if err != nil {
 		return
 	}
+
+	// get the data block
 	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
-		var iter leveldb.Iterator
-		iter, err = t.getBlock(bi, ro)
-		if !iter.Seek(key) {
-			err = iter.Error()
+		var it iter.Iterator
+		it, err = t.getDataIter(bi, ro)
+		if err != nil {
+			return
+		}
+
+		// seek to key
+		if !it.Seek(key) {
+			err = it.Error()
 			if err == nil {
-				err = leveldb.ErrNotFound
+				err = errors.ErrNotFound
 			}
 			return
 		}
-		rkey, rvalue = iter.Key(), iter.Value()
+		rkey, rvalue = it.Key(), it.Value()
 	}
 	return
 }
 
+// ApproximateOffsetOf approximate the offset of given key in bytes.
 func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
-	index_iter := t.index.NewIterator(t.o.GetComparer())
+	index_iter := t.index.NewIterator()
 	if index_iter.Seek(key) {
 		bi := new(bInfo)
 		_, err := bi.decodeFrom(index_iter.Value())
@@ -143,61 +162,64 @@ func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 			return bi.offset
 		}
 	}
+	// block info is corrupted or key is past the last key in the file.
+	// Approximate the offset by returning offset of the end of data
+	// block (which is right near the end of the file).
 	return t.dataEnd
 }
 
-func (t *Reader) getBlock(bi *bInfo, ro leveldb.ReadOptionsInterface) (iter leveldb.Iterator, err error) {
+func (t *Reader) getDataIter(bi *bInfo, ro opt.ReadOptionsGetter) (it iter.Iterator, err error) {
 	var b *block.Reader
-	newBlock := func() {
-		bb, err := bi.readAll(t.r, ro.HasFlag(leveldb.RFVerifyChecksums))
+	readBlock := func() {
+		buf, err := bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
 		if err != nil {
 			return
 		}
-		b, err = block.NewReader(bb)
+		b, err = block.NewReader(buf, t.o.GetComparer())
 	}
 
-	var cacheObj leveldb.CacheObject
+	var cacheObj cache.CacheObject
 	if t.cache != nil {
 		var ok bool
 		cacheObj, ok = t.cache.Get(bi.offset)
 		if ok {
 			b = cacheObj.Value().(*block.Reader)
 		} else {
-			newBlock()
+			readBlock()
 			if err != nil {
 				return
 			}
 			cacheObj = t.cache.Set(bi.offset, b, int(bi.size), nil)
 		}
 	} else {
-		newBlock()
+		readBlock()
 		if err != nil {
 			return
 		}
 	}
 
-	biter := b.NewIterator(t.o.GetComparer())
+	x := b.NewIterator()
 	if cacheObj != nil {
-		runtime.SetFinalizer(biter, func(x *block.Iterator) {
+		runtime.SetFinalizer(x, func(x *block.Iterator) {
 			cacheObj.Release()
 		})
 	}
-	return biter, nil
+	return x, nil
 }
 
 type indexIter struct {
 	block.Iterator
 
 	t  *Reader
-	ro leveldb.ReadOptionsInterface
+	ro opt.ReadOptionsGetter
 }
 
-func (i *indexIter) Get() (iter leveldb.Iterator, err error) {
+func (i *indexIter) Get() (it iter.Iterator, err error) {
 	bi := new(bInfo)
 	_, err = bi.decodeFrom(i.Value())
 	if err != nil {
 		return
 	}
 
-	return i.t.getBlock(bi, i.ro)
+	return i.t.getDataIter(bi, i.ro)
 }

@@ -11,10 +11,12 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
+// Package memdb provide in-memory key/value database implementation.
 package memdb
 
 import (
-	"leveldb"
+	"leveldb/comparer"
+	"leveldb/errors"
 	"math/rand"
 	"sync"
 	"unsafe"
@@ -39,8 +41,9 @@ type mNode struct {
 	next  []*mNode
 }
 
+// DB represent an in-memory key/value database.
 type DB struct {
-	cmp       leveldb.BasicComparer
+	cmp       comparer.BasicComparer
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int
@@ -51,7 +54,8 @@ type DB struct {
 	prev [tMaxHeight]*mNode
 }
 
-func New(cmp leveldb.BasicComparer) *DB {
+// New create new initalized in-memory key/value database.
+func New(cmp comparer.BasicComparer) *DB {
 	p := &DB{
 		cmp:       cmp,
 		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
@@ -61,6 +65,7 @@ func New(cmp leveldb.BasicComparer) *DB {
 	return p
 }
 
+// Put insert given key and value to the database.
 func (p *DB) Put(key []byte, value []byte) {
 	p.mu.Lock()
 	p.findGreaterOrEqual(key, true)
@@ -85,6 +90,7 @@ func (p *DB) Put(key []byte, value []byte) {
 	p.mu.Unlock()
 }
 
+// Remove remove given key from the database.
 func (p *DB) Remove(key []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -103,6 +109,7 @@ func (p *DB) Remove(key []byte) {
 	p.n--
 }
 
+// Contains return true if given key are in database.
 func (p *DB) Contains(key []byte) bool {
 	p.mu.RLock()
 	x := p.findGreaterOrEqual(key, false)
@@ -113,27 +120,31 @@ func (p *DB) Contains(key []byte) bool {
 	return false
 }
 
+// Get return key/value equal or greater than given key.
 func (p *DB) Get(key []byte) (rkey, value []byte, err error) {
 	p.mu.RLock()
 	node := p.findGreaterOrEqual(key, false)
 	p.mu.RUnlock()
 	if node == nil || node == p.head {
-		err = leveldb.ErrNotFound
+		err = errors.ErrNotFound
 		return
 	}
 	return node.key, node.value, nil
 }
 
+// NewIterator create a new iterator over the database content.
 func (p *DB) NewIterator() *Iterator {
 	return &Iterator{p: p}
 }
 
+// Size return approximate size of memory used by the database.
 func (p *DB) Size() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.memSize
 }
 
+// Len return the number of entries in the database.
 func (p *DB) Len() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

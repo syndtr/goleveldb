@@ -11,7 +11,8 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+// Package cache provides interface and implementation of a cache algorithms.
+package cache
 
 type Cache interface {
 	// Get caches namespace for given id.

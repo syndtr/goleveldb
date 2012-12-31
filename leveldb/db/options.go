@@ -13,46 +13,51 @@
 
 package db
 
-import "leveldb"
+import (
+	"leveldb/cache"
+	"leveldb/comparer"
+	"leveldb/filter"
+	"leveldb/opt"
+)
 
 type iOptions struct {
-	s   *session
-	opt leveldb.OptionsInterface
+	s *session
+	o opt.OptionsGetter
 }
 
-func (o *iOptions) GetComparer() leveldb.Comparer {
+func (o *iOptions) GetComparer() comparer.Comparer {
 	return o.s.cmp
 }
 
-func (o *iOptions) HasFlag(flag leveldb.OptionsFlag) bool {
-	return o.opt.HasFlag(flag)
+func (o *iOptions) HasFlag(flag opt.OptionsFlag) bool {
+	return o.o.HasFlag(flag)
 }
 
 func (o *iOptions) GetWriteBuffer() int {
-	return o.opt.GetWriteBuffer()
+	return o.o.GetWriteBuffer()
 }
 
 func (o *iOptions) GetMaxOpenFiles() int {
-	return o.opt.GetMaxOpenFiles()
+	return o.o.GetMaxOpenFiles()
 }
 
-func (o *iOptions) GetBlockCache() leveldb.Cache {
-	return o.opt.GetBlockCache()
+func (o *iOptions) GetBlockCache() cache.Cache {
+	return o.o.GetBlockCache()
 }
 
 func (o *iOptions) GetBlockSize() int {
-	return o.opt.GetBlockSize()
+	return o.o.GetBlockSize()
 }
 
 func (o *iOptions) GetBlockRestartInterval() int {
-	return o.opt.GetBlockRestartInterval()
+	return o.o.GetBlockRestartInterval()
 }
 
-func (o *iOptions) GetCompressionType() leveldb.Compression {
-	return o.opt.GetCompressionType()
+func (o *iOptions) GetCompressionType() opt.Compression {
+	return o.o.GetCompressionType()
 }
 
-func (o *iOptions) GetFilter() leveldb.Filter {
+func (o *iOptions) GetFilter() filter.Filter {
 	if o.s.filter == nil {
 		return nil
 	}

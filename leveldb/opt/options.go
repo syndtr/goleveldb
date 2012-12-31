@@ -11,11 +11,16 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+// Package opt provides sets of options used by LevelDB.
+package opt
 
-import "sync"
+import (
+	"leveldb/cache"
+	"leveldb/comparer"
+	"leveldb/filter"
+	"sync"
+)
 
-// Database flag
 type OptionsFlag uint
 
 const (
@@ -43,29 +48,15 @@ const (
 	nCompression
 )
 
-type OptionsInterface interface {
-	GetComparer() Comparer
-	HasFlag(flag OptionsFlag) bool
-	GetWriteBuffer() int
-	GetMaxOpenFiles() int
-	GetBlockCache() Cache
-	GetBlockSize() int
-	GetBlockRestartInterval() int
-	GetCompressionType() Compression
-	GetFilter() Filter
-}
-
-// Database options
+// Options represent sets of LevelDB options.
 type Options struct {
-	mu sync.Mutex
-
 	// Comparer used to define the order of keys in the table.
 	// Default: a comparer that uses lexicographic byte-wise ordering
 	//
 	// REQUIRES: The client must ensure that the comparer supplied
 	// here has the same name and orders keys *exactly* the same as the
 	// comparer provided to previous open calls on the same DB.
-	Comparer Comparer
+	Comparer comparer.Comparer
 
 	// Specify the database flag.
 	Flag OptionsFlag
@@ -95,7 +86,7 @@ type Options struct {
 	// If non-NULL, use the specified cache for blocks.
 	// If NULL, leveldb will automatically create and use an 8MB internal cache.
 	// Default: NULL
-	BlockCache Cache
+	BlockCache cache.Cache
 
 	// Approximate size of user data packed per block.  Note that the
 	// block size specified here corresponds to uncompressed data.  The
@@ -133,12 +124,27 @@ type Options struct {
 	// NewBloomFilter() here.
 	//
 	// Default: NULL
-	Filter Filter
+	Filter filter.Filter
+
+	mu sync.Mutex
 }
 
-func (o *Options) GetComparer() Comparer {
+// OptionsGetter wraps methods used to get sanitized options.
+type OptionsGetter interface {
+	GetComparer() comparer.Comparer
+	HasFlag(flag OptionsFlag) bool
+	GetWriteBuffer() int
+	GetMaxOpenFiles() int
+	GetBlockCache() cache.Cache
+	GetBlockSize() int
+	GetBlockRestartInterval() int
+	GetCompressionType() Compression
+	GetFilter() filter.Filter
+}
+
+func (o *Options) GetComparer() comparer.Comparer {
 	if o == nil || o.Comparer == nil {
-		return DefaultComparer
+		return comparer.DefaultComparer
 	}
 	return o.Comparer
 }
@@ -164,14 +170,14 @@ func (o *Options) GetMaxOpenFiles() int {
 	return o.MaxOpenFiles
 }
 
-func (o *Options) GetBlockCache() Cache {
+func (o *Options) GetBlockCache() cache.Cache {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o == nil {
 		return nil
 	}
 	if o.BlockCache == nil {
-		o.BlockCache = NewLRUCache(8 << 20)
+		o.BlockCache = cache.NewLRUCache(8 << 20)
 	}
 	return o.BlockCache
 }
@@ -197,14 +203,13 @@ func (o *Options) GetCompressionType() Compression {
 	return o.CompressionType
 }
 
-func (o *Options) GetFilter() Filter {
+func (o *Options) GetFilter() filter.Filter {
 	if o == nil {
 		return nil
 	}
 	return o.Filter
 }
 
-// Read flag
 type ReadOptionsFlag uint
 
 const (
@@ -218,14 +223,15 @@ const (
 	RFDontFillCache
 )
 
-type ReadOptionsInterface interface {
-	HasFlag(flag ReadOptionsFlag) bool
+// ReadOptions represent sets of options used by LevelDB during read
+// operations.
+type ReadOptions struct {
+	// Specify the read flag.
+	Flag ReadOptionsFlag
 }
 
-// Read options
-type ReadOptions struct {
-	// Specify the read flag
-	Flag ReadOptionsFlag
+type ReadOptionsGetter interface {
+	HasFlag(flag ReadOptionsFlag) bool
 }
 
 func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
@@ -235,7 +241,6 @@ func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
 	return (o.Flag & flag) != 0
 }
 
-// Write flag
 type WriteOptionsFlag uint
 
 const (
@@ -256,14 +261,15 @@ const (
 	WFSync WriteOptionsFlag = 1 << iota
 )
 
-type WriteOptionsInterface interface {
-	HasFlag(flag WriteOptionsFlag) bool
+// WriteOptions represent sets of options used by LevelDB during write
+// operations.
+type WriteOptions struct {
+	// Specify the write flag.
+	Flag WriteOptionsFlag
 }
 
-// Write options
-type WriteOptions struct {
-	// Specify the write flag
-	Flag WriteOptionsFlag
+type WriteOptionsGetter interface {
+	HasFlag(flag WriteOptionsFlag) bool
 }
 
 func (o *WriteOptions) HasFlag(flag WriteOptionsFlag) bool {

@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/hash"
 )
 
 const (
@@ -42,6 +42,7 @@ const (
 
 var sixZero [6]byte
 
+// Writer represent a log writer.
 type Writer struct {
 	w   io.Writer
 	buf bytes.Buffer
@@ -49,10 +50,12 @@ type Writer struct {
 	boff int
 }
 
+// NewWriter create new initialized log writer.
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w}
 }
 
+// Append append record to the log.
 func (l *Writer) Append(record []byte) (err error) {
 	begin := true
 	for {
@@ -107,10 +110,10 @@ func (l *Writer) write(rtype uint, record []byte) (err error) {
 	buf := &l.buf
 	buf.Reset()
 
-	crc := leveldb.NewCRC32C()
+	crc := hash.NewCRC32C()
 	crc.Write([]byte{byte(rtype)})
 	crc.Write(record)
-	binary.Write(buf, binary.LittleEndian, leveldb.MaskCRC32(crc.Sum32()))
+	binary.Write(buf, binary.LittleEndian, hash.MaskCRC32(crc.Sum32()))
 
 	buf.WriteByte(byte(rlen & 0xff))
 	buf.WriteByte(byte(rlen >> 8))

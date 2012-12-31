@@ -15,22 +15,22 @@ package db
 
 import (
 	"bytes"
-	"leveldb"
+	"leveldb/comparer"
 	"testing"
 )
 
-var icmp = &iComparer{leveldb.BytesComparer{}}
+var icmp = &iComparer{comparer.BytesComparer{}}
 
 func ikey(key string, seq uint64, t vType) iKey {
 	return newIKey([]byte(key), uint64(seq), t)
 }
 
 func shortSep(a, b []byte) []byte {
-	return icmp.FindShortestSeparator(a, b)
+	return icmp.Separator(a, b)
 }
 
 func shortSuccessor(b []byte) []byte {
-	return icmp.FindShortSuccessor(b)
+	return icmp.Successor(b)
 }
 
 func testSingleKey(t *testing.T, key string, seq uint64, vtype vType) {

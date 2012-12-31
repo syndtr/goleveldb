@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package leveldb
+package filter
 
 import (
 	"bytes"
@@ -19,7 +19,7 @@ import (
 	"testing"
 )
 
-type Harness struct {
+type harness struct {
 	t *testing.T
 
 	bloom  *BloomFilter
@@ -27,65 +27,65 @@ type Harness struct {
 	keys   [][]byte
 }
 
-func NewHarness(t *testing.T) *Harness {
-	return &Harness{t: t, bloom: NewBloomFilter(10)}
+func newHarness(t *testing.T) *harness {
+	return &harness{t: t, bloom: NewBloomFilter(10)}
 }
 
-func (h *Harness) Add(key []byte) {
+func (h *harness) add(key []byte) {
 	h.keys = append(h.keys, key)
 }
 
-func (h *Harness) AddNum(key uint32) {
+func (h *harness) addNum(key uint32) {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, key)
-	h.Add(buf)
+	h.add(buf)
 }
 
-func (h *Harness) Build() {
+func (h *harness) build() {
 	buf := new(bytes.Buffer)
 	h.bloom.CreateFilter(h.keys, buf)
 	h.filter = buf.Bytes()
 }
 
-func (h *Harness) Reset() {
+func (h *harness) reset() {
 	h.filter = nil
 	h.keys = nil
 }
 
-func (h *Harness) FilterLen() int {
+func (h *harness) filterLen() int {
 	return len(h.filter)
 }
 
-func (h *Harness) Assert(key []byte, want, silent bool) bool {
+func (h *harness) assert(key []byte, want, silent bool) bool {
 	got := h.bloom.KeyMayMatch(key, h.filter)
 	if !silent && got != want {
-		h.t.Errorf("Assert on '%v' failed got '%v', want '%v'", key, got, want)
+		h.t.Errorf("assert on '%v' failed got '%v', want '%v'", key, got, want)
 	}
 	return got
 }
 
-func (h *Harness) AssertNum(key uint32, want, silent bool) bool {
+func (h *harness) assertNum(key uint32, want, silent bool) bool {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, key)
-	return h.Assert(buf.Bytes(), want, silent)
+	return h.assert(buf.Bytes(), want, silent)
 }
 
 func TestBloomFilter_Empty(t *testing.T) {
-	h := NewHarness(t)
-	h.Build()
-	h.Assert([]byte("hello"), false, false)
-	h.Assert([]byte("world"), false, false)
+	h := newHarness(t)
+	h.build()
+	h.assert([]byte("hello"), false, false)
+	h.assert([]byte("world"), false, false)
 }
 
 func TestBloomFilter_Small(t *testing.T) {
-	h := NewHarness(t)
-	h.Add([]byte("hello"))
-	h.Add([]byte("world"))
-	h.Build()
-	h.Assert([]byte("hello"), true, false)
-	h.Assert([]byte("world"), true, false)
-	h.Assert([]byte("x"), false, false)
-	h.Assert([]byte("foo"), false, false)
+	h := newHarness(t)
+	h.add([]byte("hello"))
+	h.add([]byte("world"))
+	h.build()
+	h.assert([]byte("hello"), true, false)
+	h.assert([]byte("world"), true, false)
+	h.assert([]byte("x"), false, false)
+	h.assert([]byte("foo"), false, false)
 }
 
 func nextN(n int) int {
@@ -103,28 +103,28 @@ func nextN(n int) int {
 }
 
 func TestBloomFilter_VaryingLengths(t *testing.T) {
-	h := NewHarness(t)
+	h := newHarness(t)
 	var mediocre, good int
 	for n := 1; n < 10000; n = nextN(n) {
-		h.Reset()
+		h.reset()
 		for i := 0; i < n; i++ {
-			h.AddNum(uint32(i))
+			h.addNum(uint32(i))
 		}
-		h.Build()
+		h.build()
 
-		got := h.FilterLen()
+		got := h.filterLen()
 		want := (n * 10 / 8) + 40
 		if got > want {
 			t.Errorf("filter len test failed, '%d' > '%d'", got, want)
 		}
 
 		for i := 0; i < n; i++ {
-			h.AssertNum(uint32(i), true, false)
+			h.assertNum(uint32(i), true, false)
 		}
 
 		var rate float32
 		for i := 0; i < 10000; i++ {
-			if h.AssertNum(uint32(i+1000000000), true, true) {
+			if h.assertNum(uint32(i+1000000000), true, true) {
 				rate++
 			}
 		}

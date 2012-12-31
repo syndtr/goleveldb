@@ -14,7 +14,9 @@
 package db
 
 import (
-	"leveldb"
+	"leveldb/errors"
+	"leveldb/iter"
+	"leveldb/opt"
 	"sync/atomic"
 )
 
@@ -46,7 +48,7 @@ type version struct {
 	seekCompactionTable *tFile
 }
 
-func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState bool, err error) {
+func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cState bool, err error) {
 	s := v.s
 	icmp := s.cmp
 	ucmp := icmp.cmp
@@ -113,7 +115,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 
 			var rkey, rval []byte
 			rkey, rval, err = s.tops.get(t, key, ro)
-			if err == leveldb.ErrNotFound {
+			if err == errors.ErrNotFound {
 				continue
 			} else if err != nil {
 				return
@@ -121,7 +123,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 
 			pk := iKey(rkey).parse()
 			if pk == nil {
-				err = leveldb.ErrCorrupt("internal key corrupted")
+				err = errors.ErrCorrupt("internal key corrupted")
 				return
 			}
 			if ucmp.Compare(ukey, pk.ukey) == 0 {
@@ -129,7 +131,7 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 				case tVal:
 					value = rval
 				case tDel:
-					err = leveldb.ErrNotFound
+					err = errors.ErrNotFound
 				default:
 					panic("not reached")
 				}
@@ -138,18 +140,18 @@ func (v *version) get(key iKey, ro *leveldb.ReadOptions) (value []byte, cState b
 		}
 	}
 
-	err = leveldb.ErrNotFound
+	err = errors.ErrNotFound
 	return
 }
 
-func (v *version) getIterators(ro *leveldb.ReadOptions) (iters []leveldb.Iterator) {
+func (v *version) getIterators(ro *opt.ReadOptions) (its []iter.Iterator) {
 	s := v.s
 	icmp := s.cmp
 
 	// Merge all level zero files together since they may overlap
 	for _, t := range v.tables[0] {
-		iter := s.tops.newIterator(t, ro)
-		iters = append(iters, iter)
+		it := s.tops.newIterator(t, ro)
+		its = append(its, it)
 	}
 
 	for _, tt := range v.tables[1:] {
@@ -157,8 +159,8 @@ func (v *version) getIterators(ro *leveldb.ReadOptions) (iters []leveldb.Iterato
 			continue
 		}
 
-		iter := leveldb.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
-		iters = append(iters, iter)
+		it := iter.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
+		its = append(its, it)
 	}
 
 	return

@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"leveldb"
+	"leveldb/errors"
 )
 
 // The magic was picked by running
@@ -56,7 +56,7 @@ func writeFooter(w io.Writer, mi, ii *bInfo) (n int, err error) {
 
 func readFooter(r io.ReaderAt, size uint64) (mi, ii *bInfo, err error) {
 	if size < uint64(footerSize) {
-		err = leveldb.ErrInvalid("file is too short to be an sstable")
+		err = errors.ErrInvalid("file is too short to be an sstable")
 		return
 	}
 
@@ -67,7 +67,7 @@ func readFooter(r io.ReaderAt, size uint64) (mi, ii *bInfo, err error) {
 	}
 
 	if bytes.Compare(buf[handlesSize:], magicBytes) != 0 {
-		err = leveldb.ErrInvalid("not an sstable (bad magic number)")
+		err = errors.ErrInvalid("not an sstable (bad magic number)")
 		return
 	}
 

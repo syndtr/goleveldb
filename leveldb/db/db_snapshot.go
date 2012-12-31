@@ -15,12 +15,12 @@ package db
 
 import (
 	"container/list"
-	"leveldb"
+	"leveldb/errors"
+	"leveldb/iter"
 	"leveldb/memdb"
+	"leveldb/opt"
 	"sync/atomic"
 )
-
-var ErrSnapshotReleased = leveldb.ErrInvalid("snapshot released")
 
 type snapEntry struct {
 	elem *list.Element
@@ -75,16 +75,16 @@ func (d *DB) newSnapshot() *Snapshot {
 }
 
 // Get get value for given key of this snapshot of database.
-func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err error) {
+func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	if atomic.LoadUint32(&p.released) != 0 {
-		return nil, ErrSnapshotReleased
+		return nil, errors.ErrSnapshotReleased
 	}
 
 	d := p.d
 	s := d.s
 
 	if d.getClosed() {
-		return nil, ErrClosed
+		return nil, errors.ErrClosed
 	}
 
 	ucmp := s.cmp.cmp
@@ -105,7 +105,7 @@ func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 		}
 		if vt == tDel {
 			value = nil
-			err = leveldb.ErrNotFound
+			err = errors.ErrNotFound
 		}
 		return true
 	}
@@ -132,21 +132,20 @@ func (p *Snapshot) Get(key []byte, ro *leveldb.ReadOptions) (value []byte, err e
 }
 
 // NewIterator return an iterator over the contents of this snapshot of
-// database. The result of NewIterator() is initially invalid (caller must
-// call Next or one of Seek method, ie First, Last or Seek).
-func (p *Snapshot) NewIterator(ro *leveldb.ReadOptions) leveldb.Iterator {
+// database.
+func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 	if atomic.LoadUint32(&p.released) != 0 {
-		return &leveldb.EmptyIterator{ErrSnapshotReleased}
+		return &iter.EmptyIterator{errors.ErrSnapshotReleased}
 	}
 
 	d := p.d
 	s := d.s
 
 	if d.getClosed() {
-		return &leveldb.EmptyIterator{ErrClosed}
+		return &iter.EmptyIterator{errors.ErrClosed}
 	}
 
-	return newDBIter(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
+	return newIterator(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
 }
 
 // Release release the snapshot. The caller must not use the snapshot

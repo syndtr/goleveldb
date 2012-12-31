@@ -15,7 +15,7 @@ package block
 
 import (
 	"bytes"
-	"leveldb"
+	"leveldb/comparer"
 	"testing"
 )
 
@@ -52,12 +52,12 @@ func TestBlock(t *testing.T) {
 	if ll != len(out) {
 		t.Error("guessed len doesn't equal with output len, ", ll, "!=", len(out))
 	}
-	br, err := NewReader(out)
+	br, err := NewReader(out, comparer.BytesComparer{})
 	if err != nil {
 		t.Error(err)
 	}
 
-	iter := br.NewIterator(leveldb.DefaultComparer)
+	iter := br.NewIterator()
 
 	for i := 1; i < len(cases)+1; i++ {
 		for j := 0; j < i; j++ {

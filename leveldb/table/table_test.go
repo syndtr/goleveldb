@@ -15,7 +15,7 @@ package table
 
 import (
 	"bytes"
-	"leveldb"
+	"leveldb/opt"
 	"testing"
 )
 
@@ -40,11 +40,11 @@ func offsetBetween(t *testing.T, v, low, hi uint64) {
 
 func TestApproximateOffsetOfPlain(t *testing.T) {
 	w := new(writer)
-	o := &leveldb.Options{
+	o := &opt.Options{
 		BlockSize:       1024,
-		CompressionType: leveldb.NoCompression,
+		CompressionType: opt.NoCompression,
 	}
-	tw := NewWriter(w, new(leveldb.Options))
+	tw := NewWriter(w, new(opt.Options))
 	tw.Add([]byte("k01"), []byte("hello"))
 	tw.Add([]byte("k02"), []byte("hello2"))
 	tw.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))

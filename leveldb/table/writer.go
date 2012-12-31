@@ -15,90 +15,99 @@ package table
 
 import (
 	"encoding/binary"
-	"leveldb"
 	"leveldb/block"
+	"leveldb/comparer"
 	"leveldb/descriptor"
+	"leveldb/hash"
+	"leveldb/opt"
 )
 
+// Writer represent a table writer.
 type Writer struct {
 	w   descriptor.Writer
-	o   leveldb.OptionsInterface
-	cmp leveldb.Comparer
+	o   opt.OptionsGetter
+	cmp comparer.Comparer
 
-	dataBlock   *block.Writer
-	indexBlock  *block.Writer
-	filterBlock *block.FilterWriter
+	data   *block.Writer
+	index  *block.Writer
+	filter *block.FilterWriter
 
-	n, offset    int
-	lastKey      []byte
-	pendingIndex bool
-	pendingBlock *bInfo
+	n, off int
+	lkey   []byte // last key
+	lblock *bInfo // last block
+	pindex bool   // pending index
 
 	closed bool
 }
 
-func NewWriter(w descriptor.Writer, o leveldb.OptionsInterface) *Writer {
+// NewWriter create new initialized table writer.
+func NewWriter(w descriptor.Writer, o opt.OptionsGetter) *Writer {
 	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
 	// Creating blocks
-	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
-	t.indexBlock = block.NewWriter(1)
-	filterPolicy := o.GetFilter()
-	if filterPolicy != nil {
-		t.filterBlock = block.NewFilterWriter(filterPolicy)
-		t.filterBlock.StartBlock(0)
+	t.data = block.NewWriter(o.GetBlockRestartInterval())
+	t.index = block.NewWriter(1)
+	filter := o.GetFilter()
+	if filter != nil {
+		t.filter = block.NewFilterWriter(filter)
+		t.filter.Generate(0)
 	}
-	t.pendingBlock = new(bInfo)
+	t.lblock = new(bInfo)
 	return t
 }
 
+// Add append key/value to the table.
 func (t *Writer) Add(key, value []byte) (err error) {
 	if t.closed {
 		panic("operation on closed table writer")
 	}
 
-	if t.pendingIndex {
-		sep := t.cmp.FindShortestSeparator(t.lastKey, key)
-		t.indexBlock.Add(sep, t.pendingBlock.encode())
-		t.pendingIndex = false
+	if t.pindex {
+		// write the pending index
+		sep := t.cmp.Separator(t.lkey, key)
+		t.index.Add(sep, t.lblock.encode())
+		t.pindex = false
 	}
 
-	if t.filterBlock != nil {
-		t.filterBlock.AddKey(key)
+	if t.filter != nil {
+		t.filter.Add(key)
 	}
 
-	t.lastKey = key
+	t.lkey = key
 	t.n++
 
-	t.dataBlock.Add(key, value)
-	if t.dataBlock.Size() >= t.o.GetBlockSize() {
+	t.data.Add(key, value)
+	if t.data.Size() >= t.o.GetBlockSize() {
 		err = t.Flush()
 	}
 	return
 }
 
+// Flush finalize and write the data block.
 func (t *Writer) Flush() (err error) {
 	if t.closed {
 		panic("operation on closed table writer")
 	}
 
-	if t.pendingIndex {
+	if t.pindex {
 		return
 	}
 
-	err = t.write(t.dataBlock.Finish(), t.pendingBlock, false)
+	err = t.write(t.data.Finish(), t.lblock, false)
 	if err != nil {
 		return
 	}
-	t.dataBlock.Reset()
+	t.data.Reset()
 
-	t.pendingIndex = true
+	t.pindex = true
 
-	if t.filterBlock != nil {
-		t.filterBlock.StartBlock(t.offset)
+	if t.filter != nil {
+		t.filter.Generate(t.off)
 	}
 	return
 }
 
+// Finish finalize the table. No Add(), Flush() or Finish() is possible
+// beyond this, doing so will raise panic.
 func (t *Writer) Finish() (err error) {
 	if t.closed {
 		panic("operation on closed table writer")
@@ -113,59 +122,62 @@ func (t *Writer) Finish() (err error) {
 
 	// Write filter block
 	fi := new(bInfo)
-	if t.filterBlock != nil {
-		err = t.write(t.filterBlock.Finish(), fi, true)
+	if t.filter != nil {
+		err = t.write(t.filter.Finish(), fi, true)
 		if err != nil {
 			return
 		}
 	}
 
 	// Write meta block
-	metaBlock := block.NewWriter(t.o.GetBlockRestartInterval())
-	if t.filterBlock != nil {
-		filterPolicy := t.o.GetFilter()
-		key := []byte("filter." + filterPolicy.Name())
-		metaBlock.Add(key, fi.encode())
+	meta := block.NewWriter(t.o.GetBlockRestartInterval())
+	if t.filter != nil {
+		filter := t.o.GetFilter()
+		key := []byte("filter." + filter.Name())
+		meta.Add(key, fi.encode())
 	}
-	mi := new(bInfo)
-	err = t.write(metaBlock.Finish(), mi, false)
+	mb := new(bInfo)
+	err = t.write(meta.Finish(), mb, false)
 	if err != nil {
 		return
 	}
 
 	// Write index block
-	if t.pendingIndex {
-		suc := t.cmp.FindShortSuccessor(t.lastKey)
-		t.indexBlock.Add(suc, t.pendingBlock.encode())
-		t.pendingIndex = false
+	if t.pindex {
+		suc := t.cmp.Successor(t.lkey)
+		t.index.Add(suc, t.lblock.encode())
+		t.pindex = false
 	}
-	ii := new(bInfo)
-	err = t.write(t.indexBlock.Finish(), ii, false)
+	ib := new(bInfo)
+	err = t.write(t.index.Finish(), ib, false)
 	if err != nil {
 		return
 	}
 
 	// Write footer
 	var n int
-	n, err = writeFooter(t.w, mi, ii)
+	n, err = writeFooter(t.w, mb, ib)
 	if err != nil {
 		return
 	}
-	t.offset += n
+	t.off += n
 
 	return
 }
 
+// Len return the number of records added so far.
 func (t *Writer) Len() int {
 	return t.n
 }
 
+// Size return the number of bytes written so far.
 func (t *Writer) Size() int {
-	return t.offset
+	return t.off
 }
 
+// CountBlock return the number of data block written so far.
 func (t *Writer) CountBlock() int {
-	n := t.indexBlock.Len()
+	n := t.index.Len()
 	if !t.closed {
 		n++
 	}
@@ -173,17 +185,17 @@ func (t *Writer) CountBlock() int {
 }
 
 func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
-	compression := leveldb.NoCompression
+	compression := opt.NoCompression
 	if !raw {
 		compression = t.o.GetCompressionType()
 	}
 	switch compression {
-	case leveldb.SnappyCompression:
-		compression = leveldb.NoCompression
+	case opt.SnappyCompression:
+		compression = opt.NoCompression
 	}
 
 	if bi != nil {
-		bi.offset = uint64(t.offset)
+		bi.offset = uint64(t.off)
 		bi.size = uint64(len(buf))
 	}
 
@@ -198,14 +210,14 @@ func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
 		return
 	}
 
-	crc := leveldb.NewCRC32C()
+	crc := hash.NewCRC32C()
 	crc.Write(buf)
 	crc.Write(compbit)
-	err = binary.Write(t.w, binary.LittleEndian, leveldb.MaskCRC32(crc.Sum32()))
+	err = binary.Write(t.w, binary.LittleEndian, hash.MaskCRC32(crc.Sum32()))
 	if err != nil {
 		return
 	}
 
-	t.offset += len(buf) + 5
+	t.off += len(buf) + 5
 	return
 }

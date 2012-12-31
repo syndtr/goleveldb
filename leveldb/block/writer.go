@@ -18,16 +18,18 @@ import (
 	"encoding/binary"
 )
 
+// Writer represent a block writer,
 type Writer struct {
 	restartInterval int
 
 	buf      *bytes.Buffer
 	restarts []uint32
-	lastKey  []byte
+	lkey     []byte
 	n        int
 	closed   bool
 }
 
+// NewWriter create new initialized block writer.
 func NewWriter(restartInterval int) *Writer {
 	return &Writer{
 		restartInterval: restartInterval,
@@ -35,6 +37,7 @@ func NewWriter(restartInterval int) *Writer {
 	}
 }
 
+// Add append key/value to the block.
 func (b *Writer) Add(key, value []byte) {
 	if b.closed {
 		panic("opeartion on closed block writer")
@@ -45,11 +48,11 @@ func (b *Writer) Add(key, value []byte) {
 	if b.n%b.restartInterval == 0 {
 		b.restarts = append(b.restarts, uint32(b.buf.Len()))
 	} else {
-		n := len(b.lastKey)
+		n := len(b.lkey)
 		if n > len(key) {
 			n = len(key)
 		}
-		for shared < n && b.lastKey[shared] == key[shared] {
+		for shared < n && b.lkey[shared] == key[shared] {
 			shared++
 		}
 	}
@@ -68,10 +71,12 @@ func (b *Writer) Add(key, value []byte) {
 	b.buf.Write(key[shared:])
 	b.buf.Write(value)
 
-	b.lastKey = key
+	b.lkey = key
 	b.n++
 }
 
+// Finish finalize the block. No Add() is possible beyond this
+// unless after Reset(), or panic will raised.
 func (b *Writer) Finish() []byte {
 	if b.closed {
 		panic("opeartion on closed block writer")
@@ -92,18 +97,21 @@ func (b *Writer) Finish() []byte {
 	return b.buf.Bytes()
 }
 
+// Reset reset the states of this block writer.
 func (b *Writer) Reset() {
 	b.buf.Reset()
 	b.restarts = nil
-	b.lastKey = nil
+	b.lkey = nil
 	b.n = 0
 	b.closed = false
 }
 
+// Len return the sum of added entries.
 func (b *Writer) Len() int {
 	return b.n
 }
 
+// Size return actual size of block in bytes,
 func (b *Writer) Size() int {
 	n := b.buf.Len()
 	if !b.closed {
@@ -115,6 +123,7 @@ func (b *Writer) Size() int {
 	return n
 }
 
+// CountRestart return the number of restarts point.
 func (b *Writer) CountRestart() int {
 	return len(b.restarts)
 }

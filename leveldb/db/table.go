@@ -14,8 +14,11 @@
 package db
 
 import (
-	"leveldb"
+	"leveldb/cache"
+	"leveldb/comparer"
 	"leveldb/descriptor"
+	"leveldb/iter"
+	"leveldb/opt"
 	"leveldb/table"
 	"runtime"
 	"sort"
@@ -30,12 +33,12 @@ type tFile struct {
 }
 
 // test if key is after t
-func (t *tFile) isAfter(key []byte, cmp leveldb.BasicComparer) bool {
+func (t *tFile) isAfter(key []byte, cmp comparer.BasicComparer) bool {
 	return key != nil && cmp.Compare(key, t.max.ukey()) > 0
 }
 
 // test if key is before t
-func (t *tFile) isBefore(key []byte, cmp leveldb.BasicComparer) bool {
+func (t *tFile) isBefore(key []byte, cmp comparer.BasicComparer) bool {
 	return key != nil && cmp.Compare(key, t.min.ukey()) < 0
 }
 
@@ -114,7 +117,7 @@ func (p tFiles) isOverlaps(min, max []byte, disjSorted bool, cmp *iComparer) boo
 	return !p[idx].isBefore(max, ucmp)
 }
 
-func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp leveldb.BasicComparer) {
+func (p tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp comparer.BasicComparer) {
 	for i := 0; i < len(p); {
 		t := p[i]
 		i++
@@ -157,14 +160,14 @@ func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 	return
 }
 
-func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *leveldb.ReadOptions) *tFilesIter {
+func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *opt.ReadOptions) *tFilesIter {
 	return &tFilesIter{tops, cmp, ro, p, -1}
 }
 
 type tFilesIter struct {
 	tops *tOps
 	cmp  *iComparer
-	ro   *leveldb.ReadOptions
+	ro   *opt.ReadOptions
 	tt   tFiles
 	pos  int
 }
@@ -220,9 +223,9 @@ func (i *tFilesIter) Prev() bool {
 	return true
 }
 
-func (i *tFilesIter) Get() (iter leveldb.Iterator, err error) {
+func (i *tFilesIter) Get() (it iter.Iterator, err error) {
 	if i.pos < 0 || i.pos >= len(i.tt) {
-		return &leveldb.EmptyIterator{}, nil
+		return &iter.EmptyIterator{}, nil
 	}
 	return i.tops.newIterator(i.tt[i.pos], i.ro), nil
 }
@@ -281,17 +284,17 @@ func (p tFileSorterNewest) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
-// table cache
+// table operations
 type tOps struct {
 	s       *session
-	cache   leveldb.Cache
-	cachens leveldb.CacheNamespace
+	cache   cache.Cache
+	cachens cache.CacheNamespace
 }
 
 func newTableOps(s *session, cacheCap int) *tOps {
-	cache := leveldb.NewLRUCache(cacheCap)
-	cachens := cache.GetNamespace(0)
-	return &tOps{s, cache, cachens}
+	c := cache.NewLRUCache(cacheCap)
+	ns := c.GetNamespace(0)
+	return &tOps{s, c, ns}
 }
 
 func (t *tOps) create() (w *tWriter, err error) {
@@ -304,11 +307,11 @@ func (t *tOps) create() (w *tWriter, err error) {
 		t:    t,
 		file: file,
 		w:    fw,
-		tw:   table.NewWriter(fw, t.s.opt),
+		tw:   table.NewWriter(fw, t.s.o),
 	}, nil
 }
 
-func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, n int, err error) {
+func (t *tOps) createFrom(src iter.Iterator) (f *tFile, n int, err error) {
 	w, err := t.create()
 	if err != nil {
 		return
@@ -337,23 +340,23 @@ func (t *tOps) createFrom(src leveldb.Iterator) (f *tFile, n int, err error) {
 	return
 }
 
-func (t *tOps) newIterator(f *tFile, ro *leveldb.ReadOptions) leveldb.Iterator {
+func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iter.Iterator {
 	c, err := t.lookup(f)
 	if err != nil {
-		return &leveldb.EmptyIterator{err}
+		return &iter.EmptyIterator{err}
 	}
-	iter := c.Value().(*table.Reader).NewIterator(ro)
-	if p, ok := iter.(*leveldb.IndexedIterator); ok {
-		runtime.SetFinalizer(p, func(x *leveldb.IndexedIterator) {
+	it := c.Value().(*table.Reader).NewIterator(ro)
+	if p, ok := it.(*iter.IndexedIterator); ok {
+		runtime.SetFinalizer(p, func(x *iter.IndexedIterator) {
 			c.Release()
 		})
 	} else {
 		panic("not reached")
 	}
-	return iter
+	return it
 }
 
-func (t *tOps) get(f *tFile, key []byte, ro *leveldb.ReadOptions) (rkey, rvalue []byte, err error) {
+func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
 	c, err := t.lookup(f)
 	if err != nil {
 		return
@@ -375,8 +378,8 @@ func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
 func (t *tOps) remove(f *tFile) {
 	num := f.file.Number()
 
-	var ns leveldb.CacheNamespace
-	bc := t.s.opt.GetBlockCache()
+	var ns cache.CacheNamespace
+	bc := t.s.o.GetBlockCache()
 	if bc != nil {
 		ns = bc.GetNamespace(num)
 	}
@@ -393,11 +396,10 @@ func (t *tOps) purgeCache() {
 	t.cache.Purge(nil)
 }
 
-func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
+func (t *tOps) lookup(f *tFile) (c cache.CacheObject, err error) {
 	num := f.file.Number()
 
-	var ok bool
-	c, ok = t.cachens.Get(num)
+	c, ok := t.cachens.Get(num)
 	if !ok {
 		var r descriptor.Reader
 		r, err = f.file.Open()
@@ -405,16 +407,16 @@ func (t *tOps) lookup(f *tFile) (c leveldb.CacheObject, err error) {
 			return
 		}
 
-		opt := t.s.opt
+		o := t.s.o
 
-		var ns leveldb.CacheNamespace
-		bc := opt.GetBlockCache()
+		var ns cache.CacheNamespace
+		bc := o.GetBlockCache()
 		if bc != nil {
 			ns = bc.GetNamespace(num)
 		}
 
 		var p *table.Reader
-		p, err = table.NewReader(r, f.size, t.s.opt, ns)
+		p, err = table.NewReader(r, f.size, t.s.o, ns)
 		if err != nil {
 			return
 		}
