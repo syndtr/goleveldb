@@ -33,7 +33,7 @@ type dbHarness struct {
 }
 
 func newDbHarness(t *testing.T) *dbHarness {
-	desc := newTestDesc(testDescPrint{})
+	desc := newTestDesc(t)
 	o := &opt.Options{
 		Flag: opt.OFCreateIfMissing,
 	}
