@@ -18,7 +18,7 @@ import (
 	"leveldb/comparer"
 	"leveldb/errors"
 	"math/rand"
-	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -38,7 +38,23 @@ func init() {
 type mNode struct {
 	key   []byte
 	value []byte
-	next  []*mNode
+	next  []unsafe.Pointer
+}
+
+func (p *mNode) getNext(n int) *mNode {
+	return (*mNode)(atomic.LoadPointer(&p.next[n]))
+}
+
+func (p *mNode) setNext(n int, x *mNode) {
+	atomic.StorePointer(&p.next[n], unsafe.Pointer(x))
+}
+
+func (p *mNode) getNext_NB(n int) *mNode {
+	return (*mNode)(p.next[n])
+}
+
+func (p *mNode) setNext_NB(n int, x *mNode) {
+	p.next[n] = unsafe.Pointer(x)
 }
 
 // DB represent an in-memory key/value database.
@@ -47,10 +63,9 @@ type DB struct {
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int
-	memSize   int
-	n         int
+	memSize   int64
+	n         int32
 
-	mu   sync.RWMutex
 	prev [tMaxHeight]*mNode
 }
 
@@ -65,10 +80,9 @@ func New(cmp comparer.BasicComparer) *DB {
 	return p
 }
 
-// Put insert given key and value to the database.
+// Put insert given key and value to the database. Need external synchronization.
 func (p *DB) Put(key []byte, value []byte) {
-	p.mu.Lock()
-	p.findGreaterOrEqual(key, true)
+	p.findGE_NB(key, true)
 
 	h := p.randHeight()
 	if h > p.maxHeight {
@@ -80,40 +94,33 @@ func (p *DB) Put(key []byte, value []byte) {
 
 	x := p.newNode(key, value, h)
 	for i, n := range p.prev[:h] {
-		x.next[i] = n.next[i]
-		n.next[i] = x
+		x.setNext_NB(i, n.getNext_NB(i))
+		n.setNext(i, x)
 	}
 
-	p.memSize += mNodeSize + (mPtrSize * h)
-	p.memSize += len(key) + len(value)
-	p.n++
-	p.mu.Unlock()
+	atomic.AddInt64(&p.memSize, int64(mNodeSize+(mPtrSize*h)+len(key)+len(value)))
+	atomic.AddInt32(&p.n, 1)
 }
 
-// Remove remove given key from the database.
+// Remove remove given key from the database. Need external synchronization.
 func (p *DB) Remove(key []byte) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	x := p.findGreaterOrEqual(key, true)
+	x := p.findGE_NB(key, true)
 	if x == nil || x == p.head || p.cmp.Compare(x.key, key) != 0 {
 		return
 	}
 
 	h := len(x.next)
 	for i, n := range p.prev[:h] {
-		n.next[i] = n.next[i].next[i]
+		n.setNext(i, n.getNext_NB(i).getNext_NB(i))
 	}
 
-	p.memSize -= mNodeSize + (mPtrSize * h)
-	p.memSize -= len(x.key) + len(x.value)
-	p.n--
+	atomic.AddInt64(&p.memSize, -int64(mNodeSize+(mPtrSize*h)+len(x.key)+len(x.value)))
+	atomic.AddInt32(&p.n, -1)
 }
 
 // Contains return true if given key are in database.
 func (p *DB) Contains(key []byte) bool {
-	p.mu.RLock()
-	x := p.findGreaterOrEqual(key, false)
-	p.mu.RUnlock()
+	x := p.findGE(key, false)
 	if x != nil && x != p.head && p.cmp.Compare(x.key, key) == 0 {
 		return true
 	}
@@ -122,9 +129,7 @@ func (p *DB) Contains(key []byte) bool {
 
 // Get return key/value equal or greater than given key.
 func (p *DB) Get(key []byte) (rkey, value []byte, err error) {
-	p.mu.RLock()
-	node := p.findGreaterOrEqual(key, false)
-	p.mu.RUnlock()
+	node := p.findGE(key, false)
 	if node == nil || node == p.head {
 		err = errors.ErrNotFound
 		return
@@ -139,27 +144,23 @@ func (p *DB) NewIterator() *Iterator {
 
 // Size return approximate size of memory used by the database.
 func (p *DB) Size() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.memSize
+	return int(atomic.LoadInt64(&p.memSize))
 }
 
 // Len return the number of entries in the database.
 func (p *DB) Len() int {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.n
+	return int(atomic.LoadInt32(&p.n))
 }
 
 func (p *DB) newNode(key, value []byte, height int) *mNode {
-	return &mNode{key, value, make([]*mNode, height)}
+	return &mNode{key, value, make([]unsafe.Pointer, height)}
 }
 
-func (p *DB) findGreaterOrEqual(key []byte, prev bool) *mNode {
+func (p *DB) findGE(key []byte, prev bool) *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.next[n]
+		next := x.getNext(n)
 		if next != nil && p.cmp.Compare(next.key, key) < 0 {
 			// Keep searching in this list
 			x = next
@@ -176,11 +177,32 @@ func (p *DB) findGreaterOrEqual(key []byte, prev bool) *mNode {
 	return nil
 }
 
-func (p *DB) findLessThan(key []byte) *mNode {
+func (p *DB) findGE_NB(key []byte, prev bool) *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.next[n]
+		next := x.getNext_NB(n)
+		if next != nil && p.cmp.Compare(next.key, key) < 0 {
+			// Keep searching in this list
+			x = next
+		} else {
+			if prev {
+				p.prev[n] = x
+			}
+			if n == 0 {
+				return next
+			}
+			n--
+		}
+	}
+	return nil
+}
+
+func (p *DB) findLT(key []byte) *mNode {
+	x := p.head
+	n := p.maxHeight - 1
+	for {
+		next := x.getNext(n)
 		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
 			if n == 0 {
 				return x
@@ -197,7 +219,7 @@ func (p *DB) findLast() *mNode {
 	x := p.head
 	n := p.maxHeight - 1
 	for {
-		next := x.next[n]
+		next := x.getNext(n)
 		if next == nil {
 			if n == 0 {
 				return x
@@ -230,23 +252,17 @@ func (i *Iterator) Valid() bool {
 }
 
 func (i *Iterator) First() bool {
-	i.p.mu.RLock()
-	i.node = i.p.head.next[0]
-	i.p.mu.RUnlock()
+	i.node = i.p.head.getNext(0)
 	return i.Valid()
 }
 
 func (i *Iterator) Last() bool {
-	i.p.mu.RLock()
 	i.node = i.p.findLast()
-	i.p.mu.RUnlock()
 	return i.Valid()
 }
 
 func (i *Iterator) Seek(key []byte) (r bool) {
-	i.p.mu.RLock()
-	i.node = i.p.findGreaterOrEqual(key, false)
-	i.p.mu.RUnlock()
+	i.node = i.p.findGE(key, false)
 	return i.Valid()
 }
 
@@ -254,9 +270,7 @@ func (i *Iterator) Next() bool {
 	if i.node == nil {
 		return i.First()
 	}
-	i.p.mu.RLock()
-	i.node = i.node.next[0]
-	i.p.mu.RUnlock()
+	i.node = i.node.getNext(0)
 	res := i.Valid()
 	if !res {
 		i.onLast = true
@@ -271,9 +285,7 @@ func (i *Iterator) Prev() bool {
 		}
 		return false
 	}
-	i.p.mu.RLock()
-	i.node = i.p.findLessThan(i.node.key)
-	i.p.mu.RUnlock()
+	i.node = i.p.findLT(i.node.key)
 	if i.node == i.p.head {
 		i.node = nil
 	}
