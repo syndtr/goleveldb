@@ -41,7 +41,7 @@ type testDesc struct {
 	log testDescLogging
 
 	files    map[uint64]*testFile
-	manifest *testFile
+	manifest *testFilePtr
 
 	emuCh        chan struct{}
 	emuDelaySync descriptor.FileType
@@ -101,24 +101,17 @@ func (d *testDesc) Print(str string) {
 }
 
 func (d *testDesc) GetFile(num uint64, t descriptor.FileType) descriptor.File {
-	d.Lock()
-	defer d.Unlock()
-	n := (num << 8) | uint64(t)
-	if f, ok := d.files[n]; ok {
-		return f
-	}
-	f := &testFile{desc: d, num: num, t: t}
-	return f
+	return &testFilePtr{desc: d, num: num, t: t}
 }
 
 func (d *testDesc) GetFiles(t descriptor.FileType) (r []descriptor.File) {
 	d.Lock()
 	defer d.Unlock()
-	for _, file := range d.files {
-		if file.t&t == 0 {
+	for _, f := range d.files {
+		if f.t&t == 0 {
 			continue
 		}
-		r = append(r, file)
+		r = append(r, &testFilePtr{desc: d, num: f.num, t: f.t})
 	}
 	return
 }
@@ -133,7 +126,7 @@ func (d *testDesc) GetMainManifest() (f descriptor.File, err error) {
 }
 
 func (d *testDesc) SetMainManifest(f descriptor.File) error {
-	p, ok := f.(*testFile)
+	p, ok := f.(*testFilePtr)
 	if !ok {
 		return descriptor.ErrInvalidFile
 	}
@@ -159,8 +152,7 @@ type testWriter struct {
 }
 
 func (w *testWriter) Write(b []byte) (n int, err error) {
-	p := w.p
-	return p.buf.Write(b)
+	return w.p.buf.Write(b)
 }
 
 func (w *testWriter) Sync() error {
@@ -181,7 +173,7 @@ func (w *testWriter) Close() error {
 	desc := p.desc
 
 	desc.Lock()
-	p.desc.print(fmt.Sprintf("testDesc: closing writer, num=%d type=%s", p.num, p.t))
+	desc.print(fmt.Sprintf("testDesc: closing writer, num=%d type=%s", p.num, p.t))
 	p.opened = false
 	desc.Unlock()
 
@@ -222,105 +214,142 @@ type testFile struct {
 	num  uint64
 	t    descriptor.FileType
 
-	buf     bytes.Buffer
-	created bool
-	opened  bool
+	buf    bytes.Buffer
+	opened bool
 }
 
-func (p *testFile) Open() (r descriptor.Reader, err error) {
+type testFilePtr struct {
+	desc *testDesc
+	num  uint64
+	t    descriptor.FileType
+}
+
+func (p *testFilePtr) id() uint64 {
+	return (p.num << 8) | uint64(p.t)
+}
+
+func (p *testFilePtr) Open() (r descriptor.Reader, err error) {
 	desc := p.desc
+
 	desc.Lock()
 	defer desc.Unlock()
-	if p.opened {
-		return nil, errFileOpen
-	}
-	if !p.created {
+
+	desc.print(fmt.Sprintf("testDesc: open file, num=%d type=%s", p.num, p.t))
+
+	f, exist := desc.files[p.id()]
+	if !exist {
 		return nil, os.ErrNotExist
 	}
-	p.desc.print(fmt.Sprintf("testDesc: open file, num=%d type=%s", p.num, p.t))
-	r = &testReader{p, bytes.NewReader(p.buf.Bytes())}
+
+	if f.opened {
+		return nil, errFileOpen
+	}
+
+	f.opened = true
+	r = &testReader{f, bytes.NewReader(f.buf.Bytes())}
 	return
 }
 
-func (p *testFile) Create() (w descriptor.Writer, err error) {
+func (p *testFilePtr) Create() (w descriptor.Writer, err error) {
 	desc := p.desc
 
 	desc.Lock()
 	defer desc.Unlock()
 
-	if p.opened {
-		return nil, errFileOpen
+	desc.print(fmt.Sprintf("testDesc: create file, num=%d type=%s", p.num, p.t))
+
+	f, exist := desc.files[p.id()]
+	if exist {
+		if f.opened {
+			return nil, errFileOpen
+		}
+	} else {
+		f = &testFile{desc: desc, num: p.num, t: p.t}
+		desc.files[p.id()] = f
 	}
-	p.desc.print(fmt.Sprintf("testDesc: create file, num=%d type=%s", p.num, p.t))
-	p.created = true
-	p.opened = true
-	p.buf.Reset()
-	n := (p.num << 8) | uint64(p.t)
-	desc.files[n] = p
-	return &testWriter{p}, nil
+
+	f.opened = true
+	f.buf.Reset()
+	return &testWriter{f}, nil
 }
 
-func (p *testFile) Rename(num uint64, t descriptor.FileType) error {
+func (p *testFilePtr) Rename(num uint64, t descriptor.FileType) error {
 	desc := p.desc
 
 	desc.Lock()
 	defer desc.Unlock()
 
-	if p.opened {
-		return errFileOpen
-	}
-	n := (p.num << 8) | uint64(p.t)
-	delete(desc.files, n)
+	desc.print(fmt.Sprintf("testDesc: rename file, from num=%d type=%s, to num=%d type=%d", p.num, p.t, num, t))
+
+	oid := p.id()
 	p.num = num
 	p.t = t
-	n = (p.num << 8) | uint64(p.t)
-	desc.files[n] = p
+
+	if f, exist := desc.files[oid]; exist {
+		if f.opened {
+			return errFileOpen
+		}
+		delete(desc.files, oid)
+		f.num = num
+		f.t = t
+		desc.files[p.id()] = f
+	}
+
 	return nil
 }
 
-func (p *testFile) Exist() bool {
+func (p *testFilePtr) Exist() bool {
 	desc := p.desc
+
 	desc.Lock()
 	defer desc.Unlock()
-	return p.created
+
+	_, exist := desc.files[p.id()]
+	return exist
 }
 
-func (p *testFile) Type() descriptor.FileType {
+func (p *testFilePtr) Type() descriptor.FileType {
 	desc := p.desc
 	desc.Lock()
 	defer desc.Unlock()
 	return p.t
 }
 
-func (p *testFile) Number() uint64 {
+func (p *testFilePtr) Number() uint64 {
 	desc := p.desc
 	desc.Lock()
 	defer desc.Unlock()
 	return p.num
 }
 
-func (p *testFile) Size() (size uint64, err error) {
+func (p *testFilePtr) Size() (size uint64, err error) {
 	desc := p.desc
 
 	desc.Lock()
 	defer desc.Unlock()
-	if !p.created {
-		return 0, os.ErrNotExist
+
+	if f, exist := desc.files[p.id()]; exist {
+		return uint64(f.buf.Len()), nil
 	}
-	return uint64(p.buf.Len()), nil
+
+	return 0, os.ErrNotExist
 }
 
-func (p *testFile) Remove() error {
+func (p *testFilePtr) Remove() error {
 	desc := p.desc
 
 	desc.Lock()
 	defer desc.Unlock()
+
 	desc.print(fmt.Sprintf("testDesc: removing file, num=%d type=%s", p.num, p.t))
-	if p.opened {
-		return errFileOpen
+
+	if f, exist := desc.files[p.id()]; exist {
+		if f.opened {
+			return errFileOpen
+		}
+		f.buf.Reset()
+		delete(desc.files, p.id())
 	}
-	p.buf.Reset()
-	p.created = false
-	delete(desc.files, p.num)
+
 	return nil
 }
