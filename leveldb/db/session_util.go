@@ -199,6 +199,7 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 	defer func() {
 		if err == nil {
 			s.recordCommited(r)
+			s.manifestFile = file
 		} else {
 			s.manifest = nil
 			s.manifestWriter.Close()

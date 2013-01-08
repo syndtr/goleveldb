@@ -32,6 +32,7 @@ type session struct {
 	tops   *tOps
 
 	manifest       *log.Writer
+	manifestFile   descriptor.File
 	manifestWriter descriptor.Writer
 
 	st struct {
@@ -71,13 +72,12 @@ func (s *session) create() (err error) {
 
 // Recover a database session
 func (s *session) recover() (err error) {
-	var m descriptor.File
-	m, err = s.desc.GetMainManifest()
+	s.manifestFile, err = s.desc.GetMainManifest()
 	if err != nil {
 		return
 	}
 
-	r, err := m.Open()
+	r, err := s.manifestFile.Open()
 	if err != nil {
 		return
 	}

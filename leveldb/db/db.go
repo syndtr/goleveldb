@@ -102,6 +102,9 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 		return
 	}
 
+	// remove any obsolete files
+	d.cleanFiles()
+
 	go d.compaction()
 	go d.write()
 	return

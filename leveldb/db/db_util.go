@@ -14,10 +14,43 @@
 package db
 
 import (
+	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/log"
 	"leveldb/memdb"
 )
+
+func (d *DB) cleanFiles() {
+	s := d.s
+
+	v := s.version()
+	tables := make(map[uint64]struct{})
+	for _, tt := range v.tables {
+		for _, t := range tt {
+			tables[t.file.Number()] = struct{}{}
+		}
+	}
+
+	for _, f := range s.getFiles(descriptor.TypeAll) {
+		keep := true
+		switch f.Type() {
+		case descriptor.TypeManifest:
+			keep = f.Number() >= s.manifestFile.Number()
+		case descriptor.TypeLog:
+			if d.flogf != nil {
+				keep = f.Number() >= d.flogf.Number()
+			} else {
+				keep = f.Number() >= d.logf.Number()
+			}
+		case descriptor.TypeTable:
+			_, keep = tables[f.Number()]
+		}
+
+		if !keep {
+			f.Remove()
+		}
+	}
+}
 
 func (d *DB) newMem() (err error) {
 	s := d.s

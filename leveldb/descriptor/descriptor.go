@@ -26,6 +26,8 @@ const (
 	TypeLog
 	TypeTable
 	TypeTemp
+
+	TypeAll = TypeManifest | TypeLog | TypeTable | TypeTemp
 )
 
 func (t FileType) String() string {
