@@ -199,6 +199,9 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 	defer func() {
 		if err == nil {
 			s.recordCommited(r)
+			if s.manifestFile != nil {
+				s.manifestFile.Remove()
+			}
 			s.manifestFile = file
 		} else {
 			s.manifest = nil
@@ -211,12 +214,20 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 	if err != nil {
 		return
 	}
+	err = s.manifestWriter.Sync()
+	if err != nil {
+		return
+	}
 	return s.desc.SetMainManifest(file)
 }
 
 func (s *session) flushManifest(r *sessionRecord) (err error) {
 	s.fillRecord(r, false)
 	err = s.manifest.Append(r.encode())
+	if err != nil {
+		return
+	}
+	err = s.manifestWriter.Sync()
 	if err != nil {
 		return
 	}
