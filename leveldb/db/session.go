@@ -81,6 +81,7 @@ func (s *session) recover() (err error) {
 	if err != nil {
 		return
 	}
+	defer r.Close()
 
 	st := &s.st
 
