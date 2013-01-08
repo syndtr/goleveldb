@@ -524,7 +524,10 @@ func (d *DB) Close() error {
 	}
 
 	d.s.tops.purgeCache()
-	d.s.o.GetBlockCache().Purge(nil)
+	cache := d.s.o.GetBlockCache()
+	if cache != nil {
+		cache.Purge(nil)
+	}
 
 	if d.logw != nil {
 		d.logw.Close()
