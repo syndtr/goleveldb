@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-type StdDescriptor struct {
+type FileDescriptor struct {
 	path string
 	lock *os.File
 	log  *os.File
@@ -31,7 +31,7 @@ type StdDescriptor struct {
 	mu   sync.Mutex
 }
 
-func Open(dbpath string) (d *StdDescriptor, err error) {
+func OpenFile(dbpath string) (d *FileDescriptor, err error) {
 	err = os.MkdirAll(dbpath, 0755)
 	if err != nil {
 		return
@@ -60,7 +60,7 @@ func Open(dbpath string) (d *StdDescriptor, err error) {
 		return
 	}
 
-	return &StdDescriptor{path: dbpath, lock: lock, log: log}, nil
+	return &FileDescriptor{path: dbpath, lock: lock, log: log}, nil
 }
 
 // Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
@@ -83,7 +83,7 @@ func itoa(buf *[]byte, i int, wid int) {
 	*buf = append(*buf, b[bp:]...)
 }
 
-func (d *StdDescriptor) Print(str string) {
+func (d *FileDescriptor) Print(str string) {
 	t := time.Now()
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
@@ -117,11 +117,11 @@ func (d *StdDescriptor) Print(str string) {
 	d.mu.Unlock()
 }
 
-func (d *StdDescriptor) GetFile(number uint64, t FileType) File {
+func (d *FileDescriptor) GetFile(number uint64, t FileType) File {
 	return &stdFile{desc: d, num: number, t: t}
 }
 
-func (d *StdDescriptor) GetFiles(t FileType) (r []File) {
+func (d *FileDescriptor) GetFiles(t FileType) (r []File) {
 	dir, err := os.Open(d.path)
 	if err != nil {
 		return
@@ -141,7 +141,7 @@ func (d *StdDescriptor) GetFiles(t FileType) (r []File) {
 	return
 }
 
-func (d *StdDescriptor) GetMainManifest() (f File, err error) {
+func (d *FileDescriptor) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
 	file, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
@@ -161,7 +161,7 @@ func (d *StdDescriptor) GetMainManifest() (f File, err error) {
 	return p, nil
 }
 
-func (d *StdDescriptor) SetMainManifest(f File) (err error) {
+func (d *FileDescriptor) SetMainManifest(f File) (err error) {
 	p, ok := f.(*stdFile)
 	if !ok {
 		return ErrInvalidFile
@@ -182,13 +182,13 @@ func (d *StdDescriptor) SetMainManifest(f File) (err error) {
 
 }
 
-func (d *StdDescriptor) Close() {
+func (d *FileDescriptor) Close() {
 	setFileLock(d.lock, false)
 	d.lock.Close()
 }
 
 type stdFile struct {
-	desc *StdDescriptor
+	desc *FileDescriptor
 	num  uint64
 	t    FileType
 }
