@@ -16,10 +16,21 @@ package db
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
 type vType int
+
+func (t vType) String() string {
+	switch t {
+	case tDel:
+		return "d"
+	case tVal:
+		return "v"
+	}
+	return "x"
+}
 
 const (
 	tDel vType = iota
@@ -84,7 +95,7 @@ func (p iKey) num() uint64 {
 	return binary.LittleEndian.Uint64(p[len(p)-8:])
 }
 
-func (p iKey) seqAndType() (valid bool, seq uint64, t vType) {
+func (p iKey) seqAndType() (ok bool, seq uint64, t vType) {
 	if p == nil {
 		panic("operation on nil iKey")
 	}
@@ -95,14 +106,24 @@ func (p iKey) seqAndType() (valid bool, seq uint64, t vType) {
 	if t > tVal {
 		return false, 0, 0
 	}
-	valid = true
+	ok = true
 	return
 }
 
 func (p iKey) parse() *parsedIKey {
-	valid, seq, t := p.seqAndType()
-	if !valid {
+	ok, seq, t := p.seqAndType()
+	if !ok {
 		return nil
 	}
 	return &parsedIKey{p.ukey(), seq, t}
+}
+
+func (p iKey) String() string {
+	if len(p) == 0 {
+		return "<nil>"
+	}
+	if ok, seq, t := p.seqAndType(); ok {
+		return fmt.Sprintf("%s:%s:%d", shorten(string(p.ukey())), t, seq)
+	}
+	return "<invalid>"
 }

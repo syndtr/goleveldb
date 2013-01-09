@@ -50,14 +50,13 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 		return err
 	}
 
-	min, max := t.min.ukey(), t.max.ukey()
 	if level < 0 {
-		level = s.version().pickLevel(min, max)
+		level = s.version().pickLevel(t.min.ukey(), t.max.ukey())
 	}
 	c.rec.addTableFile(level, t)
 
 	s.printf("MemCompaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
-		level, t.file.Number(), t.size, n, shorten(string(min)), shorten(string(max)))
+		level, t.file.Number(), t.size, n, t.min, t.max)
 
 	return nil
 }
@@ -173,9 +172,8 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			return err
 		}
 		rec.addTableFile(c.level+1, t)
-		min, max := shorten(string(t.min.ukey())), shorten(string(t.max.ukey()))
 		s.printf("Compaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
-			c.level+1, t.file.Number(), t.size, tw.tw.Len(), min, max)
+			c.level+1, t.file.Number(), t.size, tw.tw.Len(), t.min, t.max)
 		return nil
 	}
 
