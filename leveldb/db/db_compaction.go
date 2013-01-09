@@ -181,7 +181,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		tw = nil
 		ukey := snapUkey
 		hasUkey := snapHasUkey
-		seq := snapSeq
+		lseq := snapSeq
 		snapSched := snapIter == 0
 
 		defer func() {
@@ -233,7 +233,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			if snapSched {
 				snapUkey = ukey
 				snapHasUkey = hasUkey
-				snapSeq = seq
+				snapSeq = lseq
 				snapIter = i
 				snapSched = false
 			}
@@ -243,25 +243,24 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				return
 			}
 
-			drop := false
-			ik := key.parse()
-			if ik == nil {
+			if seq, t, ok := key.parseNum(); !ok {
 				// Don't drop error keys
 				ukey = nil
 				hasUkey = false
-				seq = kMaxSeq
+				lseq = kMaxSeq
 			} else {
-				if !hasUkey || ucmp.Compare(ik.ukey, ukey) != 0 {
+				if !hasUkey || ucmp.Compare(key.ukey(), ukey) != 0 {
 					// First occurrence of this user key
-					ukey = ik.ukey
+					ukey = key.ukey()
 					hasUkey = true
-					seq = kMaxSeq
+					lseq = kMaxSeq
 				}
 
-				if seq <= minSeq {
+				drop := false
+				if lseq <= minSeq {
 					// Dropped because newer entry for same user key exist
 					drop = true // (A)
-				} else if ik.vtype == tDel && ik.seq <= minSeq && c.isBaseLevelForKey(ik.ukey) {
+				} else if t == tDel && seq <= minSeq && c.isBaseLevelForKey(ukey) {
 					// For this user key:
 					// (1) there is no data in higher levels
 					// (2) data in lower levels will have larger seq numbers
@@ -272,11 +271,10 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 					drop = true
 				}
 
-				seq = ik.seq
-			}
-
-			if drop {
-				continue
+				lseq = seq
+				if drop {
+					continue
+				}
 			}
 
 			// Create new table if not already

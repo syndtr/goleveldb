@@ -176,27 +176,27 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	res := "[ "
 	first := true
 	for iter.Valid() {
-		pkey := iKey(iter.Key()).parse()
-		if pkey == nil {
-			if !first {
-				res += ", "
-			}
-			first = false
-			res += "CORRUPTED"
-		} else {
-			if ucmp.Compare(ikey.ukey(), pkey.ukey) != 0 {
+		rkey := iKey(iter.Key())
+		if _, t, ok := rkey.parseNum(); ok {
+			if ucmp.Compare(ikey.ukey(), rkey.ukey()) != 0 {
 				break
 			}
 			if !first {
 				res += ", "
 			}
 			first = false
-			switch pkey.vtype {
+			switch t {
 			case tVal:
 				res += string(iter.Value())
 			case tDel:
 				res += "DEL"
 			}
+		} else {
+			if !first {
+				res += ", "
+			}
+			first = false
+			res += "CORRUPTED"
 		}
 		iter.Next()
 	}

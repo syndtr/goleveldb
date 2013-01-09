@@ -99,15 +99,14 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 		if ucmp.Compare(ik.ukey(), key) != 0 {
 			return false
 		}
-		valid, _, vt := ik.seqAndType()
-		if !valid {
-			panic("got invalid ikey")
+		if _, t, ok := ik.parseNum(); ok {
+			if t == tDel {
+				value = nil
+				err = errors.ErrNotFound
+			}
+			return true
 		}
-		if vt == tDel {
-			value = nil
-			err = errors.ErrNotFound
-		}
-		return true
+		return false
 	}
 
 	d.mu.RLock()

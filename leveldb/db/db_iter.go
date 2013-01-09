@@ -48,23 +48,25 @@ func (i *Iterator) scanNext(skip []byte) {
 	it := i.it
 
 	for {
-		pkey := iKey(it.Key()).parse()
-		if pkey == nil {
+		key := iKey(it.Key())
+		if seq, t, ok := key.parseNum(); ok {
+			if seq <= i.seq {
+				switch t {
+				case tDel:
+					skip = key.ukey()
+				case tVal:
+					if skip == nil || cmp.Compare(key.ukey(), skip) > 0 {
+						i.valid = true
+						return
+					}
+				}
+			}
+		} else {
 			i.err = errIKeyCorrupt
 			i.valid = false
 			return
 		}
-		if pkey.seq <= i.seq {
-			switch pkey.vtype {
-			case tDel:
-				skip = pkey.ukey
-			case tVal:
-				if skip == nil || cmp.Compare(pkey.ukey, skip) > 0 {
-					i.valid = true
-					return
-				}
-			}
-		}
+
 		if !it.Next() {
 			break
 		}
@@ -77,35 +79,38 @@ func (i *Iterator) scanPrev() {
 	cmp := i.cmp
 	it := i.it
 
-	vtype := tDel
+	tt := tDel
 	if it.Valid() {
 		for {
-			pkey := iKey(it.Key()).parse()
-			if pkey == nil {
+			key := iKey(it.Key())
+			if seq, t, ok := key.parseNum(); ok {
+				if seq <= i.seq {
+					if tt != tDel && cmp.Compare(key.ukey(), i.skey) < 0 {
+						break
+					}
+
+					if t == tDel {
+						i.skey = nil
+					} else {
+						i.skey = key.ukey()
+						i.sval = it.Value()
+					}
+					tt = t
+				}
+			} else {
 				i.err = errIKeyCorrupt
 				i.valid = false
 				i.clear()
 				return
 			}
-			if pkey.seq <= i.seq {
-				if vtype != tDel && cmp.Compare(pkey.ukey, i.skey) < 0 {
-					break
-				}
-				vtype = pkey.vtype
-				if vtype == tDel {
-					i.skey = nil
-				} else {
-					i.skey = pkey.ukey
-					i.sval = it.Value()
-				}
-			}
+
 			if !it.Prev() {
 				break
 			}
 		}
 	}
 
-	if vtype == tDel {
+	if tt == tDel {
 		i.valid = false
 		i.clear()
 		i.backward = false

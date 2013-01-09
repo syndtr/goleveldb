@@ -113,28 +113,29 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cState bool,
 				}
 			}
 
-			var rkey, rval []byte
-			rkey, rval, err = s.tops.get(t, key, ro)
+			var _rkey, rval []byte
+			_rkey, rval, err = s.tops.get(t, key, ro)
 			if err == errors.ErrNotFound {
 				continue
 			} else if err != nil {
 				return
 			}
 
-			pk := iKey(rkey).parse()
-			if pk == nil {
-				err = errors.ErrCorrupt("internal key corrupted")
-				return
-			}
-			if ucmp.Compare(ukey, pk.ukey) == 0 {
-				switch pk.vtype {
-				case tVal:
-					value = rval
-				case tDel:
-					err = errors.ErrNotFound
-				default:
-					panic("not reached")
+			rkey := iKey(_rkey)
+			if _, t, ok := rkey.parseNum(); ok {
+				if ucmp.Compare(ukey, rkey.ukey()) == 0 {
+					switch t {
+					case tVal:
+						value = rval
+					case tDel:
+						err = errors.ErrNotFound
+					default:
+						panic("not reached")
+					}
+					return
 				}
+			} else {
+				err = errors.ErrCorrupt("internal key corrupted")
 				return
 			}
 		}

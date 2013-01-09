@@ -33,20 +33,23 @@ func shortSuccessor(b []byte) []byte {
 	return icmp.Successor(b)
 }
 
-func testSingleKey(t *testing.T, key string, seq uint64, vtype vType) {
-	ik := ikey(key, seq, vtype)
-	pk := ik.parse()
+func testSingleKey(t *testing.T, key string, seq uint64, vt vType) {
+	ik := ikey(key, seq, vt)
 
-	if !bytes.Equal(pk.ukey, []byte(key)) {
-		t.Errorf("user key does not equal, got %v, want %v", string(pk.ukey), key)
+	if !bytes.Equal(ik.ukey(), []byte(key)) {
+		t.Errorf("user key does not equal, got %v, want %v", string(ik.ukey()), key)
 	}
 
-	if pk.seq != seq {
-		t.Errorf("seq number does not equal, got %v, want %v", pk.seq, seq)
-	}
+	if rseq, rt, ok := ik.parseNum(); ok {
+		if rseq != seq {
+			t.Errorf("seq number does not equal, got %v, want %v", rseq, seq)
+		}
 
-	if pk.vtype != vtype {
-		t.Errorf("type does not equal, got %v, want %v", pk.vtype, vtype)
+		if rt != vt {
+			t.Errorf("type does not equal, got %v, want %v", rt, vt)
+		}
+	} else {
+		t.Error("cannot parse seq and type")
 	}
 }
 

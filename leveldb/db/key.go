@@ -14,10 +14,8 @@
 package db
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 )
 
 type vType int
@@ -32,56 +30,47 @@ func (t vType) String() string {
 	return "x"
 }
 
+// Value types encoded as the last component of internal keys.
+// Don't modify; this value are saved to disk.
 const (
 	tDel vType = iota
 	tVal
 )
 
+// tSeek defines the vType that should be passed when constructing an
+// internal key for seeking to a particular sequence number (since we
+// sort sequence numbers in decreasing order and the value type is
+// embedded as the low 8 bits in the sequence number in internal keys,
+// we need to use the highest-numbered ValueType, not the lowest).
 const tSeek = tVal
 
 const (
+	// Maximum value possible for sequence number; the 8-bits are
+	// used by value type, so its can packed together in single
+	// 64-bit integer.
 	kMaxSeq uint64 = (uint64(1) << 56) - 1
+	// Maximum value possible for packed sequence number and type.
 	kMaxNum uint64 = (kMaxSeq << 8) | uint64(tSeek)
 )
 
+// Maximum number encoded in bytes.
 var kMaxNumBytes = make([]byte, 8)
 
 func init() {
 	binary.LittleEndian.PutUint64(kMaxNumBytes, kMaxNum)
 }
 
-func packSeqAndType(seq uint64, t vType) uint64 {
+type iKey []byte
+
+func newIKey(ukey []byte, seq uint64, t vType) iKey {
 	if seq > kMaxSeq || t > tVal {
 		panic("invalid seq number or value type")
 	}
-	return (seq << 8) | uint64(t)
-}
 
-func unpackSeqAndType(packed uint64) (uint64, vType) {
-	return uint64(packed >> 8), vType(packed & 0xff)
-}
-
-type parsedIKey struct {
-	ukey  []byte
-	seq   uint64
-	vtype vType
-}
-
-type iKey []byte
-
-func writeIkey(w io.Writer, ukey []byte, seq uint64, t vType) {
-	w.Write(ukey)
-	binary.Write(w, binary.LittleEndian, packSeqAndType(seq, t))
-}
-
-func newIKey(ukey []byte, seq uint64, t vType) iKey {
-	b := new(bytes.Buffer)
-	writeIkey(b, ukey, seq, t)
-	return b.Bytes()
-}
-
-func newIKeyFromParsed(k *parsedIKey) iKey {
-	return newIKey(k.ukey, k.seq, k.vtype)
+	b := make(iKey, len(ukey)+8)
+	copy(b, ukey)
+	binary.LittleEndian.PutUint64(b[len(ukey):], (seq<<8)|uint64(t))
+	return b
 }
 
 func (p iKey) ukey() []byte {
@@ -95,35 +84,28 @@ func (p iKey) num() uint64 {
 	return binary.LittleEndian.Uint64(p[len(p)-8:])
 }
 
-func (p iKey) seqAndType() (ok bool, seq uint64, t vType) {
+func (p iKey) parseNum() (seq uint64, t vType, ok bool) {
 	if p == nil {
 		panic("operation on nil iKey")
 	}
 	if len(p) < 8 {
-		return false, 0, 0
+		return
 	}
-	seq, t = unpackSeqAndType(p.num())
+	num := p.num()
+	seq, t = uint64(num>>8), vType(num&0xff)
 	if t > tVal {
-		return false, 0, 0
+		return 0, 0, false
 	}
 	ok = true
 	return
-}
-
-func (p iKey) parse() *parsedIKey {
-	ok, seq, t := p.seqAndType()
-	if !ok {
-		return nil
-	}
-	return &parsedIKey{p.ukey(), seq, t}
 }
 
 func (p iKey) String() string {
 	if len(p) == 0 {
 		return "<nil>"
 	}
-	if ok, seq, t := p.seqAndType(); ok {
-		return fmt.Sprintf("%s:%s:%d", shorten(string(p.ukey())), t, seq)
+	if seq, t, ok := p.parseNum(); ok {
+		return fmt.Sprintf("%s:%s:%d<%d>", shorten(string(p.ukey())), t, seq, p.num())
 	}
 	return "<invalid>"
 }
