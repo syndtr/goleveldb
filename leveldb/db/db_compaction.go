@@ -338,8 +338,8 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 }
 
 func (d *DB) compaction() {
-	s := d.s
-
+	// register to the WaitGroup
+	d.ewg.Add(1)
 	defer func() {
 		if x := recover(); x != nil {
 			if x != d {
@@ -356,11 +356,11 @@ func (d *DB) compaction() {
 				break drain
 			}
 		}
-		d.eack <- struct{}{}
 		close(d.cch)
+		d.ewg.Done()
 	}()
 
-	for {
+	for s := d.s; true; {
 		var creq *cReq
 		select {
 		case signal := <-d.cch:

@@ -56,11 +56,12 @@ func (p Sizes) Sum() (n uint64) {
 
 // DB represent a database session.
 type DB struct {
-	s    *session
-	cch  chan cSignal
-	creq chan *cReq
-	wch  chan *Batch
-	eack chan struct{}
+	s *session
+
+	cch  chan cSignal   // compaction worker signal
+	creq chan *cReq     // compaction request
+	wch  chan *Batch    // write channel
+	ewg  sync.WaitGroup // exit WaitGroup
 
 	mu          sync.RWMutex
 	mem, fmem   *memdb.DB
@@ -92,7 +93,6 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 		cch:  make(chan cSignal),
 		creq: make(chan *cReq),
 		wch:  make(chan *Batch),
-		eack: make(chan struct{}),
 		seq:  s.st.seq,
 	}
 	d.snapshots.Init()
@@ -259,6 +259,10 @@ func (d *DB) flush() (err error) {
 }
 
 func (d *DB) write() {
+	// register to the WaitGroup
+	d.ewg.Add(1)
+	defer d.ewg.Done()
+
 	lch := make(chan *Batch)
 	lack := make(chan error)
 	go func() {
@@ -283,7 +287,6 @@ func (d *DB) write() {
 		b := <-d.wch
 		if b == nil && d.getClosed() {
 			lch <- nil
-			d.eack <- struct{}{}
 			close(d.wch)
 			return
 		}
@@ -521,10 +524,8 @@ func (d *DB) Close() error {
 	// wake Compaction goroutine
 	d.cch <- cClose
 
-	// wait for ack
-	for i := 0; i < 2; i++ {
-		<-d.eack
-	}
+	// wait for the WaitGroup
+	d.ewg.Wait()
 
 	d.s.tops.purgeCache()
 	cache := d.s.o.GetBlockCache()
