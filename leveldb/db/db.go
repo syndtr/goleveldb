@@ -16,6 +16,7 @@ package db
 
 import (
 	"container/list"
+	"fmt"
 	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iter"
@@ -24,6 +25,7 @@ import (
 	"leveldb/opt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -70,6 +72,7 @@ type DB struct {
 	logf, flogf descriptor.File
 	seq, fseq   uint64
 	snapshots   list.List
+	cstats      [kNumLevels]cStats
 	err         error
 	closed      bool
 }
@@ -438,10 +441,53 @@ func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 //     about the internal operation of the DB.
 //  "leveldb.sstables" - returns a multi-line string that describes all
 //     of the sstables that make up the db contents.
-func (d *DB) GetProperty(property string) (value string, err error) {
+func (d *DB) GetProperty(prop string) (value string, err error) {
 	if d.getClosed() {
 		return "", errors.ErrClosed
 	}
+
+	const prefix = "leveldb."
+	if !strings.HasPrefix(prop, prefix) {
+		return "", errors.ErrInvalid("unknown property: " + prop)
+	}
+
+	p := prop[len(prefix):]
+
+	switch s := d.s; true {
+	case strings.HasPrefix(p, "num-files-at-level"):
+		var level uint
+		var rest string
+		n, _ := fmt.Scanf("%d%s", &level, &rest)
+		if n != 1 || level >= kNumLevels {
+			return "", errors.ErrInvalid("invalid property: " + prop)
+		}
+		value = fmt.Sprint(s.version().tLen(int(level)))
+	case p == "stats":
+		v := s.version()
+		value = "Compactions\n" +
+			" Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)\n" +
+			"-------+------------+---------------+---------------+---------------+---------------\n"
+		for level, tt := range v.tables {
+			duration, read, write := d.cstats[level].get()
+			if len(tt) == 0 && duration == 0 {
+				continue
+			}
+			value += fmt.Sprintf(" %3d   | %10d | %13.5f | %13.5f | %13.5f | %13.5f\n",
+				level, len(tt), float64(tt.size())/1048576.0, duration.Seconds(),
+				float64(read)/1048576.0, float64(write)/1048576.0)
+		}
+	case p == "sstables":
+		v := s.version()
+		for level, tt := range v.tables {
+			value += fmt.Sprintf("--- level %d ---\n", level)
+			for _, t := range tt {
+				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Number(), t.size, t.min, t.max)
+			}
+		}
+	default:
+		return "", errors.ErrInvalid("unknown property: " + prop)
+	}
+
 	return
 }
 

@@ -16,8 +16,52 @@ package db
 import (
 	"leveldb/memdb"
 	"runtime"
+	"sync"
 	"time"
 )
+
+type cStats struct {
+	sync.Mutex
+	duration time.Duration
+	read     uint64
+	write    uint64
+}
+
+func (p *cStats) add(n *cStatsStaging) {
+	p.Lock()
+	p.duration += n.duration
+	p.read += n.read
+	p.write += n.write
+	p.Unlock()
+}
+
+func (p *cStats) get() (duration time.Duration, read, write uint64) {
+	p.Lock()
+	defer p.Unlock()
+	return p.duration, p.read, p.write
+}
+
+type cStatsStaging struct {
+	start    time.Time
+	duration time.Duration
+	timerOn  bool
+	read     uint64
+	write    uint64
+}
+
+func (p *cStatsStaging) startTimer() {
+	if !p.timerOn {
+		p.start = time.Now()
+		p.timerOn = true
+	}
+}
+
+func (p *cStatsStaging) stopTimer() {
+	if p.timerOn {
+		p.duration += time.Now().Sub(p.start)
+		p.timerOn = false
+	}
+}
 
 type cReq struct {
 	level    int
@@ -33,12 +77,14 @@ const (
 )
 
 type cMem struct {
-	s   *session
-	rec *sessionRecord
+	s     *session
+	level int
+	t     *tFile
+	rec   *sessionRecord
 }
 
 func newCMem(s *session) *cMem {
-	return &cMem{s, new(sessionRecord)}
+	return &cMem{s: s, rec: new(sessionRecord)}
 }
 
 func (c *cMem) flush(mem *memdb.DB, level int) error {
@@ -58,6 +104,8 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	s.printf("MemCompaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
 		level, t.file.Number(), t.size, n, t.min, t.max)
 
+	c.level = level
+	c.t = t
 	return nil
 }
 
@@ -119,16 +167,24 @@ func (d *DB) transact(f func() error) {
 func (d *DB) memCompaction() {
 	s := d.s
 	c := newCMem(s)
+	stats := new(cStatsStaging)
 
 	s.printf("MemCompaction: started, size=%d", d.fmem.Size())
 
 	d.transact(func() (err error) {
+		stats.startTimer()
+		defer stats.stopTimer()
 		return c.flush(d.fmem, -1)
 	})
 
 	d.transact(func() (err error) {
+		stats.startTimer()
+		defer stats.stopTimer()
 		return c.commit(d.logf.Number(), d.fseq)
 	})
+
+	stats.write = c.t.size
+	d.cstats[c.level].add(stats)
 
 	// drop frozen mem
 	d.dropFrozenMem()
@@ -163,8 +219,9 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	var snapHasUkey bool
 	var snapSeq uint64
 	var snapIter int
-	minSeq := d.minSnapshot()
 	var tw *tWriter
+	minSeq := d.minSnapshot()
+	stats := new(cStatsStaging)
 
 	finish := func() error {
 		t, err := tw.finish()
@@ -172,6 +229,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			return err
 		}
 		rec.addTableFile(c.level+1, t)
+		stats.write += t.size
 		s.printf("Compaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
 			c.level+1, t.file.Number(), t.size, tw.tw.Len(), t.min, t.max)
 		return nil
@@ -185,12 +243,14 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		snapSched := snapIter == 0
 
 		defer func() {
+			stats.stopTimer()
 			if err != nil && tw != nil {
 				tw.drop()
 				tw = nil
 			}
 		}()
 
+		stats.startTimer()
 		iter := c.newIterator()
 		for i := 0; iter.Next(); i++ {
 			// Skip until last state
@@ -200,6 +260,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 			// Prioritize memdb compaction
 			if d.hasFrozenMem() {
+				stats.stopTimer()
 				d.memCompaction()
 				// dry the channel
 			drain:
@@ -213,6 +274,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 						break drain
 					}
 				}
+				stats.startTimer()
 			}
 
 			key := iKey(iter.Key())
@@ -308,6 +370,8 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	// Finish last table
 	if tw != nil {
 		d.transact(func() (err error) {
+			stats.startTimer()
+			defer stats.stopTimer()
 			return finish()
 		})
 		tw = nil
@@ -318,14 +382,20 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	// Insert deleted tables into record
 	for n, tt := range c.tables {
 		for _, t := range tt {
+			stats.read += t.size
 			rec.deleteTable(c.level+n, t.file.Number())
 		}
 	}
 
 	// Commit changes
 	d.transact(func() (err error) {
+		stats.startTimer()
+		defer stats.stopTimer()
 		return s.commit(rec)
 	})
+
+	// Save compaction stats
+	d.cstats[c.level+1].add(stats)
 
 	// Delete unused tables
 	for _, tt := range c.tables {

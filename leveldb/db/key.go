@@ -105,7 +105,7 @@ func (p iKey) String() string {
 		return "<nil>"
 	}
 	if seq, t, ok := p.parseNum(); ok {
-		return fmt.Sprintf("%s:%s:%d<%d>", shorten(string(p.ukey())), t, seq, p.num())
+		return fmt.Sprintf("%s:%s:%d", shorten(string(p.ukey())), t, seq)
 	}
 	return "<invalid>"
 }
