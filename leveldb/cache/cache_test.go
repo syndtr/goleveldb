@@ -13,7 +13,10 @@
 
 package cache
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func TestCache_HitMiss(t *testing.T) {
 	cases := []struct {
@@ -92,7 +95,7 @@ func TestCache_HitMiss(t *testing.T) {
 	}
 
 	if setfin != len(cases) {
-		t.Errorf("some set finalizer may not not executed, want=%d got=%d", len(cases), setfin)
+		t.Errorf("some set finalizer may not be executed, want=%d got=%d", len(cases), setfin)
 	}
 }
 
@@ -108,7 +111,6 @@ func TestLRUCache_Eviction(t *testing.T) {
 		r.Release()
 	}
 	ns.Set(9, 9, 10, nil).Release()
-	// 	c.esched <- true
 
 	for _, x := range []uint64{2, 5, 9} {
 		r, ok := ns.Get(x)
@@ -134,6 +136,28 @@ func TestLRUCache_Eviction(t *testing.T) {
 	}
 }
 
+func TestLRUCache_SetGet(t *testing.T) {
+	c := NewLRUCache(13)
+	ns := c.GetNamespace(0)
+	for i := 0; i < 200; i++ {
+		n := uint64(rand.Intn(99999) % 20)
+		ns.Set(n, n, 1, nil).Release()
+		if p, ok := ns.Get(n); ok {
+			if p.Value() == nil {
+				t.Errorf("key '%d' contains nil value", n)
+			} else {
+				got := p.Value().(uint64)
+				if got != n {
+					t.Errorf("invalid value for key '%d' want '%d', got '%d'", n, n, got)
+				}
+			}
+			p.Release()
+		} else {
+			t.Errorf("key '%d' doesn't exist", n)
+		}
+	}
+}
+
 func BenchmarkLRUCache_SetRelease(b *testing.B) {
 	capacity := b.N / 100
 	if capacity <= 0 {
@@ -143,6 +167,27 @@ func BenchmarkLRUCache_SetRelease(b *testing.B) {
 	ns := c.GetNamespace(0)
 	b.ResetTimer()
 	for i := uint64(0); i < uint64(b.N); i++ {
+		ns.Set(i, nil, 1, nil).Release()
+	}
+}
+
+func BenchmarkLRUCache_SetReleaseTwice(b *testing.B) {
+	capacity := b.N / 100
+	if capacity <= 0 {
+		capacity = 10
+	}
+	c := NewLRUCache(capacity)
+	ns := c.GetNamespace(0)
+	b.ResetTimer()
+
+	na := b.N / 2
+	nb := b.N - na
+
+	for i := uint64(0); i < uint64(na); i++ {
+		ns.Set(i, nil, 1, nil).Release()
+	}
+
+	for i := uint64(0); i < uint64(nb); i++ {
 		ns.Set(i, nil, 1, nil).Release()
 	}
 }
