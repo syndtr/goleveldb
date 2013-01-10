@@ -41,6 +41,18 @@ const (
 // Database compression type
 type Compression uint
 
+func (c Compression) String() string {
+	switch c {
+	case DefaultCompression:
+		return "default"
+	case NoCompression:
+		return "none"
+	case SnappyCompression:
+		return "snappy"
+	}
+	return "unknown"
+}
+
 const (
 	DefaultCompression Compression = iota
 	NoCompression

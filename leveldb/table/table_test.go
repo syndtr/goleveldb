@@ -44,7 +44,7 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		BlockSize:       1024,
 		CompressionType: opt.NoCompression,
 	}
-	tw := NewWriter(w, new(opt.Options))
+	tw := NewWriter(w, o)
 	tw.Add([]byte("k01"), []byte("hello"))
 	tw.Add([]byte("k02"), []byte("hello2"))
 	tw.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))

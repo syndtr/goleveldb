@@ -19,6 +19,7 @@ import (
 	"leveldb/errors"
 	"leveldb/hash"
 	"leveldb/opt"
+	"snappy"
 )
 
 // bInfo holds information about where and how long a block is
@@ -95,7 +96,7 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 
 	switch compression {
 	case opt.SnappyCompression:
-		compression = opt.NoCompression
+		return snappy.Decode(nil, b)
 	}
 
 	return

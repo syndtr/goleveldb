@@ -746,6 +746,7 @@ func TestDb_RecoverWithLargeLog(t *testing.T) {
 func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	h := newDbHarness(t)
 	h.o.WriteBuffer = 100000000
+	h.o.CompressionType = opt.NoCompression
 
 	v := h.db.s.version()
 	if v.tLen(0) > 0 {
@@ -798,6 +799,7 @@ func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 
 func TestDb_SparseMerge(t *testing.T) {
 	h := newDbHarness(t)
+	h.o.CompressionType = opt.NoCompression
 
 	h.putMulti(kNumLevels, "A", "Z")
 
@@ -834,6 +836,7 @@ func TestDb_SparseMerge(t *testing.T) {
 func TestDb_ApproximateSizes(t *testing.T) {
 	h := newDbHarness(t)
 	h.o.WriteBuffer = 100000000
+	h.o.CompressionType = opt.NoCompression
 
 	h.sizeAssert("", "xyz", 0, 0)
 	h.reopen()
@@ -873,6 +876,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 
 func TestDb_ApproximateSizes_MixOfSmallAndLarge(t *testing.T) {
 	h := newDbHarness(t)
+	h.o.CompressionType = opt.NoCompression
 
 	sizes := []uint64{
 		10000,

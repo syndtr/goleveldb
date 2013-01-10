@@ -20,6 +20,7 @@ import (
 	"leveldb/descriptor"
 	"leveldb/hash"
 	"leveldb/opt"
+	"snappy"
 )
 
 // Writer represent a table writer.
@@ -191,7 +192,10 @@ func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
 	}
 	switch compression {
 	case opt.SnappyCompression:
-		compression = opt.NoCompression
+		buf, err = snappy.Encode(nil, buf)
+		if err != nil {
+			return
+		}
 	}
 
 	if bi != nil {
