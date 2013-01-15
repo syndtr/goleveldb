@@ -17,7 +17,9 @@ import (
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
+	"runtime"
 	"sync/atomic"
+	"unsafe"
 )
 
 var levelMaxSize [kNumLevels]float64
@@ -33,6 +35,11 @@ func init() {
 	}
 }
 
+type tSet struct {
+	level int
+	table *tFile
+}
+
 type version struct {
 	s *session
 
@@ -41,23 +48,57 @@ type version struct {
 	// Level that should be compacted next and its compaction score.
 	// Score < 1 means compaction is not strictly needed.  These fields
 	// are initialized by ComputeCompaction()
-	compactionLevel int
-	compactionScore float64
+	cLevel int
+	cScore float64
 
-	seekCompactionLevel int
-	seekCompactionTable *tFile
+	cSeek unsafe.Pointer
+
+	next *version
 }
 
-func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cState bool, err error) {
+func (v *version) purge() {
+	if v.next == nil {
+		return
+	}
+
+	s := v.s
+
+	next := v.next
+	v.next = nil
+
+	tables := make(map[uint64]struct{})
+	for _, tt := range next.tables {
+		for _, t := range tt {
+			tables[t.file.Number()] = struct{}{}
+		}
+	}
+
+	for _, tt := range v.tables {
+		for _, t := range tt {
+			if _, ok := tables[t.file.Number()]; !ok {
+				s.tops.remove(t)
+			}
+		}
+	}
+
+	next.setfin()
+}
+
+func (v *version) setfin() {
+	runtime.SetFinalizer(v, func(x *version) {
+		go x.purge()
+	})
+}
+
+func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool, err error) {
 	s := v.s
 	icmp := s.cmp
 	ucmp := icmp.cmp
 
 	ukey := key.ukey()
 
-	var fLevel int
-	var fTable *tFile
-	fSeek := true
+	var tset *tSet
+	tseek := true
 
 	// We can search level-by-level since entries never hop across
 	// levels. Therefore we are guaranteed that if we find data
@@ -94,22 +135,12 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cState bool,
 		}
 
 		for _, t := range ts {
-			if fSeek {
-				if fTable != nil {
-					if atomic.AddInt32(&fTable.seekLeft, -1) <= 0 {
-						s.st.Lock()
-						if v.seekCompactionTable == nil {
-							v.seekCompactionLevel = fLevel
-							v.seekCompactionTable = fTable
-							cState = true
-						}
-						s.st.Unlock()
-					}
-
-					fSeek = false
-				} else {
-					fLevel = level
-					fTable = t
+			if tseek {
+				if tset == nil {
+					tset = &tSet{level, t}
+				} else if tset.table.incrSeek() <= 0 {
+					cstate = atomic.CompareAndSwapPointer(&v.cSeek, nil, unsafe.Pointer(tset))
+					tseek = false
 				}
 			}
 
@@ -273,8 +304,12 @@ func (v *version) computeCompaction() {
 		}
 	}
 
-	v.compactionLevel = bestLevel
-	v.compactionScore = bestScore
+	v.cLevel = bestLevel
+	v.cScore = bestScore
+}
+
+func (v *version) needCompaction() bool {
+	return v.cScore >= 1 || atomic.LoadPointer(&v.cSeek) != nil
 }
 
 type versionStaging struct {

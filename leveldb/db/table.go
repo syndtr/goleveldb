@@ -22,6 +22,7 @@ import (
 	"leveldb/table"
 	"runtime"
 	"sort"
+	"sync/atomic"
 )
 
 // table file
@@ -40,6 +41,10 @@ func (t *tFile) isAfter(key []byte, cmp comparer.BasicComparer) bool {
 // test if key is before t
 func (t *tFile) isBefore(key []byte, cmp comparer.BasicComparer) bool {
 	return key != nil && cmp.Compare(key, t.min.ukey()) < 0
+}
+
+func (t *tFile) incrSeek() int32 {
+	return atomic.AddInt32(&t.seekLeft, -1)
 }
 
 func newTFile(file descriptor.File, size uint64, min, max iKey) *tFile {

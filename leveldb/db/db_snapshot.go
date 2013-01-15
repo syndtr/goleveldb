@@ -17,8 +17,8 @@ import (
 	"container/list"
 	"leveldb/errors"
 	"leveldb/iter"
-	"leveldb/memdb"
 	"leveldb/opt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -28,39 +28,51 @@ type snapEntry struct {
 	ref  int
 }
 
-func (d *DB) acquireSnapshot() (p *snapEntry) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	back := d.snapshots.Back()
-	if back != nil {
-		p = back.Value.(*snapEntry)
+type snaps struct {
+	sync.Mutex
+	list.List
+}
+
+// Create new initaliized snaps object.
+func newSnaps() *snaps {
+	p := new(snaps)
+	p.Init()
+	return p
+}
+
+// Insert given seq to the list.
+func (p *snaps) acquire(seq uint64) (e *snapEntry) {
+	p.Lock()
+	if back := p.Back(); back != nil {
+		e = back.Value.(*snapEntry)
 	}
-	num := d.seq
-	if p == nil || p.seq != num {
-		p = &snapEntry{seq: num}
-		p.elem = d.snapshots.PushBack(p)
+	if e == nil || e.seq != seq {
+		e = &snapEntry{seq: seq}
+		e.elem = p.PushBack(e)
 	}
-	p.ref++
+	e.ref++
+	p.Unlock()
 	return
 }
 
-func (d *DB) releaseSnapshot(p *snapEntry) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	p.ref--
-	if p.ref == 0 {
-		d.snapshots.Remove(p.elem)
+// Release given entry; remove it when ref reach zero.
+func (p *snaps) release(e *snapEntry) {
+	p.Lock()
+	e.ref--
+	if e.ref == 0 {
+		p.Remove(e.elem)
 	}
+	p.Unlock()
 }
 
-func (d *DB) minSnapshot() uint64 {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	back := d.snapshots.Front()
-	if back == nil {
-		return d.s.seq()
+// Get smallest sequence or return given seq if list empty.
+func (p *snaps) seq(seq uint64) uint64 {
+	p.Lock()
+	defer p.Unlock()
+	if back := p.Back(); back != nil {
+		return back.Value.(*snapEntry).seq
 	}
-	return back.Value.(*snapEntry).seq
+	return seq
 }
 
 // Snapshot represent a database snapshot.
@@ -70,8 +82,9 @@ type Snapshot struct {
 	released uint32
 }
 
+// Create new snapshot object.
 func (d *DB) newSnapshot() *Snapshot {
-	return &Snapshot{d: d, entry: d.acquireSnapshot()}
+	return &Snapshot{d: d, entry: d.snaps.acquire(d.getSeq())}
 }
 
 // Get get value for given key of this snapshot of database.
@@ -81,53 +94,13 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 	}
 
 	d := p.d
-	s := d.s
 
-	if d.getClosed() {
-		return nil, errors.ErrClosed
-	}
-
-	ucmp := s.cmp.cmp
-	ikey := newIKey(key, p.entry.seq, tSeek)
-	memGet := func(m *memdb.DB) bool {
-		var k []byte
-		k, value, err = m.Get(ikey)
-		if err != nil {
-			return false
-		}
-		ik := iKey(k)
-		if ucmp.Compare(ik.ukey(), key) != 0 {
-			return false
-		}
-		if _, t, ok := ik.parseNum(); ok {
-			if t == tDel {
-				value = nil
-				err = errors.ErrNotFound
-			}
-			return true
-		}
-		return false
-	}
-
-	d.mu.RLock()
-	if memGet(d.mem) || (d.fmem != nil && memGet(d.fmem)) {
-		d.mu.RUnlock()
+	err = d.rok()
+	if err != nil {
 		return
 	}
-	d.mu.RUnlock()
 
-	var cState bool
-	value, cState, err = s.version().get(ikey, ro)
-
-	if cState && !d.getClosed() {
-		// schedule compaction
-		select {
-		case d.cch <- cSched:
-		default:
-		}
-	}
-
-	return
+	return d.get(key, p.entry.seq, ro)
 }
 
 // NewIterator return an iterator over the contents of this snapshot of
@@ -140,8 +113,8 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 	d := p.d
 	s := d.s
 
-	if d.getClosed() {
-		return &iter.EmptyIterator{errors.ErrClosed}
+	if err := d.rok(); err != nil {
+		return &iter.EmptyIterator{err}
 	}
 
 	return newIterator(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
@@ -151,7 +124,7 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 // after this call.
 func (p *Snapshot) Release() {
 	if atomic.CompareAndSwapUint32(&p.released, 0, 1) {
-		p.d.releaseSnapshot(p.entry)
+		p.d.snaps.release(p.entry)
 		p.d = nil
 		p.entry = nil
 	}

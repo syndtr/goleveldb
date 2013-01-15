@@ -16,7 +16,8 @@ package db
 import (
 	"fmt"
 	"leveldb/descriptor"
-	"leveldb/log"
+	"sync/atomic"
+	"unsafe"
 )
 
 // logging
@@ -49,146 +50,122 @@ func (s *session) getFiles(t descriptor.FileType) []descriptor.File {
 
 // session state
 
-type stateNum struct {
-	num        uint64
-	isCommited bool
-}
-
-func (p *stateNum) set(num uint64) {
-	if p.num != num {
-		p.num = num
-		p.isCommited = false
-	}
-}
-
-func (p *stateNum) commited(num uint64) {
-	if p.num == num {
-		p.isCommited = true
-	}
-}
-
-func (s *session) setVersion(v *version) {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-	st.version = v
-	st.versions = append(st.versions, v)
-}
-
-func (s *session) setFileNum(num uint64) {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-	st.nextNum.set(num)
-}
-
-func (s *session) markFileNum(num uint64) {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-	if num > st.nextNum.num {
-		st.nextNum.set(num)
-	}
-}
-
-func (s *session) allocFileNumNL() (num uint64) {
-	st := &s.st
-	num = st.nextNum.num
-	st.nextNum.num++
-	st.nextNum.isCommited = false
-	return
-}
-
-func (s *session) allocFileNum() (num uint64) {
-	s.st.Lock()
-	defer s.st.Unlock()
-	return s.allocFileNumNL()
-}
-
-func (s *session) reuseFileNum(num uint64) {
-	st := &s.st
-	st.Lock()
-	if st.nextNum.num == num+1 {
-		st.nextNum.num = num
-	}
-	st.Unlock()
-}
-
+// Get current version.
 func (s *session) version() *version {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-	return st.version
+	return (*version)(atomic.LoadPointer(&s.stVersion))
 }
 
-func (s *session) seq() uint64 {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-	return st.seq
+// Get current version; no barrier.
+func (s *session) version_NB() *version {
+	return (*version)(s.stVersion)
 }
 
-func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
-	st := &s.st
-	st.RLock()
-	defer st.RUnlock()
-
-	if snapshot || !st.nextNum.isCommited {
-		r.setNextNum(st.nextNum.num)
+// Set current version to v.
+func (s *session) setVersion(v *version) {
+	for {
+		old := s.stVersion
+		if atomic.CompareAndSwapPointer(&s.stVersion, old, unsafe.Pointer(v)) {
+			if old == nil {
+				v.setfin()
+			} else {
+				(*version)(old).next = v
+			}
+			break
+		}
 	}
+}
+
+// Get current unused file number.
+func (s *session) fileNum() uint64 {
+	return atomic.LoadUint64(&s.stFileNum)
+}
+
+// Get current unused file number to num.
+func (s *session) setFileNum(num uint64) {
+	atomic.StoreUint64(&s.stFileNum, num)
+}
+
+// Mark file number as used.
+func (s *session) markFileNum(num uint64) {
+	num += 1
+	for {
+		old, x := s.stFileNum, num
+		if old > x {
+			x = old
+		}
+		if atomic.CompareAndSwapUint64(&s.stFileNum, old, x) {
+			break
+		}
+	}
+}
+
+// Allocate a file number.
+func (s *session) allocFileNum() (num uint64) {
+	return atomic.AddUint64(&s.stFileNum, 1) - 1
+}
+
+// Reuse given file number.
+func (s *session) reuseFileNum(num uint64) {
+	for {
+		old, x := s.stFileNum, num
+		if old != x+1 {
+			x = old
+		}
+		if atomic.CompareAndSwapUint64(&s.stFileNum, old, x) {
+			break
+		}
+	}
+}
+
+// manifest related utils
+
+// Fill given session record obj with current states; need external
+// synchronization.
+func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
+	r.setNextNum(s.fileNum())
 
 	if snapshot {
 		if !r.hasLogNum {
-			r.setLogNum(st.logNum)
+			r.setLogNum(s.stLogNum)
 		}
 
 		if !r.hasLogNum {
-			r.setSeq(st.seq)
+			r.setSeq(s.stSeq)
 		}
 
-		for level, ik := range st.compactPointers {
+		for level, ik := range s.stCPtrs {
 			r.addCompactPointer(level, ik)
 		}
-	}
 
-	if snapshot {
 		r.setComparer(s.cmp.cmp.Name())
 	}
 }
 
+// Mark if record has been commited, this will update session state;
+// need external synchronization.
 func (s *session) recordCommited(r *sessionRecord) {
-	st := &s.st
-	st.Lock()
-	defer st.Unlock()
-
-	if r.hasNextNum {
-		st.nextNum.commited(r.nextNum)
-	}
-
 	if r.hasLogNum {
-		st.logNum = r.logNum
+		s.stLogNum = r.logNum
 	}
 
 	if r.hasSeq {
-		st.seq = r.seq
+		s.stSeq = r.seq
 	}
 
 	for _, p := range r.compactPointers {
-		st.compactPointers[p.level] = iKey(p.key)
+		s.stCPtrs[p.level] = iKey(p.key)
 	}
 }
 
+// Create a new manifest file; need external synchronization.
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
-	file := s.desc.GetFile(num, descriptor.TypeManifest)
-	s.manifestWriter, err = file.Create()
+	w, err := newLogWriter(s.desc.GetFile(num, descriptor.TypeManifest))
 	if err != nil {
 		return
 	}
 
-	s.manifest = log.NewWriter(s.manifestWriter)
-
 	if v == nil {
-		v = s.st.version
+		v = s.version_NB()
 	}
 
 	if r == nil {
@@ -196,38 +173,40 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 	}
 	s.fillRecord(r, true)
 	v.fillRecord(r)
+
 	defer func() {
 		if err == nil {
 			s.recordCommited(r)
-			if s.manifestFile != nil {
-				s.manifestFile.Remove()
+			if s.manifest != nil {
+				s.manifest.remove()
 			}
-			s.manifestFile = file
+			s.manifest = w
 		} else {
-			s.manifest = nil
-			s.manifestWriter.Close()
-			s.manifestWriter = nil
-			file.Remove()
+			w.remove()
 		}
 	}()
-	err = s.manifest.Append(r.encode())
+
+	err = w.log.Append(r.encode())
 	if err != nil {
 		return
 	}
-	err = s.manifestWriter.Sync()
+
+	err = w.writer.Sync()
 	if err != nil {
 		return
 	}
-	return s.desc.SetMainManifest(file)
+
+	return s.desc.SetMainManifest(w.file)
 }
 
+// Flush record to disk.
 func (s *session) flushManifest(r *sessionRecord) (err error) {
 	s.fillRecord(r, false)
-	err = s.manifest.Append(r.encode())
+	err = s.manifest.log.Append(r.encode())
 	if err != nil {
 		return
 	}
-	err = s.manifestWriter.Sync()
+	err = s.manifest.writer.Sync()
 	if err != nil {
 		return
 	}

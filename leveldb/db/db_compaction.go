@@ -101,7 +101,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	}
 	c.rec.addTableFile(level, t)
 
-	s.printf("MemCompaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
+	s.printf("Compaction: table created, source=mem level=%d num=%d size=%d entries=%d min=%q max=%q",
 		level, t.file.Number(), t.size, n, t.min, t.max)
 
 	c.level = level
@@ -137,17 +137,17 @@ func (d *DB) transact(f func() error) {
 	}
 
 	for {
-		if d.getClosed() {
+		if d.isClosed() {
 			exit()
 		}
 		err := f()
-		if err != d.err {
-			d.setError(err)
+		if (d.err == nil) != (err == nil) {
+			d.seterr(err)
 		}
 		if err == nil {
 			return
 		}
-		s.printf("Transact: err=`%v'", err)
+		s.printf("Transact: err=%q", err)
 		// dry the channel
 	drain:
 		for {
@@ -157,30 +157,30 @@ func (d *DB) transact(f func() error) {
 				break drain
 			}
 		}
-		if d.getClosed() {
+		if d.isClosed() {
 			exit()
 		}
 		time.Sleep(time.Second)
 	}
 }
 
-func (d *DB) memCompaction() {
+func (d *DB) memCompaction(mem *memdb.DB) {
 	s := d.s
 	c := newCMem(s)
 	stats := new(cStatsStaging)
 
-	s.printf("MemCompaction: started, size=%d", d.fmem.Size())
+	s.printf("MemCompaction: started, size=%d", mem.Size())
 
 	d.transact(func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.flush(d.fmem, -1)
+		return c.flush(mem, -1)
 	})
 
 	d.transact(func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.commit(d.logf.Number(), d.fseq)
+		return c.commit(d.log.file.Number(), d.fseq)
 	})
 
 	stats.write = c.t.size
@@ -220,7 +220,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	var snapSeq uint64
 	var snapIter int
 	var tw *tWriter
-	minSeq := d.minSnapshot()
+	minSeq := d.snaps.seq(d.getSeq())
 	stats := new(cStatsStaging)
 
 	finish := func() error {
@@ -230,7 +230,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		}
 		rec.addTableFile(c.level+1, t)
 		stats.write += t.size
-		s.printf("Compaction: table created, level=%d num=%d size=%d entries=%d min=%q max=%q",
+		s.printf("Compaction: table created, source=file level=%d num=%d size=%d entries=%d min=%q max=%q",
 			c.level+1, t.file.Number(), t.size, tw.tw.Len(), t.min, t.max)
 		return nil
 	}
@@ -259,9 +259,9 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			}
 
 			// Prioritize memdb compaction
-			if d.hasFrozenMem() {
+			if mem := d.getFrozenMem(); mem != nil {
 				stats.stopTimer()
-				d.memCompaction()
+				d.memCompaction(mem)
 				// dry the channel
 			drain:
 				for {
@@ -379,10 +379,10 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 	s.print("Compaction: done")
 
-	// Insert deleted tables into record
 	for n, tt := range c.tables {
 		for _, t := range tt {
 			stats.read += t.size
+			// Insert deleted tables into record
 			rec.deleteTable(c.level+n, t.file.Number())
 		}
 	}
@@ -396,13 +396,6 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 	// Save compaction stats
 	d.cstats[c.level+1].add(stats)
-
-	// Delete unused tables
-	for _, tt := range c.tables {
-		for _, t := range tt {
-			s.tops.remove(t)
-		}
-	}
 
 	runtime.GC()
 }
@@ -448,8 +441,8 @@ func (d *DB) compaction() {
 
 			s.printf("CompactRange: ordered, level=%d", creq.level)
 
-			if d.hasFrozenMem() {
-				d.memCompaction()
+			if mem := d.getFrozenMem(); mem != nil {
+				d.memCompaction(mem)
 			}
 
 			if creq.level >= 0 {
@@ -477,13 +470,13 @@ func (d *DB) compaction() {
 
 		for a, b := true, true; a || b; {
 			a, b = false, false
-			if d.hasFrozenMem() {
-				d.memCompaction()
+			if mem := d.getFrozenMem(); mem != nil {
+				d.memCompaction(mem)
 				a = true
 				continue
 			}
 
-			if s.needCompaction() {
+			if s.version().needCompaction() {
 				d.doCompaction(s.pickCompaction(), false)
 				b = true
 			}

@@ -236,7 +236,7 @@ func (h *dbHarness) compactMem() {
 	db := h.db
 
 	// create new memdb and log
-	err := db.newMem()
+	_, err := db.newMem()
 	if err != nil {
 		t.Error("newMem: got error: ", err)
 		return
@@ -266,7 +266,7 @@ func (h *dbHarness) compactRangeAt(level int, min, max string) {
 	db.creq <- r
 	db.cch <- cWait
 
-	err := db.ok()
+	err := db.wok()
 	if err != nil {
 		t.Error("CompactRangeAt: got error: ", err)
 	}

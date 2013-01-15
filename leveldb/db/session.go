@@ -17,33 +17,26 @@ import (
 	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iter"
-	"leveldb/log"
 	"leveldb/opt"
-	"sync"
+	"sync/atomic"
+	"unsafe"
 )
 
+// session represent a persistent database session.
 type session struct {
-	sync.RWMutex
-
 	desc   descriptor.Descriptor
 	o      *iOptions
 	cmp    *iComparer
 	filter *iFilter
 	tops   *tOps
 
-	manifest       *log.Writer
-	manifestFile   descriptor.File
-	manifestWriter descriptor.Writer
+	manifest *logWriter
 
-	st struct {
-		sync.RWMutex
-		version         *version
-		versions        []*version
-		nextNum         stateNum
-		logNum          uint64
-		seq             uint64
-		compactPointers [kNumLevels]iKey
-	}
+	stVersion unsafe.Pointer   // current version
+	stFileNum uint64           // current unused file number
+	stLogNum  uint64           // current log file number; need external synchronization
+	stSeq     uint64           // last mem compacted seq; need external synchronization
+	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
 func newSession(desc descriptor.Descriptor, o *opt.Options) *session {
@@ -60,7 +53,7 @@ func newSession(desc descriptor.Descriptor, o *opt.Options) *session {
 	return s
 }
 
-// Create a new database session
+// Create a new database session; need external synchronization.
 func (s *session) create() (err error) {
 	// create manifest
 	err = s.createManifest(s.allocFileNum(), nil, nil)
@@ -70,41 +63,39 @@ func (s *session) create() (err error) {
 	return
 }
 
-// Recover a database session
+// Recover a database session; need external synchronization.
 func (s *session) recover() (err error) {
-	s.manifestFile, err = s.desc.GetMainManifest()
+	file, err := s.desc.GetMainManifest()
 	if err != nil {
 		return
 	}
 
-	r, err := s.manifestFile.Open()
+	r, err := newLogReader(file, true)
 	if err != nil {
 		return
 	}
-	defer r.Close()
+	defer r.close()
 
-	st := &s.st
-
-	cmpName := s.cmp.cmp.Name()
-	staging := st.version.newStaging()
+	cmp := s.cmp.cmp.Name()
+	staging := s.version_NB().newStaging()
 	srec := new(sessionRecord)
-	lr := log.NewReader(r, true)
-	for lr.Next() {
+
+	for r.log.Next() {
 		rec := new(sessionRecord)
-		err = rec.decode(lr.Record())
+		err = rec.decode(r.log.Record())
 		if err != nil {
 			continue
 		}
 
-		if rec.hasComparer && rec.comparer != cmpName {
+		if rec.hasComparer && rec.comparer != cmp {
 			return errors.ErrInvalid("invalid comparer, " +
-				"want '" + cmpName + "', " +
+				"want '" + cmp + "', " +
 				"got '" + rec.comparer + "'")
 		}
 
 		// save compact pointers
 		for _, rp := range rec.compactPointers {
-			st.compactPointers[rp.level] = iKey(rp.key)
+			s.stCPtrs[rp.level] = iKey(rp.key)
 		}
 
 		// commit record to version staging
@@ -120,8 +111,9 @@ func (s *session) recover() (err error) {
 			srec.setSeq(rec.seq)
 		}
 	}
+
 	// check for error in log reader
-	err = lr.Error()
+	err = r.log.Error()
 	if err != nil {
 		return
 	}
@@ -138,6 +130,7 @@ func (s *session) recover() (err error) {
 		return
 	}
 
+	s.manifest = &logWriter{file: file}
 	s.setVersion(staging.finish())
 	s.setFileNum(srec.nextNum)
 	s.recordCommited(srec)
@@ -145,11 +138,12 @@ func (s *session) recover() (err error) {
 	return
 }
 
+// Commit session; need external synchronization.
 func (s *session) commit(r *sessionRecord) (err error) {
 	// spawn new version based on current version
-	nv := s.st.version.spawn(r)
+	nv := s.version_NB().spawn(r)
 
-	if s.manifest == nil {
+	if s.manifest.closed() {
 		// manifest log writer not yet created, create one
 		err = s.createManifest(s.allocFileNum(), r, nv)
 	} else {
@@ -164,31 +158,18 @@ func (s *session) commit(r *sessionRecord) (err error) {
 	return
 }
 
-func (s *session) needCompaction() bool {
-	st := &s.st
-	st.RLock()
-	defer st.RUnlock()
-	v := st.version
-	return v.compactionScore >= 1 || v.seekCompactionTable != nil
-}
-
+// Pick a compaction based on current state; need external synchronization.
 func (s *session) pickCompaction() (c *compaction) {
-	st := &s.st
-
-	st.RLock()
-	v := st.version
-	bySize := v.compactionScore >= 1
-	bySeek := v.seekCompactionTable != nil
-	st.RUnlock()
-
 	icmp := s.cmp
 	ucmp := icmp.cmp
 
+	v := s.version_NB()
+
 	var level int
 	var t0 tFiles
-	if bySize {
-		level = v.compactionLevel
-		cp := s.st.compactPointers[level]
+	if v.cScore >= 1 {
+		level = v.cLevel
+		cp := s.stCPtrs[level]
 		tt := v.tables[level]
 		for _, t := range tt {
 			if cp == nil || icmp.Compare(t.max, cp) > 0 {
@@ -199,11 +180,14 @@ func (s *session) pickCompaction() (c *compaction) {
 		if len(t0) == 0 {
 			t0 = append(t0, tt[0])
 		}
-	} else if bySeek {
-		level = v.seekCompactionLevel
-		t0 = append(t0, v.seekCompactionTable)
 	} else {
-		return
+		if p := atomic.LoadPointer(&v.cSeek); p != nil {
+			ts := (*tSet)(p)
+			level = ts.level
+			t0 = append(t0, ts.table)
+		} else {
+			return
+		}
 	}
 
 	c = &compaction{s: s, version: v, level: level}
@@ -218,12 +202,9 @@ func (s *session) pickCompaction() (c *compaction) {
 	return
 }
 
+// Create compaction from given level and range; need external synchronization.
 func (s *session) getCompactionRange(level int, min, max []byte) (c *compaction) {
-	st := &s.st
-
-	st.RLock()
-	v := st.version
-	st.RUnlock()
+	v := s.version_NB()
 
 	var t0 tFiles
 	v.tables[level].getOverlaps(min, max, &t0, level != 0, s.cmp.cmp)
@@ -237,6 +218,7 @@ func (s *session) getCompactionRange(level int, min, max []byte) (c *compaction)
 	return
 }
 
+// compaction represent a compaction state
 type compaction struct {
 	s       *session
 	version *version
@@ -253,6 +235,7 @@ type compaction struct {
 	tPtrs [kNumLevels]int
 }
 
+// Expand compacted tables; need external synchronization.
 func (c *compaction) expand() {
 	s := c.s
 	v := c.version
@@ -299,6 +282,7 @@ func (c *compaction) expand() {
 	c.min, c.max = min, max
 }
 
+// Check whether compaction is trivial.
 func (c *compaction) trivial() bool {
 	return len(c.tables[0]) == 1 && len(c.tables[1]) == 0 && c.gp.size() <= kMaxGrandParentOverlapBytes
 }

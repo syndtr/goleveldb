@@ -15,11 +15,37 @@ package db
 
 import (
 	"leveldb/descriptor"
-	"leveldb/errors"
-	"leveldb/log"
-	"leveldb/memdb"
+	"leveldb/iter"
+	"leveldb/opt"
 )
 
+// Reader is the interface that wraps basic Get and NewIterator methods.
+// This interface implemented by both *DB and *Snapshot.
+type Reader interface {
+	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
+	NewIterator(ro *opt.ReadOptions) iter.Iterator
+}
+
+// Range represent key range.
+type Range struct {
+	// Start key, include in the range
+	Start []byte
+
+	// Limit, not include in the range
+	Limit []byte
+}
+
+type Sizes []uint64
+
+// Sum return sum of the sizes.
+func (p Sizes) Sum() (n uint64) {
+	for _, s := range p {
+		n += s
+	}
+	return
+}
+
+// Remove unused files.
 func (d *DB) cleanFiles() {
 	s := d.s
 
@@ -35,12 +61,12 @@ func (d *DB) cleanFiles() {
 		keep := true
 		switch f.Type() {
 		case descriptor.TypeManifest:
-			keep = f.Number() >= s.manifestFile.Number()
+			keep = !s.manifest.closed() && f.Number() >= s.manifest.file.Number()
 		case descriptor.TypeLog:
-			if d.flogf != nil {
-				keep = f.Number() >= d.flogf.Number()
+			if d.flog != nil && !d.flog.closed() {
+				keep = f.Number() >= d.flog.file.Number()
 			} else {
-				keep = f.Number() >= d.logf.Number()
+				keep = f.Number() >= d.log.file.Number()
 			}
 		case descriptor.TypeTable:
 			_, keep = tables[f.Number()]
@@ -50,73 +76,4 @@ func (d *DB) cleanFiles() {
 			f.Remove()
 		}
 	}
-}
-
-func (d *DB) newMem() (err error) {
-	s := d.s
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	// create new log
-	file := s.getLogFile(s.allocFileNum())
-	w, err := file.Create()
-	if err != nil {
-		return
-	}
-	d.log = log.NewWriter(w)
-	if d.logw != nil {
-		d.logw.Close()
-	}
-	d.logw = w
-
-	d.flogf = d.logf
-	d.logf = file
-
-	// new mem
-	d.fmem = d.mem
-	d.mem = memdb.New(s.cmp)
-
-	d.fseq = d.seq
-
-	return
-}
-
-func (d *DB) hasFrozenMem() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.fmem != nil
-}
-
-func (d *DB) dropFrozenMem() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.fmem = nil
-
-	d.flogf.Remove()
-	d.flogf = nil
-}
-
-func (d *DB) setError(err error) {
-	d.mu.Lock()
-	d.err = err
-	d.mu.Unlock()
-}
-
-func (d *DB) getClosed() bool {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.closed
-}
-
-func (d *DB) ok() error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	if d.err != nil {
-		return d.err
-	}
-	if d.closed {
-		return errors.ErrClosed
-	}
-	return nil
 }

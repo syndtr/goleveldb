@@ -15,66 +15,35 @@
 package db
 
 import (
-	"container/list"
 	"fmt"
 	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iter"
-	"leveldb/log"
 	"leveldb/memdb"
 	"leveldb/opt"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
-	"time"
+	"unsafe"
 )
-
-// Reader is the interface that wraps basic Get and NewIterator methods.
-// This interface implemented by both *DB and *Snapshot.
-type Reader interface {
-	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
-	NewIterator(ro *opt.ReadOptions) iter.Iterator
-}
-
-// Range represent key range.
-type Range struct {
-	// Start key, include in the range
-	Start []byte
-
-	// Limit, not include in the range
-	Limit []byte
-}
-
-type Sizes []uint64
-
-// Sum return sum of the sizes.
-func (p Sizes) Sum() (n uint64) {
-	for _, s := range p {
-		n += s
-	}
-	return
-}
 
 // DB represent a database session.
 type DB struct {
 	s *session
 
-	cch  chan cSignal   // compaction worker signal
-	creq chan *cReq     // compaction request
-	wch  chan *Batch    // write channel
-	ewg  sync.WaitGroup // exit WaitGroup
+	cch    chan cSignal       // compaction worker signal
+	creq   chan *cReq         // compaction request
+	wch    chan *Batch        // write channel
+	ewg    sync.WaitGroup     // exit WaitGroup
+	cstats [kNumLevels]cStats // Compaction stats
 
-	mu          sync.RWMutex
-	mem, fmem   *memdb.DB
-	log         *log.Writer
-	logw        descriptor.Writer
-	logf, flogf descriptor.File
-	seq, fseq   uint64
-	snapshots   list.List
-	cstats      [kNumLevels]cStats
-	err         error
-	closed      bool
+	mem       unsafe.Pointer
+	log, flog *logWriter
+	seq, fseq uint64
+	snaps     *snaps
+	closed    uint32
+	err       unsafe.Pointer
 }
 
 // Open open or create database from given desc.
@@ -92,13 +61,13 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	}
 
 	d = &DB{
-		s:    s,
-		cch:  make(chan cSignal),
-		creq: make(chan *cReq),
-		wch:  make(chan *Batch),
-		seq:  s.st.seq,
+		s:     s,
+		cch:   make(chan cSignal),
+		creq:  make(chan *cReq),
+		wch:   make(chan *Batch),
+		seq:   s.stSeq,
+		snaps: newSnaps(),
 	}
-	d.snapshots.Init()
 
 	err = d.recoverLog()
 	if err != nil {
@@ -117,37 +86,31 @@ func (d *DB) recoverLog() (err error) {
 	s := d.s
 	icmp := s.cmp
 
+	s.printf("LogRecovery: started, min=%d", s.stLogNum)
+
 	mb := new(memBatch)
 	cm := newCMem(s)
 
-	s.printf("LogRecovery: started, min=%d", s.st.logNum)
-
-	var flogf descriptor.File
-	ff := files(s.getFiles(descriptor.TypeLog))
-	ff.sort()
-
-	skip := 0
-	for _, file := range ff {
-		if file.Number() < s.st.logNum {
+	logs, skip := files(s.getFiles(descriptor.TypeLog)), 0
+	logs.sort()
+	for _, log := range logs {
+		if log.Number() < s.stLogNum {
 			skip++
 			continue
 		}
-		s.markFileNum(file.Number())
+		s.markFileNum(log.Number())
 	}
 
-	ff = ff[skip:]
-	for _, file := range ff {
-		s.printf("LogRecovery: recovering, num=%d", file.Number())
+	var r, fr *logReader
+	for _, log := range logs[skip:] {
+		s.printf("LogRecovery: recovering, num=%d", log.Number())
 
-		var r descriptor.Reader
-		r, err = file.Open()
+		r, err = newLogReader(log, true)
 		if err != nil {
 			return
 		}
 
 		if mb.mem != nil {
-			d.fseq = d.seq
-
 			if mb.mem.Len() > 0 {
 				err = cm.flush(mb.mem, 0)
 				if err != nil {
@@ -155,22 +118,21 @@ func (d *DB) recoverLog() (err error) {
 				}
 			}
 
-			err = cm.commit(file.Number(), d.fseq)
+			err = cm.commit(r.file.Number(), d.seq)
 			if err != nil {
 				return
 			}
 
 			cm.reset()
 
-			flogf.Remove()
-			flogf = nil
+			fr.remove()
+			fr = nil
 		}
 
 		mb.mem = memdb.New(icmp)
 
-		lr := log.NewReader(r, true)
-		for lr.Next() {
-			d.seq, err = replayBatch(lr.Record(), mb)
+		for r.log.Next() {
+			d.seq, err = replayBatch(r.log.Record(), mb)
 			if err != nil {
 				return
 			}
@@ -187,17 +149,17 @@ func (d *DB) recoverLog() (err error) {
 			}
 		}
 
-		err = lr.Error()
+		err = r.log.Error()
 		if err != nil {
 			return
 		}
 
-		r.Close()
-		flogf = file
+		r.close()
+		fr = r
 	}
 
 	// create new log
-	err = d.newMem()
+	_, err = d.newMem()
 	if err != nil {
 		return
 	}
@@ -209,140 +171,16 @@ func (d *DB) recoverLog() (err error) {
 		}
 	}
 
-	d.fseq = d.seq
-
-	err = cm.commit(d.logf.Number(), d.fseq)
+	err = cm.commit(d.log.file.Number(), d.seq)
 	if err != nil {
 		return
 	}
 
-	if flogf != nil {
-		flogf.Remove()
+	if fr != nil {
+		fr.remove()
 	}
 
 	return
-}
-
-func (d *DB) flush() (err error) {
-	s := d.s
-
-	delayed := false
-	for {
-		v := s.version()
-		switch {
-		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
-			delayed = true
-			time.Sleep(1000 * time.Microsecond)
-			continue
-		case d.mem.Size() <= s.o.GetWriteBuffer():
-			// still room
-			return
-		case d.hasFrozenMem():
-			d.cch <- cWait
-			continue
-		case v.tLen(0) >= kL0_StopWritesTrigger:
-			d.cch <- cSched
-			continue
-		}
-
-		// create new memdb and log
-		err = d.newMem()
-		if err != nil {
-			return
-		}
-
-		// schedule compaction
-		select {
-		case d.cch <- cSched:
-		default:
-		}
-	}
-
-	return
-}
-
-func (d *DB) write() {
-	// register to the WaitGroup
-	d.ewg.Add(1)
-	defer d.ewg.Done()
-
-	lch := make(chan *Batch)
-	lack := make(chan error)
-	go func() {
-		for b := range lch {
-			if b == nil {
-				close(lch)
-				close(lack)
-				return
-			}
-
-			// write log
-			err := d.log.Append(b.encode())
-			if err == nil && b.sync {
-				err = d.logw.Sync()
-			}
-
-			lack <- err
-		}
-	}()
-
-	for {
-		b := <-d.wch
-		if b == nil && d.getClosed() {
-			lch <- nil
-			close(d.wch)
-			return
-		}
-
-		err := d.flush()
-		if err != nil {
-			b.done(err)
-			continue
-		}
-
-		// calculate max size of batch
-		n := b.size()
-		m := 1 << 20
-		if n <= 128<<10 {
-			m = n + (128 << 10)
-		}
-
-		// merge with other batch
-		for done := false; !done && b.size() <= m && !b.sync; {
-			select {
-			case nb := <-d.wch:
-				b.append(nb)
-			default:
-				done = true
-			}
-		}
-
-		// set batch first seq number relative from last seq
-		seq := d.seq
-		b.seq = seq + 1
-
-		// write log
-		lch <- b
-
-		// replay batch to memdb
-		b.memReplay(d.mem)
-
-		// wait for log
-		err = <-lack
-		if err != nil {
-			b.revertMemReplay(d.mem)
-			b.done(err)
-			continue
-		}
-
-		// set last seq number
-		d.mu.Lock()
-		d.seq = seq + uint64(b.len())
-		d.mu.Unlock()
-
-		// done
-		b.done(nil)
-	}
 }
 
 // Put set the database entry for "key" to "value".
@@ -362,7 +200,7 @@ func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 
 // Write apply the specified batch to the database.
 func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
-	err = d.ok()
+	err = d.wok()
 	if err != nil || b == nil || b.len() == 0 {
 		return
 	}
@@ -374,29 +212,58 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	return
 }
 
-// Get get value for given key of the latest snapshot of database.
-func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
-	p := d.newSnapshot()
-	defer p.Release()
-	return p.Get(key, ro)
-}
-
-// newRawIterator return merged interators of current version, current frozen memdb
-// and current memdb.
-func (d *DB) newRawIterator(ro *opt.ReadOptions) iter.Iterator {
+func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
 	s := d.s
 
-	d.mu.RLock()
-	ti := s.version().getIterators(ro)
-	ii := make([]iter.Iterator, 0, len(ti)+2)
-	ii = append(ii, d.mem.NewIterator())
-	if d.fmem != nil {
-		ii = append(ii, d.fmem.NewIterator())
-	}
-	ii = append(ii, ti...)
-	d.mu.RUnlock()
+	ucmp := s.cmp.cmp
+	ikey := newIKey(key, seq, tSeek)
 
-	return iter.NewMergedIterator(ii, s.cmp)
+	memGet := func(m *memdb.DB) bool {
+		var k []byte
+		k, value, err = m.Get(ikey)
+		if err != nil {
+			return false
+		}
+		ik := iKey(k)
+		if ucmp.Compare(ik.ukey(), key) != 0 {
+			return false
+		}
+		if _, t, ok := ik.parseNum(); ok {
+			if t == tDel {
+				value = nil
+				err = errors.ErrNotFound
+			}
+			return true
+		}
+		return false
+	}
+
+	mem := d.getMem()
+	if memGet(mem.cur) || (mem.froze != nil && memGet(mem.froze)) {
+		return
+	}
+
+	value, cState, err := s.version().get(ikey, ro)
+
+	if cState && !d.isClosed() {
+		// schedule compaction
+		select {
+		case d.cch <- cSched:
+		default:
+		}
+	}
+
+	return
+}
+
+// Get get value for given key of the latest snapshot of database.
+func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
+	err = d.rok()
+	if err != nil {
+		return
+	}
+
+	return d.get(key, d.getSeq(), ro)
 }
 
 // NewIterator return an iterator over the contents of the latest snapshot of
@@ -420,12 +287,14 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 // Iterators created with this handle will all observe a stable snapshot
 // of the current DB state. The caller must call *Snapshot.Release() when the
 // snapshot is no longer needed.
-func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
-	if d.getClosed() {
-		return nil, errors.ErrClosed
+func (d *DB) GetSnapshot() (snap *Snapshot, err error) {
+	err = d.rok()
+	if err != nil {
+		return
 	}
-	snapshot = d.newSnapshot()
-	runtime.SetFinalizer(snapshot, func(x *Snapshot) {
+
+	snap = d.newSnapshot()
+	runtime.SetFinalizer(snap, func(x *Snapshot) {
 		x.Release()
 	})
 	return
@@ -442,8 +311,9 @@ func (d *DB) GetSnapshot() (snapshot *Snapshot, err error) {
 //  "leveldb.sstables" - returns a multi-line string that describes all
 //     of the sstables that make up the db contents.
 func (d *DB) GetProperty(prop string) (value string, err error) {
-	if d.getClosed() {
-		return "", errors.ErrClosed
+	err = d.rok()
+	if err != nil {
+		return
 	}
 
 	const prefix = "leveldb."
@@ -499,8 +369,9 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 //
 // The results may not include the sizes of recently written data.
 func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
-	if d.getClosed() {
-		return nil, errors.ErrClosed
+	err = d.rok()
+	if err != nil {
+		return
 	}
 
 	v := d.s.version()
@@ -538,7 +409,7 @@ func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
 // Therefore calling with Start==nil and Limit==nil will compact entire
 // database.
 func (d *DB) CompactRange(r Range) error {
-	err := d.ok()
+	err := d.wok()
 	if err != nil {
 		return err
 	}
@@ -550,19 +421,15 @@ func (d *DB) CompactRange(r Range) error {
 	d.creq <- req
 	d.cch <- cWait
 
-	return d.ok()
+	return d.wok()
 }
 
 // Close closes the database. Snapshot and iterator are invalid
 // after this call
 func (d *DB) Close() error {
-	d.mu.Lock()
-	if d.closed {
-		d.mu.Unlock()
+	if !d.setClosed() {
 		return errors.ErrClosed
 	}
-	d.closed = true
-	d.mu.Unlock()
 
 	// wake writer goroutine
 	d.wch <- nil
@@ -579,14 +446,14 @@ func (d *DB) Close() error {
 		cache.Purge(nil)
 	}
 
-	if d.logw != nil {
-		d.logw.Close()
+	if d.log != nil {
+		d.log.close()
 	}
-	if d.s.manifestWriter != nil {
-		d.s.manifestWriter.Close()
+	if d.s.manifest != nil {
+		d.s.manifest.close()
 	}
 
 	runtime.GC()
 
-	return d.err
+	return d.geterr()
 }

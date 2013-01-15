@@ -17,9 +17,29 @@ import (
 	"leveldb/comparer"
 	"leveldb/errors"
 	"leveldb/iter"
+	"leveldb/opt"
 )
 
 var errIKeyCorrupt = errors.ErrCorrupt("internal key corrupted")
+
+// newRawIterator return merged interators of current version, current frozen memdb
+// and current memdb.
+func (d *DB) newRawIterator(ro *opt.ReadOptions) iter.Iterator {
+	s := d.s
+
+	mem := d.getMem()
+	v := s.version()
+
+	ti := v.getIterators(ro)
+	ii := make([]iter.Iterator, 0, len(ti)+2)
+	ii = append(ii, mem.cur.NewIterator())
+	if mem.froze != nil {
+		ii = append(ii, mem.froze.NewIterator())
+	}
+	ii = append(ii, ti...)
+
+	return iter.NewMergedIterator(ii, s.cmp)
+}
 
 // Iterator represent an interator states over a database session.
 type Iterator struct {

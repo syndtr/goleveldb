@@ -17,6 +17,7 @@ import (
 	"encoding/binary"
 	"io"
 	"leveldb/descriptor"
+	"leveldb/log"
 	"sort"
 )
 
@@ -79,4 +80,74 @@ func (p files) Swap(i, j int) {
 
 func (p files) sort() {
 	sort.Sort(p)
+}
+
+type logReader struct {
+	file   descriptor.File
+	reader descriptor.Reader
+	log    *log.Reader
+}
+
+func newLogReader(file descriptor.File, checksum bool) (p *logReader, err error) {
+	r := new(logReader)
+	r.file = file
+	r.reader, err = file.Open()
+	if err != nil {
+		return
+	}
+	r.log = log.NewReader(r.reader, checksum)
+	return r, nil
+}
+
+func (r *logReader) closed() bool {
+	return r.reader == nil
+}
+
+func (r *logReader) close() {
+	if r.closed() {
+		return
+	}
+	r.reader.Close()
+	r.reader = nil
+	r.log = nil
+}
+
+func (r *logReader) remove() error {
+	r.close()
+	return r.file.Remove()
+}
+
+type logWriter struct {
+	file   descriptor.File
+	writer descriptor.Writer
+	log    *log.Writer
+}
+
+func newLogWriter(file descriptor.File) (p *logWriter, err error) {
+	w := new(logWriter)
+	w.file = file
+	w.writer, err = file.Create()
+	if err != nil {
+		return
+	}
+	w.log = log.NewWriter(w.writer)
+	return w, nil
+}
+
+func (w *logWriter) closed() bool {
+	return w.writer == nil
+}
+
+func (w *logWriter) close() {
+	if w.closed() {
+		return
+	}
+	w.writer.Close()
+	w.writer = nil
+	w.log = nil
+}
+
+func (w *logWriter) remove() error {
+	w.close()
+	return w.file.Remove()
 }
