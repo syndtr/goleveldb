@@ -15,25 +15,59 @@ package db
 
 import (
 	"leveldb/memdb"
+	"leveldb/opt"
 	"time"
 )
+
+func (d *DB) doWriteLog(b *Batch) error {
+	err := d.log.log.Append(b.encode())
+	if err == nil && b.sync {
+		err = d.log.writer.Sync()
+	}
+	return err
+}
+
+func (d *DB) writeLog() {
+	// register to the WaitGroup
+	d.ewg.Add(1)
+
+	for b := range d.lch {
+		if b == nil {
+			break
+		}
+
+		// write log
+		d.lack <- d.doWriteLog(b)
+	}
+
+	close(d.lch)
+	close(d.lack)
+	d.ewg.Done()
+}
 
 func (d *DB) flush() (m *memdb.DB, err error) {
 	s := d.s
 
-	delayed := false
+	delayed, cwait := false, false
 	for {
 		v := s.version()
 		mem := d.getMem()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
-			time.Sleep(1000 * time.Microsecond)
+			time.Sleep(time.Millisecond)
 			continue
 		case mem.cur.Size() <= s.o.GetWriteBuffer():
 			// still room
 			return mem.cur, nil
 		case mem.froze != nil:
+			if cwait {
+				if err = d.geterr(); err != nil {
+					return
+				}
+			} else {
+				cwait = true
+			}
 			d.cch <- cWait
 			continue
 		case v.tLen(0) >= kL0_StopWritesTrigger:
@@ -57,91 +91,89 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 	return
 }
 
-func (d *DB) write() {
-	// register to the WaitGroup
-	d.ewg.Add(1)
+// Write apply the specified batch to the database.
+func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
+	err = d.wok()
+	if err != nil || b == nil || b.len() == 0 {
+		return
+	}
 
-	lch := make(chan *Batch)
-	lack := make(chan error)
-	go func() {
-		for b := range lch {
-			if b == nil {
-				close(lch)
-				close(lack)
-				return
-			}
+	b.init(wo.HasFlag(opt.WFSync))
 
-			// write log
-			err := d.log.log.Append(b.encode())
-			if err == nil && b.sync {
-				err = d.log.writer.Sync()
-			}
+	select {
+	case d.wqueue <- b:
+		return <-d.wack
+	case d.wlock <- struct{}{}:
+	}
 
-			lack <- err
+	merged := 0
+	defer func() {
+		<-d.wlock
+		for i := 0; i < merged; i++ {
+			d.wack <- err
 		}
 	}()
 
-	for exit := false; !exit; {
-		b := <-d.wch
-		if b == nil && d.isClosed() {
-			break
-		}
-
-		mem, err := d.flush()
-		if err != nil {
-			b.done(err)
-			continue
-		}
-
-		// calculate max size of batch
-		n := b.size()
-		m := 1 << 20
-		if n <= 128<<10 {
-			m = n + (128 << 10)
-		}
-
-		// merge with other batch
-		for done := false; !done && b.size() <= m && !b.sync; {
-			select {
-			case nb := <-d.wch:
-				if b == nil {
-					if d.isClosed() {
-						exit = true
-						done = true
-					}
-				} else {
-					b.append(nb)
-				}
-			default:
-				done = true
-			}
-		}
-
-		// set batch first seq number relative from last seq
-		b.seq = d.seq + 1
-
-		// write log
-		lch <- b
-
-		// replay batch to memdb
-		b.memReplay(mem)
-
-		// wait for log
-		err = <-lack
-		if err != nil {
-			b.revertMemReplay(mem)
-			b.done(err)
-			continue
-		}
-
-		// set last seq number
-		d.addSeq(uint64(b.len()))
-
-		// done
-		b.done(nil)
+	mem, err := d.flush()
+	if err != nil {
+		return
 	}
 
-	lch <- nil
-	close(d.wch)
-	d.ewg.Done()
+	// calculate maximum size of the batch
+	m := 1 << 20
+	if x := b.size(); x <= 128<<10 {
+		m = x + (128 << 10)
+	}
+
+	// merge with other batch
+drain:
+	for b.size() <= m && !b.sync {
+		select {
+		case nb := <-d.wqueue:
+			b.append(nb)
+			merged++
+		default:
+			break drain
+		}
+	}
+
+	// set batch first seq number relative from last seq
+	b.seq = d.seq + 1
+
+	// write log concurrently if it is large enough
+	if b.size() >= (128 << 10) {
+		d.lch <- b
+		b.memReplay(mem)
+		err = <-d.lack
+		if err != nil {
+			b.revertMemReplay(mem)
+			return
+		}
+	} else {
+		err = d.doWriteLog(b)
+		if err != nil {
+			return
+		}
+		b.memReplay(mem)
+	}
+
+	// set last seq number
+	d.addSeq(uint64(b.len()))
+
+	return
+}
+
+// Put set the database entry for "key" to "value".
+func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
+	b := new(Batch)
+	b.Put(key, value)
+	return d.Write(b, wo)
+}
+
+// Delete remove the database entry (if any) for "key". It is not an error
+// if "key" did not exist in the database.
+func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
+	b := new(Batch)
+	b.Delete(key)
+	return d.Write(b, wo)
 }

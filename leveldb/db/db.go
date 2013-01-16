@@ -34,7 +34,11 @@ type DB struct {
 
 	cch    chan cSignal       // compaction worker signal
 	creq   chan *cReq         // compaction request
-	wch    chan *Batch        // write channel
+	wlock  chan struct{}      // writer mutex
+	wqueue chan *Batch        // writer queue
+	wack   chan error         // writer ack
+	lch    chan *Batch        // log writer chan
+	lack   chan error         // log writer ack
 	ewg    sync.WaitGroup     // exit WaitGroup
 	cstats [kNumLevels]cStats // Compaction stats
 
@@ -61,12 +65,16 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	}
 
 	d = &DB{
-		s:     s,
-		cch:   make(chan cSignal),
-		creq:  make(chan *cReq),
-		wch:   make(chan *Batch),
-		seq:   s.stSeq,
-		snaps: newSnaps(),
+		s:      s,
+		cch:    make(chan cSignal),
+		creq:   make(chan *cReq),
+		wlock:  make(chan struct{}, 1),
+		wqueue: make(chan *Batch),
+		wack:   make(chan error),
+		lch:    make(chan *Batch),
+		lack:   make(chan error),
+		seq:    s.stSeq,
+		snaps:  newSnaps(),
 	}
 
 	err = d.recoverLog()
@@ -78,7 +86,10 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	d.cleanFiles()
 
 	go d.compaction()
-	go d.write()
+	go d.writeLog()
+	// wait for compaction goroutine
+	d.cch <- cWait
+
 	return
 }
 
@@ -180,35 +191,6 @@ func (d *DB) recoverLog() (err error) {
 		fr.remove()
 	}
 
-	return
-}
-
-// Put set the database entry for "key" to "value".
-func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
-	b := new(Batch)
-	b.Put(key, value)
-	return d.Write(b, wo)
-}
-
-// Delete remove the database entry (if any) for "key". It is not an error
-// if "key" did not exist in the database.
-func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
-	b := new(Batch)
-	b.Delete(key)
-	return d.Write(b, wo)
-}
-
-// Write apply the specified batch to the database.
-func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
-	err = d.wok()
-	if err != nil || b == nil || b.len() == 0 {
-		return
-	}
-
-	rch := b.init(wo.HasFlag(opt.WFSync))
-	d.wch <- b
-	err = <-rch
-	close(rch)
 	return
 }
 
@@ -431,8 +413,20 @@ func (d *DB) Close() error {
 		return errors.ErrClosed
 	}
 
-	// wake writer goroutine
-	d.wch <- nil
+	d.wlock <- struct{}{}
+drain:
+	for {
+		select {
+		case <-d.wqueue:
+			d.wack <- errors.ErrClosed
+		default:
+			break drain
+		}
+	}
+	close(d.wlock)
+
+	// wake log writer goroutine
+	d.lch <- nil
 
 	// wake Compaction goroutine
 	d.cch <- cClose

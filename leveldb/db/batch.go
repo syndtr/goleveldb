@@ -55,7 +55,6 @@ type Batch struct {
 	rec    []batchRecord
 	seq    uint64
 	kvSize int
-	ch     []chan error
 	sync   bool
 }
 
@@ -76,22 +75,11 @@ func (b *Batch) Reset() {
 	b.rec = b.rec[:0]
 	b.seq = 0
 	b.kvSize = 0
-	b.ch = nil
 	b.sync = false
 }
 
-func (b *Batch) init(sync bool) chan error {
-	ch := make(chan error)
-	b.ch = nil
-	b.ch = append(b.ch, ch)
+func (b *Batch) init(sync bool) {
 	b.sync = sync
-	return ch
-}
-
-func (b *Batch) done(err error) {
-	for _, ch := range b.ch {
-		ch <- err
-	}
 }
 
 func (b *Batch) put(key, value []byte, seq uint64) {
@@ -110,7 +98,6 @@ func (b *Batch) delete(key []byte, seq uint64) {
 
 func (b *Batch) append(p *Batch) {
 	b.rec = append(b.rec, p.rec...)
-	b.ch = append(b.ch, p.ch...)
 	b.kvSize += p.kvSize
 	if p.sync {
 		b.sync = true
