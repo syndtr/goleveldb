@@ -14,9 +14,7 @@
 package db
 
 import (
-	"bytes"
 	"encoding/binary"
-	"io"
 	"leveldb/errors"
 	"leveldb/memdb"
 )
@@ -112,68 +110,35 @@ func (b *Batch) size() int {
 	return b.kvSize
 }
 
-func (b *Batch) encodeTo(w io.Writer) (err error) {
-	// write seq number
-	err = binary.Write(w, binary.LittleEndian, b.seq)
-	if err != nil {
-		return
-	}
+func (b *Batch) encode() []byte {
+	x := 8 + 4 + binary.MaxVarintLen32*2*len(b.rec) + b.kvSize
+	buf := make([]byte, x)
 
-	// write record len
-	err = binary.Write(w, binary.LittleEndian, uint32(len(b.rec)))
-	if err != nil {
-		return
-	}
+	i := 8 + 4
+	binary.LittleEndian.PutUint64(buf, b.seq)
+	binary.LittleEndian.PutUint32(buf[8:], uint32(len(b.rec)))
 
-	tmp := make([]byte, binary.MaxVarintLen32)
-
-	putUvarint := func(p uint64) (err error) {
-		n := binary.PutUvarint(tmp, p)
-		_, err = w.Write(tmp[:n])
-		return
-	}
-
-	putBytes := func(p []byte) (err error) {
-		err = putUvarint(uint64(len(p)))
-		if err != nil {
-			return
-		}
-		_, err = w.Write(p)
-		if err != nil {
-			return
-		}
-		return
+	putBytes := func(p []byte) {
+		i += binary.PutUvarint(buf[i:], uint64(len(p)))
+		copy(buf[i:], p)
+		i += len(p)
 	}
 
 	for _, rec := range b.rec {
 		// write record type
-		_, err = w.Write([]byte{byte(rec.t)})
-		if err != nil {
-			return
-		}
+		buf[i] = byte(rec.t)
+		i += 1
 
 		// write key
-		err = putBytes(rec.key)
-		if err != nil {
-			return
-		}
+		putBytes(rec.key)
 
 		// write value if record type is 'value'
 		if rec.t == tVal {
-			err = putBytes(rec.value)
-			if err != nil {
-				return
-			}
+			putBytes(rec.value)
 		}
 	}
 
-	return
-}
-
-func (b *Batch) encode() []byte {
-	buf := new(bytes.Buffer)
-	b.encodeTo(buf)
-	return buf.Bytes()
+	return buf[:i]
 }
 
 func (b *Batch) replay(to batchReplay) {
