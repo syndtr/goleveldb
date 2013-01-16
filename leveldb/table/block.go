@@ -42,9 +42,7 @@ func (p *bInfo) decodeFrom(b []byte) (int, error) {
 // Encode encode bInfo, bInfo encoded into varints
 func (p *bInfo) encode() []byte {
 	b := make([]byte, binary.MaxVarintLen64*2)
-	n := binary.PutUvarint(b, p.offset)
-	m := binary.PutUvarint(b[n:], p.size)
-	return b[:n+m]
+	return b[:p.encodeTo(b)]
 }
 
 func (p *bInfo) encodeTo(b []byte) int {
