@@ -14,9 +14,13 @@
 // Package cache provides interface and implementation of a cache algorithms.
 package cache
 
+// SetFunc used by Get method of Namespace interface as callback in the
+// event of key has no mapping.
+type SetFunc func() (ok bool, value interface{}, charge int, fin func())
+
 type Cache interface {
 	// Get caches namespace for given id.
-	GetNamespace(id uint64) CacheNamespace
+	GetNamespace(id uint64) Namespace
 
 	// Delete all caches. Note that the caches will be kept around until all
 	// of its existing handles have been released and the finalizer will
@@ -24,34 +28,26 @@ type Cache interface {
 	Purge(finalizer func())
 }
 
-type CacheNamespace interface {
-	// Insert a mapping from key->value into the cache and assign it
-	// the specified charge against the total cache capacity.
+type Namespace interface {
+	// Get cache for given key; insert a new one if doesn't exist.
 	//
-	// Return a cache object that corresponds to the mapping.
-	// The caller must call obj.Release() when the returned mapping is no
-	// longer needed.
-	Set(key uint64, value interface{}, charge int, finalizer func()) CacheObject
-
-	// If the cache has no mapping for "key", returns nil, false.
-	//
-	// Else return a cache object that corresponds to the mapping.
-	// The caller must call obj.Release() when the returned mapping is no
-	// longer needed.
-	Get(key uint64) (obj CacheObject, ok bool)
+	// The given setter will be called during insert operation, it may return
+	// 'ok' false, which will cancel insert operation and Get will return
+	// nil, false.
+	Get(key uint64, setf SetFunc) (obj Object, ok bool)
 
 	// If the cache contains entry for key, delete it.  Note that the
 	// underlying entry will be kept around until all existing handles
 	// to it have been released and the finalizer will finally be executed.
-	Delete(key uint64, finalizer func()) bool
+	Delete(key uint64, fin func()) bool
 
 	// Delete all caches. Note that the caches will be kept around until all
 	// of its existing handles have been released and the finalizer will
 	// finally be executed.
-	Purge(finalizer func())
+	Purge(fin func())
 }
 
-type CacheObject interface {
+type Object interface {
 	// Release the cache object.
 	// REQUIRES: handle must not have been released yet.
 	Release()

@@ -18,6 +18,13 @@ import (
 	"testing"
 )
 
+func set(ns Namespace, key uint64, value interface{}, charge int, fin func()) Object {
+	obj, _ := ns.Get(key, func() (bool, interface{}, int, func()) {
+		return true, value, charge, fin
+	})
+	return obj
+}
+
 func TestCache_HitMiss(t *testing.T) {
 	cases := []struct {
 		key   uint64
@@ -39,11 +46,11 @@ func TestCache_HitMiss(t *testing.T) {
 	c := NewLRUCache(1000)
 	ns := c.GetNamespace(0)
 	for i, x := range cases {
-		ns.Set(x.key, x.value, len(x.value), func() {
+		set(ns, x.key, x.value, len(x.value), func() {
 			setfin++
 		}).Release()
 		for j, y := range cases {
-			r, ok := ns.Get(y.key)
+			r, ok := ns.Get(y.key, nil)
 			if j <= i {
 				// should hit
 				if !ok {
@@ -74,7 +81,7 @@ func TestCache_HitMiss(t *testing.T) {
 		}
 
 		for j, y := range cases {
-			r, ok := ns.Get(y.key)
+			r, ok := ns.Get(y.key, nil)
 			if j > i {
 				// should hit
 				if !ok {
@@ -102,18 +109,18 @@ func TestCache_HitMiss(t *testing.T) {
 func TestLRUCache_Eviction(t *testing.T) {
 	c := NewLRUCache(12)
 	ns := c.GetNamespace(0)
-	ns.Set(1, 1, 1, nil).Release()
-	ns.Set(2, 2, 1, nil).Release()
-	ns.Set(3, 3, 1, nil).Release()
-	ns.Set(4, 4, 1, nil).Release()
-	ns.Set(5, 5, 1, nil).Release()
-	if r, ok := ns.Get(2); ok {
+	set(ns, 1, 1, 1, nil).Release()
+	set(ns, 2, 2, 1, nil).Release()
+	set(ns, 3, 3, 1, nil).Release()
+	set(ns, 4, 4, 1, nil).Release()
+	set(ns, 5, 5, 1, nil).Release()
+	if r, ok := ns.Get(2, nil); ok {
 		r.Release()
 	}
-	ns.Set(9, 9, 10, nil).Release()
+	set(ns, 9, 9, 10, nil).Release()
 
 	for _, x := range []uint64{2, 5, 9} {
-		r, ok := ns.Get(x)
+		r, ok := ns.Get(x, nil)
 		if !ok {
 			t.Errorf("miss for key '%d'", x)
 		} else {
@@ -125,7 +132,7 @@ func TestLRUCache_Eviction(t *testing.T) {
 	}
 
 	for _, x := range []uint64{1, 3, 4} {
-		r, ok := ns.Get(x)
+		r, ok := ns.Get(x, nil)
 		if ok {
 			t.Errorf("hit for key '%d'", x)
 			if r.Value().(int) != int(x) {
@@ -141,8 +148,8 @@ func TestLRUCache_SetGet(t *testing.T) {
 	ns := c.GetNamespace(0)
 	for i := 0; i < 200; i++ {
 		n := uint64(rand.Intn(99999) % 20)
-		ns.Set(n, n, 1, nil).Release()
-		if p, ok := ns.Get(n); ok {
+		set(ns, n, n, 1, nil).Release()
+		if p, ok := ns.Get(n, nil); ok {
 			if p.Value() == nil {
 				t.Errorf("key '%d' contains nil value", n)
 			} else {
@@ -167,7 +174,7 @@ func BenchmarkLRUCache_SetRelease(b *testing.B) {
 	ns := c.GetNamespace(0)
 	b.ResetTimer()
 	for i := uint64(0); i < uint64(b.N); i++ {
-		ns.Set(i, nil, 1, nil).Release()
+		set(ns, i, nil, 1, nil).Release()
 	}
 }
 
@@ -184,10 +191,10 @@ func BenchmarkLRUCache_SetReleaseTwice(b *testing.B) {
 	nb := b.N - na
 
 	for i := uint64(0); i < uint64(na); i++ {
-		ns.Set(i, nil, 1, nil).Release()
+		set(ns, i, nil, 1, nil).Release()
 	}
 
 	for i := uint64(0); i < uint64(nb); i++ {
-		ns.Set(i, nil, 1, nil).Release()
+		set(ns, i, nil, 1, nil).Release()
 	}
 }

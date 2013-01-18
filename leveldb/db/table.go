@@ -293,7 +293,7 @@ func (p tFileSorterNewest) Swap(i, j int) {
 type tOps struct {
 	s       *session
 	cache   cache.Cache
-	cachens cache.CacheNamespace
+	cachens cache.Namespace
 }
 
 func newTableOps(s *session, cacheCap int) *tOps {
@@ -331,7 +331,6 @@ func (t *tOps) createFrom(src iter.Iterator) (f *tFile, n int, err error) {
 	for src.Next() {
 		err = w.add(src.Key(), src.Value())
 		if err != nil {
-			w.drop()
 			return
 		}
 	}
@@ -383,7 +382,7 @@ func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
 func (t *tOps) remove(f *tFile) {
 	num := f.file.Number()
 
-	var ns cache.CacheNamespace
+	var ns cache.Namespace
 	bc := t.s.o.GetBlockCache()
 	if bc != nil {
 		ns = bc.GetNamespace(num)
@@ -401,11 +400,10 @@ func (t *tOps) purgeCache() {
 	t.cache.Purge(nil)
 }
 
-func (t *tOps) lookup(f *tFile) (c cache.CacheObject, err error) {
+func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 	num := f.file.Number()
 
-	c, ok := t.cachens.Get(num)
-	if !ok {
+	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
 		var r descriptor.Reader
 		r, err = f.file.Open()
 		if err != nil {
@@ -414,7 +412,7 @@ func (t *tOps) lookup(f *tFile) (c cache.CacheObject, err error) {
 
 		o := t.s.o
 
-		var ns cache.CacheNamespace
+		var ns cache.Namespace
 		bc := o.GetBlockCache()
 		if bc != nil {
 			ns = bc.GetNamespace(num)
@@ -426,10 +424,16 @@ func (t *tOps) lookup(f *tFile) (c cache.CacheObject, err error) {
 			return
 		}
 
-		c = t.cachens.Set(num, p, 1, func() {
+		ok = true
+		value = p
+		charge = 1
+		fin = func() {
 			r.Close()
-		})
-	}
+		}
+
+		return
+	})
+
 	return
 }
 

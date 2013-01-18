@@ -40,7 +40,7 @@ func NewLRUCache(capacity int) *LRUCache {
 }
 
 // GetNamespace return namespace object for given id.
-func (c *LRUCache) GetNamespace(id uint64) CacheNamespace {
+func (c *LRUCache) GetNamespace(id uint64) Namespace {
 	c.Lock()
 	defer c.Unlock()
 
@@ -57,13 +57,13 @@ func (c *LRUCache) GetNamespace(id uint64) CacheNamespace {
 }
 
 // Purge purge entire cache.
-func (c *LRUCache) Purge(finalizer func()) {
+func (c *LRUCache) Purge(fin func()) {
 	c.Lock()
 	top := &c.root
 	for e := c.root.mPrev; e != top; {
 		e.deleted = true
 		e.mRemove()
-		e.delFinalizer = finalizer
+		e.delfin = fin
 		e.evict()
 		e = c.root.mPrev
 	}
@@ -84,62 +84,57 @@ type lruNs struct {
 	table map[uint64]*lruElem
 }
 
-func (p *lruNs) Set(key uint64, value interface{}, charge int, finalizer func()) CacheObject {
+func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 	lru := p.lru
 	lru.Lock()
 
 	e, ok := p.table[key]
-	if !ok {
-		e = &lruElem{ns: p, key: key}
-		p.table[key] = e
+	if ok {
+		if !e.deleted {
+			// bump to front
+			e.mRemove()
+			e.mInsert(&lru.root)
+		}
 	} else {
-		e.mRemove()
-		lru.size -= e.charge
-	}
-	e.value = value
-	e.charge = charge
-	e.deleted = false
-	e.setFinalizer = finalizer
-	e.delFinalizer = nil
-	e.mInsert(&lru.root)
+		if setf == nil {
+			lru.Unlock()
+			return
+		}
 
-	lru.size += charge
-	lru.evict()
-	lru.Unlock()
+		ok, value, charge, fin := setf()
+		if !ok {
+			lru.Unlock()
+			return nil, false
+		}
 
-	return e.makeObject()
-}
-
-func (p *lruNs) Get(key uint64) (obj CacheObject, ok bool) {
-	lru := p.lru
-	lru.Lock()
-
-	e, ok := p.table[key]
-	if !ok {
-		lru.Unlock()
-		return
-	}
-
-	if !e.deleted {
-		// bump to front
-		e.mRemove()
+		e = &lruElem{
+			ns:     p,
+			key:    key,
+			value:  value,
+			charge: charge,
+			setfin: fin,
+		}
+		p.table[key] = e
 		e.mInsert(&lru.root)
+
+		lru.size += charge
+		lru.evict()
 	}
 
 	lru.Unlock()
-	obj = e.makeObject()
-	return
+
+	return e.makeObject(), true
 }
 
-func (p *lruNs) Delete(key uint64, finalizer func()) bool {
+func (p *lruNs) Delete(key uint64, fin func()) bool {
 	lru := p.lru
 	lru.Lock()
 
 	e, ok := p.table[key]
 	if !ok {
 		lru.Unlock()
-		if finalizer != nil {
-			finalizer()
+		if fin != nil {
+			fin()
 		}
 		return false
 	}
@@ -151,21 +146,21 @@ func (p *lruNs) Delete(key uint64, finalizer func()) bool {
 
 	e.deleted = true
 	e.mRemove()
-	e.delFinalizer = finalizer
+	e.delfin = fin
 	e.evict()
 
 	lru.Unlock()
 	return true
 }
 
-func (p *lruNs) Purge(finalizer func()) {
+func (p *lruNs) Purge(fin func()) {
 	p.lru.Lock()
 	for _, e := range p.table {
 		if e.deleted {
 			continue
 		}
 		e.mRemove()
-		e.delFinalizer = finalizer
+		e.delfin = fin
 		e.evict()
 	}
 	p.lru.Unlock()
@@ -176,13 +171,13 @@ type lruElem struct {
 
 	mNext, mPrev *lruElem
 
-	key          uint64
-	value        interface{}
-	charge       int
-	ref          uint
-	deleted      bool
-	setFinalizer func()
-	delFinalizer func()
+	key     uint64
+	value   interface{}
+	charge  int
+	ref     uint
+	deleted bool
+	setfin  func()
+	delfin  func()
 }
 
 func (e *lruElem) mInsert(at *lruElem) {
@@ -219,13 +214,13 @@ func (e *lruElem) evict() {
 	ns.lru.size -= e.charge
 
 	// execute finalizer
-	if e.setFinalizer != nil {
-		e.setFinalizer()
-		e.setFinalizer = nil
+	if e.setfin != nil {
+		e.setfin()
+		e.setfin = nil
 	}
-	if e.delFinalizer != nil {
-		e.delFinalizer()
-		e.delFinalizer = nil
+	if e.delfin != nil {
+		e.delfin()
+		e.delfin = nil
 	}
 
 	e.value = nil

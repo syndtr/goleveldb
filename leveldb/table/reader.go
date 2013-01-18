@@ -35,11 +35,11 @@ type Reader struct {
 	filter *block.FilterReader
 
 	dataEnd uint64
-	cache   cache.CacheNamespace
+	cache   cache.Namespace
 }
 
 // NewReader create new initialized table reader.
-func NewReader(r descriptor.Reader, size uint64, o opt.OptionsGetter, cache cache.CacheNamespace) (p *Reader, err error) {
+func NewReader(r descriptor.Reader, size uint64, o opt.OptionsGetter, cache cache.Namespace) (p *Reader, err error) {
 	mb, ib, err := readFooter(r, size)
 	if err != nil {
 		return
@@ -134,9 +134,13 @@ func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte,
 	// get the data block
 	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
 		var it iter.Iterator
-		it, err = t.getDataIter(bi, ro)
+		var cache cache.Object
+		it, cache, err = t.getDataIter(bi, ro)
 		if err != nil {
 			return
+		}
+		if cache != nil {
+			defer cache.Release()
 		}
 
 		// seek to key
@@ -148,6 +152,8 @@ func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte,
 			return
 		}
 		rkey, rvalue = it.Key(), it.Value()
+	} else {
+		err = errors.ErrNotFound
 	}
 	return
 }
@@ -168,43 +174,47 @@ func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 	return t.dataEnd
 }
 
-func (t *Reader) getDataIter(bi *bInfo, ro opt.ReadOptionsGetter) (it iter.Iterator, err error) {
+func (t *Reader) getDataIter(bi *bInfo, ro opt.ReadOptionsGetter) (it *block.Iterator, cache cache.Object, err error) {
 	var b *block.Reader
-	readBlock := func() {
-		buf, err := bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
+
+	if t.cache != nil {
+		cache, _ = t.cache.Get(bi.offset, func() (ok bool, value interface{}, charge int, fin func()) {
+			var buf []byte
+			buf, err = bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
+			if err != nil {
+				return
+			}
+			b, err = block.NewReader(buf, t.o.GetComparer())
+			if err != nil {
+				return
+			}
+			ok = true
+			value = b
+			charge = int(bi.size)
+			return
+		})
+
+		if err != nil {
+			return
+		}
+
+		if b == nil {
+			b = cache.Value().(*block.Reader)
+		}
+	} else {
+		var buf []byte
+		buf, err = bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
 		if err != nil {
 			return
 		}
 		b, err = block.NewReader(buf, t.o.GetComparer())
-	}
-
-	var cacheObj cache.CacheObject
-	if t.cache != nil {
-		var ok bool
-		cacheObj, ok = t.cache.Get(bi.offset)
-		if ok {
-			b = cacheObj.Value().(*block.Reader)
-		} else {
-			readBlock()
-			if err != nil {
-				return
-			}
-			cacheObj = t.cache.Set(bi.offset, b, int(bi.size), nil)
-		}
-	} else {
-		readBlock()
 		if err != nil {
 			return
 		}
 	}
 
-	x := b.NewIterator()
-	if cacheObj != nil {
-		runtime.SetFinalizer(x, func(x *block.Iterator) {
-			cacheObj.Release()
-		})
-	}
-	return x, nil
+	it = b.NewIterator()
+	return
 }
 
 type indexIter struct {
@@ -221,5 +231,14 @@ func (i *indexIter) Get() (it iter.Iterator, err error) {
 		return
 	}
 
-	return i.t.getDataIter(bi, i.ro)
+	x, cache, err := i.t.getDataIter(bi, i.ro)
+	if err != nil {
+		return
+	}
+	if cache != nil {
+		runtime.SetFinalizer(x, func(x *block.Iterator) {
+			cache.Release()
+		})
+	}
+	return x, nil
 }
