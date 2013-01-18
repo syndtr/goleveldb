@@ -45,6 +45,10 @@ type testDesc struct {
 
 	emuCh        chan struct{}
 	emuDelaySync descriptor.FileType
+	readCnt      uint64
+	readCntEn    descriptor.FileType
+	readAtCnt    uint64
+	readAtCntEn  descriptor.FileType
 }
 
 func newTestDesc(log testDescLogging) *testDesc {
@@ -76,6 +80,58 @@ func (d *testDesc) ReleaseSync(t descriptor.FileType) {
 	d.Lock()
 	d.emuDelaySync &= ^t
 	d.wake()
+	d.Unlock()
+}
+
+func (d *testDesc) ReadCounter() uint64 {
+	d.Lock()
+	defer d.Unlock()
+	return d.readCnt
+}
+
+func (d *testDesc) ResetReadCounter() {
+	d.Lock()
+	d.readCnt = 0
+	d.Unlock()
+}
+
+func (d *testDesc) SetReadCounter(t descriptor.FileType) {
+	d.Lock()
+	d.readCntEn = t
+	d.Unlock()
+}
+
+func (d *testDesc) countRead(t descriptor.FileType) {
+	d.Lock()
+	if d.readCntEn&t != 0 {
+		d.readCnt++
+	}
+	d.Unlock()
+}
+
+func (d *testDesc) ReadAtCounter() uint64 {
+	d.Lock()
+	defer d.Unlock()
+	return d.readAtCnt
+}
+
+func (d *testDesc) ResetReadAtCounter() {
+	d.Lock()
+	d.readAtCnt = 0
+	d.Unlock()
+}
+
+func (d *testDesc) SetReadAtCounter(t descriptor.FileType) {
+	d.Lock()
+	d.readAtCntEn = t
+	d.Unlock()
+}
+
+func (d *testDesc) countReadAt(t descriptor.FileType) {
+	d.Lock()
+	if d.readAtCntEn&t != 0 {
+		d.readAtCnt++
+	}
 	d.Unlock()
 }
 
@@ -186,10 +242,12 @@ type testReader struct {
 }
 
 func (r *testReader) Read(b []byte) (n int, err error) {
+	r.p.desc.countRead(r.p.t)
 	return r.r.Read(b)
 }
 
 func (r *testReader) ReadAt(b []byte, off int64) (n int, err error) {
+	r.p.desc.countReadAt(r.p.t)
 	return r.r.ReadAt(b, off)
 }
 
