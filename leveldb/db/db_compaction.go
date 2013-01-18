@@ -169,7 +169,7 @@ func (d *DB) memCompaction(mem *memdb.DB) {
 	c := newCMem(s)
 	stats := new(cStatsStaging)
 
-	s.printf("MemCompaction: started, size=%d", mem.Size())
+	s.printf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
 
 	d.transact(func() (err error) {
 		stats.startTimer()
@@ -364,18 +364,13 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			}
 		}
 
+		// Finish last table
+		if tw != nil {
+			return finish()
+		}
+
 		return
 	})
-
-	// Finish last table
-	if tw != nil {
-		d.transact(func() (err error) {
-			stats.startTimer()
-			defer stats.stopTimer()
-			return finish()
-		})
-		tw = nil
-	}
 
 	s.print("Compaction: done")
 
