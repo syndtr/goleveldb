@@ -16,6 +16,7 @@ package db
 import (
 	"fmt"
 	"leveldb/descriptor"
+	"leveldb/log"
 	"sync/atomic"
 	"unsafe"
 )
@@ -28,6 +29,12 @@ func (s *session) print(v ...interface{}) {
 
 func (s *session) printf(format string, v ...interface{}) {
 	s.desc.Print(fmt.Sprintf(format, v...))
+}
+
+func (s *session) logDropFunc(tag string, num uint64) log.DropFunc {
+	return func(n int, reason string) {
+		s.printf("%s[%d] dropping %d bytes: %s", tag, num, n, reason)
+	}
 }
 
 // file utils

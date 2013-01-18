@@ -116,7 +116,7 @@ func (d *DB) recoverLog() (err error) {
 	for _, log := range logs[skip:] {
 		s.printf("LogRecovery: recovering, num=%d", log.Number())
 
-		r, err = newLogReader(log, true)
+		r, err = newLogReader(log, true, s.logDropFunc("log", log.Number()))
 		if err != nil {
 			return
 		}

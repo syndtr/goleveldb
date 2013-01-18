@@ -34,10 +34,11 @@ const (
 )
 
 const (
-	kBlockSize = 32768
+	// Log block size.
+	BlockSize = 32768
 
-	// Header is checksum (4 bytes), type (1 byte), length (2 bytes).
-	kHeaderSize = 4 + 1 + 2
+	// Header is checksum (4 bytes), length (2 bytes), type (1 byte).
+	kHeaderSize = 4 + 2 + 1
 )
 
 var sixZero [6]byte
@@ -59,7 +60,7 @@ func NewWriter(w io.Writer) *Writer {
 func (l *Writer) Append(record []byte) (err error) {
 	begin := true
 	for {
-		leftover := kBlockSize - l.boff
+		leftover := BlockSize - l.boff
 		if leftover < kHeaderSize {
 			// Switch to a new block
 			if leftover > 0 {
@@ -71,7 +72,7 @@ func (l *Writer) Append(record []byte) (err error) {
 			l.boff = 0
 		}
 
-		avail := kBlockSize - l.boff - kHeaderSize
+		avail := BlockSize - l.boff - kHeaderSize
 		fragLen := len(record)
 		end := true
 		if fragLen > avail {

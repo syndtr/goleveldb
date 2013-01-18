@@ -88,14 +88,14 @@ type logReader struct {
 	log    *log.Reader
 }
 
-func newLogReader(file descriptor.File, checksum bool) (p *logReader, err error) {
+func newLogReader(file descriptor.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
 	r := new(logReader)
 	r.file = file
 	r.reader, err = file.Open()
 	if err != nil {
 		return
 	}
-	r.log = log.NewReader(r.reader, checksum)
+	r.log = log.NewReader(r.reader, checksum, dropf)
 	return r, nil
 }
 

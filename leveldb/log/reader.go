@@ -21,42 +21,45 @@ import (
 	"leveldb/hash"
 )
 
+type DropFunc func(n int, reason string)
+
 // Reader represent a log reader.
 type Reader struct {
-	r        io.ReadSeeker
+	r        io.ReaderAt
 	checksum bool
+	dropf    DropFunc
 
-	bleft  int
-	record []byte
-	err    error
+	eof       bool
+	rbuf, buf []byte
+	off       int
+	record    []byte
+	err       error
 }
 
 // NewReader create new initialized log reader.
-func NewReader(r io.ReadSeeker, checksum bool) *Reader {
+func NewReader(r io.ReaderAt, checksum bool, dropf DropFunc) *Reader {
 	return &Reader{
 		r:        r,
 		checksum: checksum,
-		bleft:    kBlockSize,
+		dropf:    dropf,
 	}
 }
 
 // Skip allow skip given number bytes, rounded by single block.
 func (l *Reader) Skip(skip int) error {
 	if skip > 0 {
-		rest := skip % kBlockSize
-		blockOffset := skip - rest
-		if rest > kBlockSize-(kHeaderSize-1) {
-			rest = 0
-			blockOffset += kBlockSize
-		}
-		if blockOffset > 0 {
-			_, err := l.r.Seek(int64(blockOffset), 0)
-			if err != nil {
-				return err
-			}
+		l.off = skip / BlockSize
+		if skip%BlockSize > 0 {
+			l.off++
 		}
 	}
 	return nil
+}
+
+func (l *Reader) drop(n int, reason string) {
+	if l.dropf != nil {
+		l.dropf(n, reason)
+	}
 }
 
 // Next read the next return, return true if there is next record,
@@ -81,13 +84,15 @@ func (l *Reader) Next() bool {
 		switch rtype {
 		case tFull:
 			if inFragment {
-				// report bytes drop
+				l.drop(buf.Len(), "partial record without end; tag=full")
+				buf.Reset()
 			}
-			l.record = rec
+			buf.Write(rec)
+			l.record = buf.Bytes()
 			return true
 		case tFirst:
 			if inFragment {
-				// report bytes drop
+				l.drop(buf.Len(), "partial record without end; tag=first")
 				buf.Reset()
 			}
 			buf.Write(rec)
@@ -96,7 +101,7 @@ func (l *Reader) Next() bool {
 			if inFragment {
 				buf.Write(rec)
 			} else {
-				// report bytes drop
+				l.drop(len(rec), "missing start of fragmented record; tag=mid")
 			}
 		case tLast:
 			if inFragment {
@@ -104,16 +109,16 @@ func (l *Reader) Next() bool {
 				l.record = buf.Bytes()
 				return true
 			} else {
-				// report bytes drop
+				l.drop(len(rec), "missing start of fragmented record; tag=last")
 			}
 		case tEof:
 			if inFragment {
-				// report bytes drop
+				l.drop(buf.Len(), "partial record without end; tag=eof")
 			}
 			return false
 		case tCorrupt:
 			if inFragment {
-				// report bytes drop
+				l.drop(buf.Len(), "record fragment corrupted")
 				buf.Reset()
 				inFragment = false
 			}
@@ -133,76 +138,69 @@ func (l *Reader) Error() error {
 }
 
 func (l *Reader) read() (ret []byte, rtype uint, err error) {
-	defer func() {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			err = nil
+retry:
+	if len(l.buf) < kHeaderSize {
+		if l.eof {
+			if len(l.buf) > 0 {
+				l.drop(len(l.buf), "truncated record at end of file")
+				l.rbuf = nil
+				l.buf = nil
+			}
 			rtype = tEof
+			return
 		}
-	}()
 
-	if l.bleft < kHeaderSize {
-		if l.bleft > 0 {
-			_, err = l.r.Seek(int64(l.bleft), 1)
-			if err != nil {
+		if l.rbuf == nil {
+			l.rbuf = make([]byte, BlockSize)
+		} else {
+			l.off++
+		}
+
+		var n int
+		n, err = l.r.ReadAt(l.rbuf, int64(l.off)*BlockSize)
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			} else {
 				return
 			}
 		}
-		l.bleft = kBlockSize
-	}
-
-	// decode the checksum
-	var recCrc uint32
-	if l.checksum {
-		err = binary.Read(l.r, binary.LittleEndian, &recCrc)
-		if err != nil {
-			return
-		}
-		recCrc = hash.UnmaskCRC32(recCrc)
-	} else {
-		_, err = l.r.Seek(4, 0)
-		if err != nil {
-			return
+		l.buf = l.rbuf[:n]
+		if n < BlockSize {
+			l.eof = true
+			goto retry
 		}
 	}
 
 	// decode record length and type
-	var header [3]byte
-	_, err = io.ReadFull(l.r, header[:])
-	if err != nil {
-		return
-	}
-	recLen := int(header[0]) | (int(header[1]) << 8)
-	rtype = uint(header[2])
+	recLen := int(l.buf[4]) | (int(l.buf[5]) << 8)
+	rtype = uint(l.buf[6])
 
-	l.bleft -= kHeaderSize
-
-	// check wether the header is sane
-	if l.bleft < recLen || rtype > tLast {
-		// skip entire block in case of corruption
+	// check whether the header is sane
+	if len(l.buf) < kHeaderSize+recLen || rtype > tLast {
 		rtype = tCorrupt
-		_, err = l.r.Seek(int64(l.bleft), 1)
-		if err == nil {
-			l.bleft = kBlockSize
-		}
-	}
-
-	ret = make([]byte, recLen)
-	_, err = io.ReadFull(l.r, ret)
-	if err != nil {
-		ret = nil
-		return
-	}
-	l.bleft -= recLen
-
-	if l.checksum {
+		l.drop(len(l.buf), "header corrupted")
+	} else if l.checksum {
+		// decode the checksum
+		recCrc := hash.UnmaskCRC32(binary.LittleEndian.Uint32(l.buf))
 		crc := hash.NewCRC32C()
-		crc.Write([]byte{byte(rtype)})
-		crc.Write(ret)
+		crc.Write(l.buf[6 : kHeaderSize+recLen])
 		if crc.Sum32() != recCrc {
-			ret = nil
+			// Drop the rest of the buffer since "length" itself may have
+			// been corrupted and if we trust it, we could find some
+			// fragment of a real log record that just happens to look
+			// like a valid log record.
 			rtype = tCorrupt
-			return
+			l.drop(len(l.buf), "checksum mismatch")
 		}
+	}
+
+	if rtype == tCorrupt {
+		// report bytes drop
+		l.buf = nil
+	} else {
+		ret = l.buf[kHeaderSize : kHeaderSize+recLen]
+		l.buf = l.buf[kHeaderSize+recLen:]
 	}
 
 	return
