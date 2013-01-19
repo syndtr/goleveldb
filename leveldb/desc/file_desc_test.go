@@ -13,7 +13,10 @@
 
 package desc
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 var cases = []struct {
 	name  string
@@ -86,4 +89,38 @@ func TestFileDesc_InvalidFileName(t *testing.T) {
 			t.Errorf("filename '%s' should be invalid", name)
 		}
 	}
+}
+
+func TestFileDesc_Flock(t *testing.T) {
+	const path = "/tmp/goleveldb-fltest"
+
+	_, err := os.Stat(path)
+	if err == nil {
+		err = os.RemoveAll(path)
+		if err != nil {
+			t.Fatal("RemoveAll: got error: ", err)
+		}
+	}
+
+	p1, err := OpenFile(path)
+	if err != nil {
+		t.Fatal("OpenFile(1): got error: ", err)
+	}
+
+	p2, err := OpenFile(path)
+	if err != nil {
+		t.Log("OpenFile(2): got error: ", err)
+	} else {
+		p2.Close()
+		p1.Close()
+		t.Fatal("OpenFile(2): expect error")
+	}
+
+	p1.Close()
+
+	p3, err := OpenFile(path)
+	if err != nil {
+		t.Fatal("OpenFile(3): got error: ", err)
+	}
+	p3.Close()
 }
