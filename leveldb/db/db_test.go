@@ -29,6 +29,15 @@ import (
 	"time"
 )
 
+func tkey(i int) []byte {
+	return []byte(fmt.Sprintf("%016d", i))
+}
+
+func tval(seed, n int) []byte {
+	r := rand.New(rand.NewSource(int64(seed)))
+	return randomString(r, n)
+}
+
 type dbHarness struct {
 	t *testing.T
 
@@ -40,27 +49,33 @@ type dbHarness struct {
 }
 
 func newDbHarnessWopt(t *testing.T, o *opt.Options) *dbHarness {
-	desc := newTestDesc(t)
-	ro := &opt.ReadOptions{}
-	wo := &opt.WriteOptions{}
-	db, err := Open(desc, o)
-	if err != nil {
-		t.Fatal("Open: got error: ", err)
-	}
-	return &dbHarness{
-		t:    t,
-		desc: desc,
-		db:   db,
-		o:    o,
-		ro:   ro,
-		wo:   wo,
-	}
+	h := new(dbHarness)
+	h.init(t, o)
+	return h
 }
 
 func newDbHarness(t *testing.T) *dbHarness {
 	return newDbHarnessWopt(t, &opt.Options{
 		Flag: opt.OFCreateIfMissing,
 	})
+}
+
+func (h *dbHarness) init(t *testing.T, o *opt.Options) {
+	h.t = t
+	h.desc = newTestDesc(t)
+	h.o = o
+	h.ro = &opt.ReadOptions{}
+	h.wo = &opt.WriteOptions{}
+
+	h.open()
+}
+
+func (h *dbHarness) open() {
+	var err error
+	h.db, err = Open(h.desc, h.o)
+	if err != nil {
+		h.t.Fatal("Open: got error: ", err)
+	}
 }
 
 func (h *dbHarness) close() {
@@ -72,10 +87,23 @@ func (h *dbHarness) close() {
 
 func (h *dbHarness) reopen() {
 	h.close()
+	h.open()
+}
+
+func (h *dbHarness) openAssert(want bool) {
 	var err error
 	h.db, err = Open(h.desc, h.o)
 	if err != nil {
-		h.t.Fatal("Reopen: got error: ", err)
+		if want {
+			h.t.Error("Open: assert: got error: ", err)
+		} else {
+			h.t.Log("Open: assert: got error: ", err)
+		}
+	} else {
+		if !want {
+			h.t.Error("Open: assert: expect error")
+		}
+		h.close()
 	}
 }
 
