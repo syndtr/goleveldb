@@ -373,7 +373,7 @@ func (p *testFilePtr) Type() descriptor.FileType {
 	return p.t
 }
 
-func (p *testFilePtr) Number() uint64 {
+func (p *testFilePtr) Num() uint64 {
 	desc := p.desc
 	desc.Lock()
 	defer desc.Unlock()

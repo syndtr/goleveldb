@@ -72,7 +72,7 @@ func (h *dbCorruptHarness) corrupt(ft descriptor.FileType, offset, n int) {
 
 	var file descriptor.File
 	for _, f := range p.desc.GetFiles(ft) {
-		if file == nil || f.Number() > file.Number() {
+		if file == nil || f.Num() > file.Num() {
 			file = f
 		}
 	}

@@ -53,7 +53,7 @@ func (d *DB) cleanFiles() {
 	tables := make(map[uint64]struct{})
 	for _, tt := range v.tables {
 		for _, t := range tt {
-			tables[t.file.Number()] = struct{}{}
+			tables[t.file.Num()] = struct{}{}
 		}
 	}
 
@@ -61,15 +61,15 @@ func (d *DB) cleanFiles() {
 		keep := true
 		switch f.Type() {
 		case descriptor.TypeManifest:
-			keep = !s.manifest.closed() && f.Number() >= s.manifest.file.Number()
+			keep = !s.manifest.closed() && f.Num() >= s.manifest.file.Num()
 		case descriptor.TypeLog:
 			if d.flog != nil && !d.flog.closed() {
-				keep = f.Number() >= d.flog.file.Number()
+				keep = f.Num() >= d.flog.file.Num()
 			} else {
-				keep = f.Number() >= d.log.file.Number()
+				keep = f.Num() >= d.log.file.Num()
 			}
 		case descriptor.TypeTable:
-			_, keep = tables[f.Number()]
+			_, keep = tables[f.Num()]
 		}
 
 		if !keep {

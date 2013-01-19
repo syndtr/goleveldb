@@ -73,8 +73,8 @@ func TestStdDesc_ParseFileName(t *testing.T) {
 		if f.Type() != c.ftype {
 			t.Errorf("filename '%s' invalid type got '%d', want '%d'", c.name, f.Type(), c.ftype)
 		}
-		if f.Number() != c.num {
-			t.Errorf("filename '%s' invalid number got '%d', want '%d'", c.name, f.Number(), c.num)
+		if f.Num() != c.num {
+			t.Errorf("filename '%s' invalid number got '%d', want '%d'", c.name, f.Num(), c.num)
 		}
 	}
 }

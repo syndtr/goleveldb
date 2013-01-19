@@ -168,7 +168,7 @@ func Recover(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	}
 
 	// set file num based on largest one
-	s.stFileNum = ff[len(ff)-1].Number() + 1
+	s.stFileNum = ff[len(ff)-1].Num() + 1
 
 	// create brand new manifest
 	err = s.create()
@@ -196,18 +196,18 @@ func (d *DB) recoverLog() (err error) {
 	logs, skip := files(s.getFiles(descriptor.TypeLog)), 0
 	logs.sort()
 	for _, log := range logs {
-		if log.Number() < s.stLogNum {
+		if log.Num() < s.stLogNum {
 			skip++
 			continue
 		}
-		s.markFileNum(log.Number())
+		s.markFileNum(log.Num())
 	}
 
 	var r, fr *logReader
 	for _, log := range logs[skip:] {
-		s.printf("LogRecovery: recovering, num=%d", log.Number())
+		s.printf("LogRecovery: recovering, num=%d", log.Num())
 
-		r, err = newLogReader(log, true, s.logDropFunc("log", log.Number()))
+		r, err = newLogReader(log, true, s.logDropFunc("log", log.Num()))
 		if err != nil {
 			return
 		}
@@ -220,7 +220,7 @@ func (d *DB) recoverLog() (err error) {
 				}
 			}
 
-			err = cm.commit(r.file.Number(), d.seq)
+			err = cm.commit(r.file.Num(), d.seq)
 			if err != nil {
 				return
 			}
@@ -273,7 +273,7 @@ func (d *DB) recoverLog() (err error) {
 		}
 	}
 
-	err = cm.commit(d.log.file.Number(), d.seq)
+	err = cm.commit(d.log.file.Num(), d.seq)
 	if err != nil {
 		return
 	}
@@ -424,7 +424,7 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 		for level, tt := range v.tables {
 			value += fmt.Sprintf("--- level %d ---\n", level)
 			for _, t := range tt {
-				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Number(), t.size, t.min, t.max)
+				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Num(), t.size, t.min, t.max)
 			}
 		}
 	default:

@@ -102,7 +102,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	c.rec.addTableFile(level, t)
 
 	s.printf("Compaction: table created, source=mem level=%d num=%d size=%d entries=%d min=%q max=%q",
-		level, t.file.Number(), t.size, n, t.min, t.max)
+		level, t.file.Num(), t.size, n, t.min, t.max)
 
 	c.level = level
 	c.t = t
@@ -180,7 +180,7 @@ func (d *DB) memCompaction(mem *memdb.DB) {
 	d.transact(func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.commit(d.log.file.Number(), d.fseq)
+		return c.commit(d.log.file.Num(), d.fseq)
 	})
 
 	stats.write = c.t.size
@@ -205,13 +205,13 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 	if !noTrivial && c.trivial() {
 		t := c.tables[0][0]
-		rec.deleteTable(c.level, t.file.Number())
+		rec.deleteTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
 		d.transact(func() (err error) {
 			return s.commit(rec)
 		})
 		s.printf("Compaction: table level changed, num=%d from=%d to=%d",
-			t.file.Number(), c.level, c.level+1)
+			t.file.Num(), c.level, c.level+1)
 		return
 	}
 
@@ -231,7 +231,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		rec.addTableFile(c.level+1, t)
 		stats.write += t.size
 		s.printf("Compaction: table created, source=file level=%d num=%d size=%d entries=%d min=%q max=%q",
-			c.level+1, t.file.Number(), t.size, tw.tw.Len(), t.min, t.max)
+			c.level+1, t.file.Num(), t.size, tw.tw.Len(), t.min, t.max)
 		return nil
 	}
 
@@ -378,7 +378,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		for _, t := range tt {
 			stats.read += t.size
 			// Insert deleted tables into record
-			rec.deleteTable(c.level+n, t.file.Number())
+			rec.deleteTable(c.level+n, t.file.Num())
 		}
 	}
 

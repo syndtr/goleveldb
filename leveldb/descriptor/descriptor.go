@@ -81,7 +81,7 @@ type File interface {
 	Type() FileType
 
 	// Return file number
-	Number() uint64
+	Num() uint64
 
 	// Return size of the file.
 	Size() (size uint64, err error)

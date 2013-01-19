@@ -70,7 +70,7 @@ func (s *session) recover() (err error) {
 		return
 	}
 
-	r, err := newLogReader(file, true, s.logDropFunc("manifest", file.Number()))
+	r, err := newLogReader(file, true, s.logDropFunc("manifest", file.Num()))
 	if err != nil {
 		return
 	}

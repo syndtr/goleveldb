@@ -71,7 +71,7 @@ func (p files) Len() int {
 }
 
 func (p files) Less(i, j int) bool {
-	return p[i].Number() < p[j].Number()
+	return p[i].Num() < p[j].Num()
 }
 
 func (p files) Swap(i, j int) {

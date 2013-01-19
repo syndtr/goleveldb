@@ -263,7 +263,7 @@ func (p *tFileSorterKey) Less(i, j int) bool {
 	a, b := p.ff[i], p.ff[j]
 	n := p.cmp.Compare(a.min, b.min)
 	if n == 0 {
-		return a.file.Number() < b.file.Number()
+		return a.file.Num() < b.file.Num()
 	}
 	return n < 0
 }
@@ -282,7 +282,7 @@ func (p tFileSorterNewest) getSorter(ff tFiles) sort.Interface {
 func (p tFileSorterNewest) Len() int { return len(p) }
 
 func (p tFileSorterNewest) Less(i, j int) bool {
-	return p[i].file.Number() > p[j].file.Number()
+	return p[i].file.Num() > p[j].file.Num()
 }
 
 func (p tFileSorterNewest) Swap(i, j int) {
@@ -380,7 +380,7 @@ func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
 }
 
 func (t *tOps) remove(f *tFile) {
-	num := f.file.Number()
+	num := f.file.Num()
 
 	var ns cache.Namespace
 	bc := t.s.o.GetBlockCache()
@@ -401,7 +401,7 @@ func (t *tOps) purgeCache() {
 }
 
 func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
-	num := f.file.Number()
+	num := f.file.Num()
 
 	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
 		var r descriptor.Reader
@@ -479,7 +479,7 @@ func (w *tWriter) finish() (t *tFile, err error) {
 func (w *tWriter) drop() {
 	w.w.Close()
 	w.file.Remove()
-	w.t.s.reuseFileNum(w.file.Number())
+	w.t.s.reuseFileNum(w.file.Num())
 	w.w = nil
 	w.file = nil
 	w.tw = nil

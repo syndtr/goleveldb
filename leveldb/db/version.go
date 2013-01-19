@@ -69,13 +69,13 @@ func (v *version) purge() {
 	tables := make(map[uint64]struct{})
 	for _, tt := range next.tables {
 		for _, t := range tt {
-			tables[t.file.Number()] = struct{}{}
+			tables[t.file.Num()] = struct{}{}
 		}
 	}
 
 	for _, tt := range v.tables {
 		for _, t := range tt {
-			if _, ok := tables[t.file.Number()]; !ok {
+			if _, ok := tables[t.file.Num()]; !ok {
 				s.tops.remove(t)
 			}
 		}
@@ -373,10 +373,10 @@ func (p *versionStaging) finish() *version {
 
 		// base tables
 		for _, t := range bt {
-			if _, ok := tm.deleted[t.file.Number()]; ok {
+			if _, ok := tm.deleted[t.file.Num()]; ok {
 				continue
 			}
-			if _, ok := tm.added[t.file.Number()]; ok {
+			if _, ok := tm.added[t.file.Num()]; ok {
 				continue
 			}
 			nt = append(nt, t)

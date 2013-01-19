@@ -118,7 +118,7 @@ func (p *sessionRecord) addTable(level int, num, size uint64, min, max iKey) {
 }
 
 func (p *sessionRecord) addTableFile(level int, t *tFile) {
-	p.addTable(level, t.file.Number(), t.size, t.min, t.max)
+	p.addTable(level, t.file.Num(), t.size, t.min, t.max)
 }
 
 func (p *sessionRecord) deleteTable(level int, num uint64) {

@@ -217,7 +217,7 @@ func (p *stdFile) Type() FileType {
 	return p.t
 }
 
-func (p *stdFile) Number() uint64 {
+func (p *stdFile) Num() uint64 {
 	return p.num
 }
 
