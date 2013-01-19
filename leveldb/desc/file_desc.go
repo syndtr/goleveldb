@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package descriptor
+package desc
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-type FileDescriptor struct {
+type FileDesc struct {
 	path string
 	lock *os.File
 	log  *os.File
@@ -31,7 +31,7 @@ type FileDescriptor struct {
 	mu   sync.Mutex
 }
 
-func OpenFile(dbpath string) (d *FileDescriptor, err error) {
+func OpenFile(dbpath string) (d *FileDesc, err error) {
 	err = os.MkdirAll(dbpath, 0755)
 	if err != nil {
 		return
@@ -60,7 +60,7 @@ func OpenFile(dbpath string) (d *FileDescriptor, err error) {
 		return
 	}
 
-	return &FileDescriptor{path: dbpath, lock: lock, log: log}, nil
+	return &FileDesc{path: dbpath, lock: lock, log: log}, nil
 }
 
 // Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
@@ -83,7 +83,7 @@ func itoa(buf *[]byte, i int, wid int) {
 	*buf = append(*buf, b[bp:]...)
 }
 
-func (d *FileDescriptor) Print(str string) {
+func (d *FileDesc) Print(str string) {
 	t := time.Now()
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
@@ -117,11 +117,11 @@ func (d *FileDescriptor) Print(str string) {
 	d.mu.Unlock()
 }
 
-func (d *FileDescriptor) GetFile(number uint64, t FileType) File {
-	return &stdFile{desc: d, num: number, t: t}
+func (d *FileDesc) GetFile(number uint64, t FileType) File {
+	return &file{desc: d, num: number, t: t}
 }
 
-func (d *FileDescriptor) GetFiles(t FileType) (r []File) {
+func (d *FileDesc) GetFiles(t FileType) (r []File) {
 	dir, err := os.Open(d.path)
 	if err != nil {
 		return
@@ -131,97 +131,98 @@ func (d *FileDescriptor) GetFiles(t FileType) (r []File) {
 	if err != nil {
 		return
 	}
-	p := &stdFile{desc: d}
+	p := &file{desc: d}
 	for _, name := range names {
 		if p.parse(name) && (p.t&t) != 0 {
 			r = append(r, p)
-			p = &stdFile{desc: d}
+			p = &file{desc: d}
 		}
 	}
 	return
 }
 
-func (d *FileDescriptor) GetMainManifest() (f File, err error) {
+func (d *FileDesc) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
-	file, err := os.OpenFile(pth, os.O_RDONLY, 0)
+	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
 		err = err.(*os.PathError).Err
 		return
 	}
+	defer rw.Close()
 	buf := new(bytes.Buffer)
-	_, err = buf.ReadFrom(file)
+	_, err = buf.ReadFrom(rw)
 	if err != nil {
 		return
 	}
 	b := buf.Bytes()
-	p := &stdFile{desc: d}
+	p := &file{desc: d}
 	if len(b) < 1 || b[len(b)-1] != '\n' || !p.parse(string(b[:len(b)-1])) {
 		return nil, errors.ErrCorrupt("invalid CURRENT file")
 	}
 	return p, nil
 }
 
-func (d *FileDescriptor) SetMainManifest(f File) (err error) {
-	p, ok := f.(*stdFile)
+func (d *FileDesc) SetMainManifest(f File) (err error) {
+	p, ok := f.(*file)
 	if !ok {
 		return ErrInvalidFile
 	}
 	pth := path.Join(d.path, "CURRENT")
 	pthTmp := fmt.Sprintf("%s.%d", pth, p.num)
-	file, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	rw, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return
 	}
-	_, err = file.WriteString(p.name() + "\n")
+	defer rw.Close()
+	_, err = rw.WriteString(p.name() + "\n")
 	if err != nil {
 		return
 	}
-	file.Close()
 	os.Remove(pth)
 	return os.Rename(pthTmp, pth)
 
 }
 
-func (d *FileDescriptor) Close() {
+func (d *FileDesc) Close() {
 	setFileLock(d.lock, false)
 	d.lock.Close()
 }
 
-type stdFile struct {
-	desc *FileDescriptor
+type file struct {
+	desc *FileDesc
 	num  uint64
 	t    FileType
 }
 
-func (p *stdFile) Open() (r Reader, err error) {
+func (p *file) Open() (r Reader, err error) {
 	return os.OpenFile(p.path(), os.O_RDONLY, 0)
 }
 
-func (p *stdFile) Create() (w Writer, err error) {
+func (p *file) Create() (w Writer, err error) {
 	return os.OpenFile(p.path(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 }
 
-func (p *stdFile) Rename(num uint64, t FileType) error {
+func (p *file) Rename(num uint64, t FileType) error {
 	oldPth := p.path()
 	p.num = num
 	p.t = t
 	return os.Rename(oldPth, p.path())
 }
 
-func (p *stdFile) Exist() bool {
+func (p *file) Exist() bool {
 	_, err := os.Stat(p.path())
 	return err == nil
 }
 
-func (p *stdFile) Type() FileType {
+func (p *file) Type() FileType {
 	return p.t
 }
 
-func (p *stdFile) Num() uint64 {
+func (p *file) Num() uint64 {
 	return p.num
 }
 
-func (p *stdFile) Size() (size uint64, err error) {
+func (p *file) Size() (size uint64, err error) {
 	fi, err := os.Stat(p.path())
 	if err == nil {
 		size = uint64(fi.Size())
@@ -229,11 +230,11 @@ func (p *stdFile) Size() (size uint64, err error) {
 	return
 }
 
-func (p *stdFile) Remove() error {
+func (p *file) Remove() error {
 	return os.Remove(p.path())
 }
 
-func (p *stdFile) name() string {
+func (p *file) name() string {
 	switch p.t {
 	case TypeManifest:
 		return fmt.Sprintf("MANIFEST-%d", p.num)
@@ -249,11 +250,11 @@ func (p *stdFile) name() string {
 	return ""
 }
 
-func (p *stdFile) path() string {
+func (p *file) path() string {
 	return path.Join(p.desc.path, p.name())
 }
 
-func (p *stdFile) parse(name string) bool {
+func (p *file) parse(name string) bool {
 	var num uint64
 	var tail string
 	_, err := fmt.Sscanf(name, "%d.%s", &num, &tail)

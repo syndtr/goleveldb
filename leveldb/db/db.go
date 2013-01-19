@@ -16,7 +16,7 @@ package db
 
 import (
 	"fmt"
-	"leveldb/descriptor"
+	"leveldb/desc"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/memdb"
@@ -50,8 +50,8 @@ type DB struct {
 	err       unsafe.Pointer
 }
 
-func open(s *session) (d *DB, err error) {
-	d = &DB{
+func open(s *session) (db *DB, err error) {
+	db = &DB{
 		s:      s,
 		cch:    make(chan cSignal),
 		creq:   make(chan *cReq),
@@ -64,25 +64,25 @@ func open(s *session) (d *DB, err error) {
 		snaps:  newSnaps(),
 	}
 
-	err = d.recoverLog()
+	err = db.recoverLog()
 	if err != nil {
 		return
 	}
 
 	// remove any obsolete files
-	d.cleanFiles()
+	db.cleanFiles()
 
-	go d.compaction()
-	go d.writeLog()
+	go db.compaction()
+	go db.writeLog()
 	// wait for compaction goroutine
-	d.cch <- cWait
+	db.cch <- cWait
 
 	return
 }
 
 // Open open or create database from given desc.
-func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
-	s := newSession(desc, o)
+func Open(d desc.Desc, o *opt.Options) (db *DB, err error) {
+	s := newSession(d, o)
 
 	err = s.recover()
 	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
@@ -99,11 +99,11 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
-func Recover(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
-	s := newSession(desc, o)
+func Recover(d desc.Desc, o *opt.Options) (db *DB, err error) {
+	s := newSession(d, o)
 
 	// get all files
-	ff := files(s.getFiles(descriptor.TypeAll))
+	ff := files(s.getFiles(desc.TypeAll))
 	ff.sort()
 
 	s.printf("Recover: started, files=%d", len(ff))
@@ -114,7 +114,7 @@ func Recover(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	ro := &opt.ReadOptions{}
 	var nt *tFile
 	for _, f := range ff {
-		if f.Type() != descriptor.TypeTable {
+		if f.Type() != desc.TypeTable {
 			continue
 		}
 
@@ -193,7 +193,7 @@ func (d *DB) recoverLog() (err error) {
 	mb := new(memBatch)
 	cm := newCMem(s)
 
-	logs, skip := files(s.getFiles(descriptor.TypeLog)), 0
+	logs, skip := files(s.getFiles(desc.TypeLog)), 0
 	logs.sort()
 	for _, log := range logs {
 		if log.Num() < s.stLogNum {

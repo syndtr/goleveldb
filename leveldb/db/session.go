@@ -14,7 +14,7 @@
 package db
 
 import (
-	"leveldb/descriptor"
+	"leveldb/desc"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
@@ -24,7 +24,7 @@ import (
 
 // session represent a persistent database session.
 type session struct {
-	desc   descriptor.Descriptor
+	desc   desc.Desc
 	o      *iOptions
 	cmp    *iComparer
 	filter *iFilter
@@ -39,9 +39,9 @@ type session struct {
 	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
-func newSession(desc descriptor.Descriptor, o *opt.Options) *session {
+func newSession(d desc.Desc, o *opt.Options) *session {
 	s := new(session)
-	s.desc = desc
+	s.desc = d
 	s.o = &iOptions{s, o}
 	s.cmp = &iComparer{o.GetComparer()}
 	filter := o.GetFilter()

@@ -11,8 +11,8 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-// Package desriptor provides I/O abstraction for LevelDB.
-package descriptor
+// Package desc provides I/O abstraction for LevelDB.
+package desc
 
 import (
 	"errors"
@@ -90,7 +90,7 @@ type File interface {
 	Remove() error
 }
 
-type Descriptor interface {
+type Desc interface {
 	// Print a string, for logging.
 	Print(str string)
 

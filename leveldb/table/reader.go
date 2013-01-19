@@ -18,7 +18,7 @@ import (
 	"leveldb/block"
 	"leveldb/cache"
 	"leveldb/comparer"
-	"leveldb/descriptor"
+	"leveldb/desc"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
@@ -27,7 +27,7 @@ import (
 
 // Reader represent a table reader.
 type Reader struct {
-	r descriptor.Reader
+	r desc.Reader
 	o opt.OptionsGetter
 
 	meta   *block.Reader
@@ -39,7 +39,7 @@ type Reader struct {
 }
 
 // NewReader create new initialized table reader.
-func NewReader(r descriptor.Reader, size uint64, o opt.OptionsGetter, cache cache.Namespace) (p *Reader, err error) {
+func NewReader(r desc.Reader, size uint64, o opt.OptionsGetter, cache cache.Namespace) (p *Reader, err error) {
 	mb, ib, err := readFooter(r, size)
 	if err != nil {
 		return

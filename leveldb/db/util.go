@@ -16,7 +16,7 @@ package db
 import (
 	"encoding/binary"
 	"io"
-	"leveldb/descriptor"
+	"leveldb/desc"
 	"leveldb/log"
 	"sort"
 )
@@ -64,7 +64,7 @@ func shorten(str string) string {
 	return str[:5] + "..." + str[len(str)-5:]
 }
 
-type files []descriptor.File
+type files []desc.File
 
 func (p files) Len() int {
 	return len(p)
@@ -83,12 +83,12 @@ func (p files) sort() {
 }
 
 type logReader struct {
-	file   descriptor.File
-	reader descriptor.Reader
+	file   desc.File
+	reader desc.Reader
 	log    *log.Reader
 }
 
-func newLogReader(file descriptor.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
+func newLogReader(file desc.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
 	r := new(logReader)
 	r.file = file
 	r.reader, err = file.Open()
@@ -118,12 +118,12 @@ func (r *logReader) remove() error {
 }
 
 type logWriter struct {
-	file   descriptor.File
-	writer descriptor.Writer
+	file   desc.File
+	writer desc.Writer
 	log    *log.Writer
 }
 
-func newLogWriter(file descriptor.File) (p *logWriter, err error) {
+func newLogWriter(file desc.File) (p *logWriter, err error) {
 	w := new(logWriter)
 	w.file = file
 	w.writer, err = file.Create()

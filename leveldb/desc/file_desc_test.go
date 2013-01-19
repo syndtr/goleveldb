@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package descriptor
+package desc
 
 import "testing"
 
@@ -54,18 +54,18 @@ var invalidCases = []string{
 	"100.lop",
 }
 
-func TestStdDesc_CreateFileName(t *testing.T) {
+func TestFileDesc_CreateFileName(t *testing.T) {
 	for _, c := range cases {
-		f := &stdFile{num: c.num, t: c.ftype}
+		f := &file{num: c.num, t: c.ftype}
 		if f.name() != c.name {
 			t.Errorf("invalid filename got '%s', want '%s'", f.name(), c.name)
 		}
 	}
 }
 
-func TestStdDesc_ParseFileName(t *testing.T) {
+func TestFileDesc_ParseFileName(t *testing.T) {
 	for _, c := range cases {
-		f := new(stdFile)
+		f := new(file)
 		if !f.parse(c.name) {
 			t.Errorf("cannot parse filename '%s'", c.name)
 			continue
@@ -79,9 +79,9 @@ func TestStdDesc_ParseFileName(t *testing.T) {
 	}
 }
 
-func TestStdDesc_InvalidFileName(t *testing.T) {
+func TestFileDesc_InvalidFileName(t *testing.T) {
 	for _, name := range invalidCases {
-		f := new(stdFile)
+		f := new(file)
 		if f.parse(name) {
 			t.Errorf("filename '%s' should be invalid", name)
 		}
