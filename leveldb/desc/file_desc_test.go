@@ -14,7 +14,9 @@
 package desc
 
 import (
+	"fmt"
 	"os"
+	"path"
 	"testing"
 )
 
@@ -92,22 +94,24 @@ func TestFileDesc_InvalidFileName(t *testing.T) {
 }
 
 func TestFileDesc_Flock(t *testing.T) {
-	const path = "/tmp/goleveldb-fltest"
+	pth := path.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
 
-	_, err := os.Stat(path)
+	_, err := os.Stat(pth)
 	if err == nil {
-		err = os.RemoveAll(path)
+		err = os.RemoveAll(pth)
 		if err != nil {
 			t.Fatal("RemoveAll: got error: ", err)
 		}
 	}
 
-	p1, err := OpenFile(path)
+	p1, err := OpenFile(pth)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	p2, err := OpenFile(path)
+	defer os.RemoveAll(pth)
+
+	p2, err := OpenFile(pth)
 	if err != nil {
 		t.Log("OpenFile(2): got error: ", err)
 	} else {
@@ -118,7 +122,7 @@ func TestFileDesc_Flock(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(path)
+	p3, err := OpenFile(pth)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}

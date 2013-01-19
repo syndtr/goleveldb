@@ -23,6 +23,5 @@ func setFileLock(f *os.File, lock bool) (err error) {
 	if lock {
 		how = syscall.LOCK_EX
 	}
-	err = syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
-	return
+	return syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
 }
