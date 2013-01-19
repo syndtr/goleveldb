@@ -50,20 +50,7 @@ type DB struct {
 	err       unsafe.Pointer
 }
 
-// Open open or create database from given desc.
-func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
-	s := newSession(desc, o)
-
-	err = s.recover()
-	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
-		err = s.create()
-	} else if err == nil && o.HasFlag(opt.OFErrorIfExist) {
-		err = os.ErrExist
-	}
-	if err != nil {
-		return
-	}
-
+func open(s *session) (d *DB, err error) {
 	d = &DB{
 		s:      s,
 		cch:    make(chan cSignal),
@@ -91,6 +78,110 @@ func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
 	d.cch <- cWait
 
 	return
+}
+
+// Open open or create database from given desc.
+func Open(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
+	s := newSession(desc, o)
+
+	err = s.recover()
+	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
+		err = s.create()
+	} else if err == nil && o.HasFlag(opt.OFErrorIfExist) {
+		err = os.ErrExist
+	}
+	if err != nil {
+		return
+	}
+
+	return open(s)
+}
+
+// Recover recover database with missing or corrupted manifest file. It will
+// ignore any manifest files, valid or not.
+func Recover(desc descriptor.Descriptor, o *opt.Options) (d *DB, err error) {
+	s := newSession(desc, o)
+
+	// get all files
+	ff := files(s.getFiles(descriptor.TypeAll))
+	ff.sort()
+
+	s.printf("Recover: started, files=%d", len(ff))
+
+	rec := new(sessionRecord)
+
+	// recover tables
+	ro := &opt.ReadOptions{}
+	var nt *tFile
+	for _, f := range ff {
+		if f.Type() != descriptor.TypeTable {
+			continue
+		}
+
+		var size uint64
+		size, err = f.Size()
+		if err != nil {
+			return
+		}
+
+		t := newTFile(f, size, nil, nil)
+		iter := s.tops.newIterator(t, ro)
+		// min ikey
+		if iter.First() {
+			t.min = iter.Key()
+		} else if iter.Error() != nil {
+			err = iter.Error()
+			return
+		} else {
+			continue
+		}
+		// max ikey
+		if iter.Last() {
+			t.max = iter.Key()
+		} else if iter.Error() != nil {
+			err = iter.Error()
+			return
+		} else {
+			continue
+		}
+
+		// add table to level 0
+		rec.addTableFile(0, t)
+
+		nt = t
+	}
+
+	// extract largest seq number from newest table
+	if nt != nil {
+		var lseq uint64
+		iter := s.tops.newIterator(nt, ro)
+		for iter.Next() {
+			seq, _, ok := iKey(iter.Key()).parseNum()
+			if !ok {
+				continue
+			}
+			if seq > lseq {
+				lseq = seq
+			}
+		}
+		rec.setSeq(lseq)
+	}
+
+	// set file num based on largest one
+	s.stFileNum = ff[len(ff)-1].Number() + 1
+
+	// create brand new manifest
+	err = s.create()
+	if err != nil {
+		return
+	}
+	// commit record
+	err = s.commit(rec)
+	if err != nil {
+		return
+	}
+
+	return open(s)
 }
 
 func (d *DB) recoverLog() (err error) {
