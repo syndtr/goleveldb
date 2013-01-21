@@ -22,7 +22,7 @@ import (
 type LRUCache struct {
 	sync.Mutex
 
-	root     lruElem
+	recent   lruNode
 	table    map[uint64]*lruNs
 	capacity int
 	size     int
@@ -34,8 +34,8 @@ func NewLRUCache(capacity int) *LRUCache {
 		table:    make(map[uint64]*lruNs),
 		capacity: capacity,
 	}
-	c.root.mNext = &c.root
-	c.root.mPrev = &c.root
+	c.recent.rNext = &c.recent
+	c.recent.rPrev = &c.recent
 	return c
 }
 
@@ -50,7 +50,7 @@ func (c *LRUCache) GetNamespace(id uint64) Namespace {
 
 	p := &lruNs{
 		lru:   c,
-		table: make(map[uint64]*lruElem),
+		table: make(map[uint64]*lruNode),
 	}
 	c.table[id] = p
 	return p
@@ -59,42 +59,45 @@ func (c *LRUCache) GetNamespace(id uint64) Namespace {
 // Purge purge entire cache.
 func (c *LRUCache) Purge(fin func()) {
 	c.Lock()
-	top := &c.root
-	for e := c.root.mPrev; e != top; {
-		e.deleted = true
-		e.mRemove()
-		e.delfin = fin
-		e.evict()
-		e = c.root.mPrev
+	top := &c.recent
+	for n := c.recent.rPrev; n != top; {
+		n.deleted = true
+		n.rRemove()
+		n.delfin = fin
+		n.evict_NB()
+		n = c.recent.rPrev
 	}
+	c.size = 0
 	c.Unlock()
 }
 
 func (c *LRUCache) evict() {
-	top := c.root.mNext
-	for e := c.root.mPrev; c.size > c.capacity && e != top; {
-		e.mRemove()
-		e.evict()
-		e = c.root.mPrev
+	top := &c.recent
+	for n := c.recent.rPrev; c.size > c.capacity && n != top; {
+		n.rRemove()
+		n.evict_NB()
+		c.size -= n.charge
+		n = c.recent.rPrev
 	}
 }
 
 type lruNs struct {
 	lru   *LRUCache
-	table map[uint64]*lruElem
+	table map[uint64]*lruNode
 }
 
 func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 	lru := p.lru
 	lru.Lock()
 
-	e, ok := p.table[key]
+	n, ok := p.table[key]
 	if ok {
-		if !e.deleted {
+		if !n.deleted {
 			// bump to front
-			e.mRemove()
-			e.mInsert(&lru.root)
+			n.rRemove()
+			n.rInsert(&lru.recent)
 		}
+		atomic.AddInt32(&n.ref, 1)
 	} else {
 		if setf == nil {
 			lru.Unlock()
@@ -107,15 +110,16 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 			return nil, false
 		}
 
-		e = &lruElem{
+		n = &lruNode{
 			ns:     p,
 			key:    key,
 			value:  value,
 			charge: charge,
 			setfin: fin,
+			ref:    2,
 		}
-		p.table[key] = e
-		e.mInsert(&lru.root)
+		p.table[key] = n
+		n.rInsert(&lru.recent)
 
 		lru.size += charge
 		lru.evict()
@@ -123,14 +127,14 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 
 	lru.Unlock()
 
-	return e.makeObject(), true
+	return &lruObject{node: n}, true
 }
 
 func (p *lruNs) Delete(key uint64, fin func()) bool {
 	lru := p.lru
 	lru.Lock()
 
-	e, ok := p.table[key]
+	n, ok := p.table[key]
 	if !ok {
 		lru.Unlock()
 		if fin != nil {
@@ -139,105 +143,117 @@ func (p *lruNs) Delete(key uint64, fin func()) bool {
 		return false
 	}
 
-	if e.deleted {
+	if n.deleted {
 		lru.Unlock()
 		return false
 	}
 
-	e.deleted = true
-	e.mRemove()
-	e.delfin = fin
-	e.evict()
+	n.deleted = true
+	n.rRemove()
+	n.delfin = fin
+	n.evict_NB()
+	lru.size -= n.charge
 
 	lru.Unlock()
 	return true
 }
 
 func (p *lruNs) Purge(fin func()) {
-	p.lru.Lock()
-	for _, e := range p.table {
-		if e.deleted {
+	lru := p.lru
+
+	lru.Lock()
+	for _, n := range p.table {
+		if n.deleted {
 			continue
 		}
-		e.mRemove()
-		e.delfin = fin
-		e.evict()
+		n.rRemove()
+		n.delfin = fin
+		n.evict_NB()
+		lru.size -= n.charge
 	}
-	p.lru.Unlock()
+	lru.Unlock()
 }
 
-type lruElem struct {
+type lruNode struct {
 	ns *lruNs
 
-	mNext, mPrev *lruElem
+	rNext, rPrev *lruNode
 
 	key     uint64
 	value   interface{}
 	charge  int
-	ref     uint
+	ref     int32
 	deleted bool
 	setfin  func()
 	delfin  func()
 }
 
-func (e *lruElem) mInsert(at *lruElem) {
-	n := at.mNext
-	at.mNext = e
-	e.mPrev = at
-	e.mNext = n
-	n.mPrev = e
-	e.ref++
+func (n *lruNode) rInsert(at *lruNode) {
+	x := at.rNext
+	at.rNext = n
+	n.rPrev = at
+	n.rNext = x
+	x.rPrev = n
 }
 
-func (e *lruElem) mRemove() {
+func (n *lruNode) rRemove() {
 	// only remove if not already removed
-	if e.mPrev == nil {
+	if n.rPrev == nil {
 		return
 	}
 
-	e.mPrev.mNext = e.mNext
-	e.mNext.mPrev = e.mPrev
-	e.mPrev = nil
-	e.mNext = nil
-	e.ref--
+	n.rPrev.rNext = n.rNext
+	n.rNext.rPrev = n.rPrev
+	n.rPrev = nil
+	n.rNext = nil
 }
 
-func (e *lruElem) evict() {
-	if e.ref != 0 {
-		return
-	}
-
-	ns := e.ns
-
+func (n *lruNode) doEvict() {
 	// remove elem
-	delete(ns.table, e.key)
-	ns.lru.size -= e.charge
+	delete(n.ns.table, n.key)
 
 	// execute finalizer
-	if e.setfin != nil {
-		e.setfin()
-		e.setfin = nil
+	if n.setfin != nil {
+		n.setfin()
+		n.setfin = nil
 	}
-	if e.delfin != nil {
-		e.delfin()
-		e.delfin = nil
+	if n.delfin != nil {
+		n.delfin()
+		n.delfin = nil
 	}
 
-	e.value = nil
+	n.value = nil
 }
 
-func (e *lruElem) makeObject() (obj *lruObject) {
-	e.ref++
-	return &lruObject{e: e}
+func (n *lruNode) evict() {
+	if atomic.AddInt32(&n.ref, -1) != 0 {
+		return
+	}
+
+	lru := n.ns.lru
+	lru.Lock()
+	n.doEvict()
+	lru.Unlock()
+}
+
+func (n *lruNode) evict_NB() {
+	if atomic.AddInt32(&n.ref, -1) != 0 {
+		return
+	}
+
+	n.doEvict()
 }
 
 type lruObject struct {
-	e    *lruElem
+	node *lruNode
 	once uint32
 }
 
 func (p *lruObject) Value() interface{} {
-	return p.e.value
+	if atomic.LoadUint32(&p.once) == 0 {
+		return p.node.value
+	}
+	return nil
 }
 
 func (p *lruObject) Release() {
@@ -245,10 +261,6 @@ func (p *lruObject) Release() {
 		return
 	}
 
-	e := p.e
-	lru := e.ns.lru
-	lru.Lock()
-	e.ref--
-	e.evict()
-	lru.Unlock()
+	p.node.evict()
+	p.node = nil
 }
