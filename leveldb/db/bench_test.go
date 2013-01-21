@@ -256,21 +256,21 @@ func (p *dbBench) close() {
 	os.RemoveAll(benchDB)
 }
 
-func BenchmarkDBWriteSequential(b *testing.B) {
+func BenchmarkDBWrite(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.writes(1)
 	p.close()
 }
 
-func BenchmarkDBWriteSequentialBatch(b *testing.B) {
+func BenchmarkDBWriteBatch(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.writes(1000)
 	p.close()
 }
 
-func BenchmarkDBWriteSequentialNoCompression(b *testing.B) {
+func BenchmarkDBWriteUncompressed(b *testing.B) {
 	p := openDBBench(b)
 	p.o.CompressionType = opt.NoCompression
 	p.populate(b.N)
@@ -278,7 +278,7 @@ func BenchmarkDBWriteSequentialNoCompression(b *testing.B) {
 	p.close()
 }
 
-func BenchmarkDBWriteSequentialBatchNoCompression(b *testing.B) {
+func BenchmarkDBWriteBatchUncompressed(b *testing.B) {
 	p := openDBBench(b)
 	p.o.CompressionType = opt.NoCompression
 	p.populate(b.N)
@@ -319,14 +319,14 @@ func BenchmarkDBOverwriteRandom(b *testing.B) {
 	p.close()
 }
 
-func BenchmarkDBPutSequential(b *testing.B) {
+func BenchmarkDBPut(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.puts()
 	p.close()
 }
 
-func BenchmarkDBReadSequential(b *testing.B) {
+func BenchmarkDBRead(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
@@ -340,7 +340,22 @@ func BenchmarkDBReadSequential(b *testing.B) {
 	p.close()
 }
 
-func BenchmarkDBReadSequentialTable(b *testing.B) {
+func BenchmarkDBReadUncompressed(b *testing.B) {
+	p := openDBBench(b)
+	p.o.CompressionType = opt.NoCompression
+	p.populate(b.N)
+	p.fill()
+
+	iter := p.newIter()
+	b.ResetTimer()
+	for iter.Next() {
+	}
+	b.StopTimer()
+	b.SetBytes(116)
+	p.close()
+}
+
+func BenchmarkDBReadTable(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
@@ -386,7 +401,7 @@ func BenchmarkDBReadReverseTable(b *testing.B) {
 	p.close()
 }
 
-func BenchmarkDBSeekSequential(b *testing.B) {
+func BenchmarkDBSeek(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
@@ -403,7 +418,7 @@ func BenchmarkDBSeekRandom(b *testing.B) {
 	p.close()
 }
 
-func BenchmarkDBGetSequential(b *testing.B) {
+func BenchmarkDBGet(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
