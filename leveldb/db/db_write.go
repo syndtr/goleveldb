@@ -65,10 +65,11 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 				if err = d.geterr(); err != nil {
 					return
 				}
+				d.cch <- cSched
 			} else {
 				cwait = true
+				d.cch <- cWait
 			}
-			d.cch <- cWait
 			continue
 		case v.tLen(0) >= kL0_StopWritesTrigger:
 			d.cch <- cSched
