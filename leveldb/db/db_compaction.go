@@ -15,7 +15,6 @@ package db
 
 import (
 	"leveldb/memdb"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -190,7 +189,6 @@ func (d *DB) memCompaction(mem *memdb.DB) {
 	d.dropFrozenMem()
 
 	c = nil
-	runtime.GC()
 }
 
 func (d *DB) doCompaction(c *compaction, noTrivial bool) {
@@ -391,8 +389,6 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 	// Save compaction stats
 	d.cstats[c.level+1].add(stats)
-
-	runtime.GC()
 }
 
 func (d *DB) compaction() {

@@ -538,7 +538,5 @@ drain:
 		d.s.manifest.close()
 	}
 
-	runtime.GC()
-
 	return d.geterr()
 }
