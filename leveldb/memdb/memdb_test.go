@@ -14,7 +14,9 @@
 package memdb
 
 import (
+	"encoding/binary"
 	"leveldb/comparer"
+	"math/rand"
 	"testing"
 )
 
@@ -63,4 +65,64 @@ func TestPutRemove(t *testing.T) {
 	p.Remove([]byte("zz"))
 	assertExist("zz", false)
 	assertLen(0)
+}
+
+func BenchmarkPut(b *testing.B) {
+	buf := make([][4]byte, b.N)
+	for i := range buf {
+		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
+	}
+
+	b.ResetTimer()
+	p := New(comparer.BytesComparer{})
+	for i := range buf {
+		p.Put(buf[i][:], nil)
+	}
+}
+
+func BenchmarkPutRandom(b *testing.B) {
+	buf := make([][4]byte, b.N)
+	for i := range buf {
+		binary.LittleEndian.PutUint32(buf[i][:], uint32(rand.Int()))
+	}
+
+	b.ResetTimer()
+	p := New(comparer.BytesComparer{})
+	for i := range buf {
+		p.Put(buf[i][:], nil)
+	}
+}
+
+func BenchmarkGet(b *testing.B) {
+	buf := make([][4]byte, b.N)
+	for i := range buf {
+		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
+	}
+
+	p := New(comparer.BytesComparer{})
+	for i := range buf {
+		p.Put(buf[i][:], nil)
+	}
+
+	b.ResetTimer()
+	for i := range buf {
+		p.Get(buf[i][:])
+	}
+}
+
+func BenchmarkGetRandom(b *testing.B) {
+	buf := make([][4]byte, b.N)
+	for i := range buf {
+		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
+	}
+
+	p := New(comparer.BytesComparer{})
+	for i := range buf {
+		p.Put(buf[i][:], nil)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p.Get(buf[rand.Int()%b.N][:])
+	}
 }
