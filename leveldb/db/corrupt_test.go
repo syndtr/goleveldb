@@ -16,11 +16,11 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/log"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"io"
-	"leveldb/cache"
-	"leveldb/desc"
-	"leveldb/log"
-	"leveldb/opt"
 	"testing"
 )
 

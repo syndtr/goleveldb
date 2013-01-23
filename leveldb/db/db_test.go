@@ -15,11 +15,11 @@ package db
 
 import (
 	"fmt"
-	"leveldb/cache"
-	"leveldb/desc"
-	"leveldb/errors"
-	"leveldb/filter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"math/rand"
 	"runtime"
 	"strings"

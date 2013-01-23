@@ -14,10 +14,10 @@
 package db
 
 import (
-	"leveldb/comparer"
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 var errIKeyCorrupt = errors.ErrCorrupt("internal key corrupted")

@@ -16,8 +16,8 @@ package db
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"io"
-	"leveldb/errors"
 )
 
 // These numbers are written to disk and should not be changed.

@@ -14,7 +14,7 @@
 package db
 
 import (
-	"leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"sync"
 	"time"
 )

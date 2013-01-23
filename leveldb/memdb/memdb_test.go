@@ -15,7 +15,7 @@ package memdb
 
 import (
 	"encoding/binary"
-	"leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"math/rand"
 	"testing"
 )

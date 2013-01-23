@@ -15,8 +15,8 @@
 package memdb
 
 import (
-	"leveldb/comparer"
-	"leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"

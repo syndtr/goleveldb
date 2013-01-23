@@ -15,9 +15,9 @@ package db
 
 import (
 	"container/list"
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"sync"
 	"sync/atomic"
 )

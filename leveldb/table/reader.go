@@ -15,13 +15,13 @@
 package table
 
 import (
-	"leveldb/block"
-	"leveldb/cache"
-	"leveldb/comparer"
-	"leveldb/desc"
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/block"
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"runtime"
 )
 

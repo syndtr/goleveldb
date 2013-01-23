@@ -14,10 +14,10 @@
 package db
 
 import (
-	"leveldb/cache"
-	"leveldb/comparer"
-	"leveldb/filter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 type iOptions struct {

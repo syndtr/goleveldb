@@ -14,9 +14,9 @@
 package db
 
 import (
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"runtime"
 	"sync/atomic"
 	"unsafe"

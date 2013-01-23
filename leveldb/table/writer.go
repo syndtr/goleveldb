@@ -14,13 +14,13 @@
 package table
 
 import (
+	"code.google.com/p/snappy-go/snappy"
 	"encoding/binary"
-	"leveldb/block"
-	"leveldb/comparer"
-	"leveldb/desc"
-	"leveldb/hash"
-	"leveldb/opt"
-	"snappy"
+	"github.com/syndtr/goleveldb/leveldb/block"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/hash"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 // Writer represent a table writer.

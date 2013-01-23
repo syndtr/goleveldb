@@ -14,12 +14,12 @@
 package db
 
 import (
-	"leveldb/cache"
-	"leveldb/comparer"
-	"leveldb/desc"
-	"leveldb/iter"
-	"leveldb/opt"
-	"leveldb/table"
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/table"
 	"runtime"
 	"sort"
 	"sync/atomic"

@@ -15,8 +15,8 @@ package db
 
 import (
 	"encoding/binary"
-	"leveldb/errors"
-	"leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
 var (

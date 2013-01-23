@@ -15,7 +15,7 @@ package db
 
 import (
 	"bytes"
-	"leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"testing"
 )
 

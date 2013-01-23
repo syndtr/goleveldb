@@ -16,9 +16,9 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"leveldb/desc"
-	"leveldb/iter"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"math/rand"
 	"os"
 	"path"

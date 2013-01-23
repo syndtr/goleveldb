@@ -16,8 +16,8 @@ package table
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"io"
-	"leveldb/errors"
 )
 
 // The magic was picked by running

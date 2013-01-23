@@ -14,8 +14,8 @@
 package db
 
 import (
-	"leveldb/memdb"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"time"
 )
 

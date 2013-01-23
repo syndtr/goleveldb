@@ -16,11 +16,11 @@ package db
 
 import (
 	"fmt"
-	"leveldb/desc"
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/memdb"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"os"
 	"runtime"
 	"strings"

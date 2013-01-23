@@ -13,7 +13,7 @@
 
 package db
 
-import "leveldb/comparer"
+import "github.com/syndtr/goleveldb/leveldb/comparer"
 
 type iComparer struct {
 	cmp comparer.Comparer

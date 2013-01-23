@@ -15,7 +15,7 @@ package table
 
 import (
 	"bytes"
-	"leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"testing"
 )
 

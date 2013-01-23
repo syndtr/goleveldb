@@ -14,8 +14,8 @@
 package db
 
 import (
-	"leveldb/errors"
-	"leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"sync/atomic"
 	"unsafe"
 )

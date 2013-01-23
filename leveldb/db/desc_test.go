@@ -17,7 +17,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/desc"
 	"os"
 	"sync"
 	"time"

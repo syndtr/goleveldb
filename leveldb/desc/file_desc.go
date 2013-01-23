@@ -16,7 +16,7 @@ package desc
 import (
 	"bytes"
 	"fmt"
-	"leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"os"
 	"path"
 	"sync"

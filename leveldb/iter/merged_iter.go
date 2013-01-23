@@ -13,7 +13,7 @@
 
 package iter
 
-import "leveldb/comparer"
+import "github.com/syndtr/goleveldb/leveldb/comparer"
 
 // MergedIterator represent a merged iterators. MergedIterator can be used
 // to merge multiple iterators into one.
