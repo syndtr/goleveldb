@@ -41,8 +41,8 @@ func (d *DB) newRawIterator(ro *opt.ReadOptions) iter.Iterator {
 	return iter.NewMergedIterator(ii, s.cmp)
 }
 
-// Iterator represent an interator states over a database session.
-type Iterator struct {
+// dbIter represent an interator states over a database session.
+type dbIter struct {
 	cmp comparer.BasicComparer
 	it  iter.Iterator
 	seq uint64
@@ -55,15 +55,15 @@ type Iterator struct {
 	err      error
 }
 
-func newIterator(seq uint64, it iter.Iterator, cmp comparer.BasicComparer) *Iterator {
-	return &Iterator{cmp: cmp, it: it, seq: seq}
+func newDBIter(seq uint64, it iter.Iterator, cmp comparer.BasicComparer) *dbIter {
+	return &dbIter{cmp: cmp, it: it, seq: seq}
 }
 
-func (i *Iterator) clear() {
+func (i *dbIter) clear() {
 	i.skey, i.sval = nil, nil
 }
 
-func (i *Iterator) scanNext(skip []byte) {
+func (i *dbIter) scanNext(skip []byte) {
 	cmp := i.cmp
 	it := i.it
 
@@ -95,7 +95,7 @@ func (i *Iterator) scanNext(skip []byte) {
 	i.valid = false
 }
 
-func (i *Iterator) scanPrev() {
+func (i *dbIter) scanPrev() {
 	cmp := i.cmp
 	it := i.it
 
@@ -139,11 +139,11 @@ func (i *Iterator) scanPrev() {
 	}
 }
 
-func (i *Iterator) Valid() bool {
+func (i *dbIter) Valid() bool {
 	return i.valid
 }
 
-func (i *Iterator) First() bool {
+func (i *dbIter) First() bool {
 	i.clear()
 	i.last = false
 	i.backward = false
@@ -156,7 +156,7 @@ func (i *Iterator) First() bool {
 	return i.valid
 }
 
-func (i *Iterator) Last() bool {
+func (i *dbIter) Last() bool {
 	i.clear()
 	i.last = false
 	i.backward = true
@@ -169,7 +169,7 @@ func (i *Iterator) Last() bool {
 	return i.valid
 }
 
-func (i *Iterator) Seek(key []byte) bool {
+func (i *dbIter) Seek(key []byte) bool {
 	i.clear()
 	i.last = false
 	i.backward = false
@@ -183,7 +183,7 @@ func (i *Iterator) Seek(key []byte) bool {
 	return i.valid
 }
 
-func (i *Iterator) Next() bool {
+func (i *dbIter) Next() bool {
 	it := i.it
 
 	if !i.valid {
@@ -208,7 +208,7 @@ func (i *Iterator) Next() bool {
 	return i.valid
 }
 
-func (i *Iterator) Prev() bool {
+func (i *dbIter) Prev() bool {
 	cmp := i.cmp
 	it := i.it
 
@@ -238,7 +238,7 @@ func (i *Iterator) Prev() bool {
 	return i.valid
 }
 
-func (i *Iterator) Key() []byte {
+func (i *dbIter) Key() []byte {
 	if !i.valid {
 		return nil
 	}
@@ -248,7 +248,7 @@ func (i *Iterator) Key() []byte {
 	return iKey(i.it.Key()).ukey()
 }
 
-func (i *Iterator) Value() []byte {
+func (i *dbIter) Value() []byte {
 	if !i.valid {
 		return nil
 	}
@@ -258,7 +258,7 @@ func (i *Iterator) Value() []byte {
 	return i.it.Value()
 }
 
-func (i *Iterator) Error() error {
+func (i *dbIter) Error() error {
 	if i.err != nil {
 		return i.err
 	}

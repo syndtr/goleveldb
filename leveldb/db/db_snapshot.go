@@ -117,7 +117,7 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 		return &iter.EmptyIterator{err}
 	}
 
-	return newIterator(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
+	return newDBIter(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
 }
 
 // Release release the snapshot. The caller must not use the snapshot

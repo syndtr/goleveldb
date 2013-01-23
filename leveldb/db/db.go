@@ -353,9 +353,9 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 func (d *DB) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 	p := d.newSnapshot()
 	i := p.NewIterator(ro)
-	x, ok := i.(*Iterator)
+	x, ok := i.(*dbIter)
 	if ok {
-		runtime.SetFinalizer(x, func(x *Iterator) {
+		runtime.SetFinalizer(x, func(x *dbIter) {
 			p.Release()
 		})
 	} else {
