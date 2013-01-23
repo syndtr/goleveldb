@@ -62,7 +62,7 @@ type DB struct {
 	cmp       comparer.BasicComparer
 	rnd       *rand.Rand
 	head      *mNode
-	maxHeight int
+	maxHeight int32
 	memSize   int64
 	n         int32
 
@@ -89,7 +89,7 @@ func (p *DB) Put(key []byte, value []byte) {
 		for i := p.maxHeight; i < h; i++ {
 			p.prev[i] = p.head
 		}
-		p.maxHeight = h
+		atomic.StoreInt32(&p.maxHeight, h)
 	}
 
 	x := p.newNode(key, value, h)
@@ -98,7 +98,7 @@ func (p *DB) Put(key []byte, value []byte) {
 		n.setNext(i, x)
 	}
 
-	atomic.AddInt64(&p.memSize, int64(mNodeSize+(mPtrSize*h)+len(key)+len(value)))
+	atomic.AddInt64(&p.memSize, int64(mNodeSize+(mPtrSize*int(h))+len(key)+len(value)))
 	atomic.AddInt32(&p.n, 1)
 }
 
@@ -152,13 +152,13 @@ func (p *DB) Len() int {
 	return int(atomic.LoadInt32(&p.n))
 }
 
-func (p *DB) newNode(key, value []byte, height int) *mNode {
+func (p *DB) newNode(key, value []byte, height int32) *mNode {
 	return &mNode{key, value, make([]unsafe.Pointer, height)}
 }
 
 func (p *DB) findGE(key []byte, prev bool) *mNode {
 	x := p.head
-	n := p.maxHeight - 1
+	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
 		next := x.getNext(n)
 		if next != nil && p.cmp.Compare(next.key, key) < 0 {
@@ -179,7 +179,7 @@ func (p *DB) findGE(key []byte, prev bool) *mNode {
 
 func (p *DB) findGE_NB(key []byte, prev bool) *mNode {
 	x := p.head
-	n := p.maxHeight - 1
+	n := int(p.maxHeight) - 1
 	for {
 		next := x.getNext_NB(n)
 		if next != nil && p.cmp.Compare(next.key, key) < 0 {
@@ -200,7 +200,7 @@ func (p *DB) findGE_NB(key []byte, prev bool) *mNode {
 
 func (p *DB) findLT(key []byte) *mNode {
 	x := p.head
-	n := p.maxHeight - 1
+	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
 		next := x.getNext(n)
 		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
@@ -217,7 +217,7 @@ func (p *DB) findLT(key []byte) *mNode {
 
 func (p *DB) findLast() *mNode {
 	x := p.head
-	n := p.maxHeight - 1
+	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
 		next := x.getNext(n)
 		if next == nil {
@@ -232,13 +232,13 @@ func (p *DB) findLast() *mNode {
 	return nil
 }
 
-func (p *DB) randHeight() int {
+func (p *DB) randHeight() (h int32) {
 	const branching = 4
-	n := 1
-	for n < tMaxHeight && p.rnd.Int()%branching == 0 {
-		n++
+	h = 1
+	for h < tMaxHeight && p.rnd.Int()%branching == 0 {
+		h++
 	}
-	return n
+	return
 }
 
 type Iterator struct {
