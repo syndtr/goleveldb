@@ -54,3 +54,8 @@ Use bloom filter:
 	}
 	mydb, err := db.Open(mydesc, o)
 	...
+
+Documentation
+-----------
+
+You can read package documentation [here](http://godoc.org/github.com/syndtr/goleveldb).
