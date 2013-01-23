@@ -177,6 +177,11 @@ func (p *dbBench) writes(perBatch int) {
 	b.SetBytes(116)
 }
 
+func (p *dbBench) drop() {
+	p.keys, p.values = nil, nil
+	runtime.GC()
+}
+
 func (p *dbBench) puts() {
 	b := p.b
 	db := p.db
@@ -250,10 +255,14 @@ func (p *dbBench) newIter() iter.Iterator {
 }
 
 func (p *dbBench) close() {
-	runtime.GOMAXPROCS(1)
 	p.db.Close()
 	p.desc.Close()
 	os.RemoveAll(benchDB)
+	p.db = nil
+	p.keys = nil
+	p.values = nil
+	runtime.GC()
+	runtime.GOMAXPROCS(1)
 }
 
 func BenchmarkDBWrite(b *testing.B) {
@@ -330,6 +339,21 @@ func BenchmarkDBRead(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
+	p.drop()
+
+	iter := p.newIter()
+	b.ResetTimer()
+	for iter.Next() {
+	}
+	b.StopTimer()
+	b.SetBytes(116)
+	p.close()
+}
+
+func BenchmarkDBReadGC(b *testing.B) {
+	p := openDBBench(b)
+	p.populate(b.N)
+	p.fill()
 
 	iter := p.newIter()
 	b.ResetTimer()
@@ -345,6 +369,7 @@ func BenchmarkDBReadUncompressed(b *testing.B) {
 	p.o.CompressionType = opt.NoCompression
 	p.populate(b.N)
 	p.fill()
+	p.drop()
 
 	iter := p.newIter()
 	b.ResetTimer()
@@ -360,6 +385,7 @@ func BenchmarkDBReadTable(b *testing.B) {
 	p.populate(b.N)
 	p.fill()
 	p.reopen()
+	p.drop()
 
 	iter := p.newIter()
 	b.ResetTimer()
@@ -374,6 +400,7 @@ func BenchmarkDBReadReverse(b *testing.B) {
 	p := openDBBench(b)
 	p.populate(b.N)
 	p.fill()
+	p.drop()
 
 	iter := p.newIter()
 	b.ResetTimer()
@@ -390,6 +417,7 @@ func BenchmarkDBReadReverseTable(b *testing.B) {
 	p.populate(b.N)
 	p.fill()
 	p.reopen()
+	p.drop()
 
 	iter := p.newIter()
 	b.ResetTimer()

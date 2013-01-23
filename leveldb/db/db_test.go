@@ -67,10 +67,10 @@ func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 	h.ro = &opt.ReadOptions{}
 	h.wo = &opt.WriteOptions{}
 
-	h.open()
+	h.openDB()
 }
 
-func (h *dbHarness) open() {
+func (h *dbHarness) openDB() {
 	var err error
 	h.db, err = Open(h.desc, h.o)
 	if err != nil {
@@ -78,16 +78,25 @@ func (h *dbHarness) open() {
 	}
 }
 
-func (h *dbHarness) close() {
+func (h *dbHarness) closeDB() {
 	err := h.db.Close()
 	if err != nil {
 		h.t.Error("Close: got error: ", err)
 	}
+	runtime.GC()
 }
 
-func (h *dbHarness) reopen() {
-	h.close()
-	h.open()
+func (h *dbHarness) reopenDB() {
+	h.closeDB()
+	h.openDB()
+}
+
+func (h *dbHarness) close() {
+	h.closeDB()
+	h.o = nil
+	h.db = nil
+	h.desc = nil
+	runtime.GC()
 }
 
 func (h *dbHarness) openAssert(want bool) {
@@ -424,7 +433,7 @@ func TestDb_Empty(t *testing.T) {
 	runAllOpts(t, func(h *dbHarness) {
 		h.get("foo", false)
 
-		h.reopen()
+		h.reopenDB()
 		h.get("foo", false)
 	})
 }
@@ -438,7 +447,7 @@ func TestDb_ReadWrite(t *testing.T) {
 		h.getVal("foo", "v3")
 		h.getVal("bar", "v2")
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v3")
 		h.getVal("bar", "v2")
 	})
@@ -453,7 +462,7 @@ func TestDb_PutDeleteGet(t *testing.T) {
 		h.delete("foo")
 		h.get("foo", false)
 
-		h.reopen()
+		h.reopenDB()
 		h.get("foo", false)
 	})
 }
@@ -484,7 +493,7 @@ func TestDb_GetFromFrozen(t *testing.T) {
 	h.getVal("foo", "v1")
 	h.desc.ReleaseSync(desc.TypeTable) // Release sync calls
 
-	h.reopen()
+	h.reopenDB()
 	h.getVal("foo", "v1")
 	h.get("k1", true)
 	h.get("k2", true)
@@ -528,7 +537,7 @@ func TestDb_GetSnapshot(t *testing.T) {
 
 		snap.Release()
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v2")
 		h.getVal(bar, "v2")
 	})
@@ -549,7 +558,7 @@ func TestDb_GetLevel0Ordering(t *testing.T) {
 			t.Errorf("level-0 tables is less than 2, got %d", t0len)
 		}
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v3")
 		h.getVal("bar", "b3")
 	})
@@ -696,7 +705,7 @@ func TestDb_Recover(t *testing.T) {
 		h.put("foo", "v1")
 		h.put("baz", "v5")
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v1")
 
 		h.getVal("foo", "v1")
@@ -704,7 +713,7 @@ func TestDb_Recover(t *testing.T) {
 		h.put("bar", "v2")
 		h.put("foo", "v3")
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v3")
 		h.put("foo", "v4")
 		h.getVal("foo", "v4")
@@ -718,11 +727,11 @@ func TestDb_RecoverWithEmptyLog(t *testing.T) {
 		h.put("foo", "v1")
 		h.put("foo", "v2")
 
-		h.reopen()
-		h.reopen()
+		h.reopenDB()
+		h.reopenDB()
 		h.put("foo", "v3")
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v3")
 	})
 }
@@ -738,7 +747,7 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 		h.put("bar", "v2")
 		h.desc.ReleaseSync(desc.TypeTable)
 
-		h.reopen()
+		h.reopenDB()
 		h.getVal("foo", "v1")
 		h.getVal("bar", "v2")
 		h.getVal("big1", strings.Repeat("x", 10000000))
@@ -764,7 +773,7 @@ func TestDb_MinorCompactionsHappen(t *testing.T) {
 		h.getVal(key(i), key(i)+strings.Repeat("v", 1000))
 	}
 
-	h.reopen()
+	h.reopenDB()
 	for i := 0; i < n; i++ {
 		h.getVal(key(i), key(i)+strings.Repeat("v", 1000))
 	}
@@ -784,7 +793,7 @@ func TestDb_RecoverWithLargeLog(t *testing.T) {
 	// Make sure that if we re-open with a small write buffer size that
 	// we flush table files in the middle of a large log file.
 	h.o.WriteBuffer = 100000
-	h.reopen()
+	h.reopenDB()
 	h.getVal("big1", strings.Repeat("1", 200000))
 	h.getVal("big2", strings.Repeat("2", 200000))
 	h.getVal("small3", strings.Repeat("3", 10))
@@ -814,7 +823,7 @@ func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	}
 
 	// Reopening moves updates to level-0
-	h.reopen()
+	h.reopenDB()
 	h.compactRangeAt(0, "", "")
 
 	v = h.db.s.version()
@@ -892,7 +901,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 	h.o.CompressionType = opt.NoCompression
 
 	h.sizeAssert("", "xyz", 0, 0)
-	h.reopen()
+	h.reopenDB()
 	h.sizeAssert("", "xyz", 0, 0)
 
 	// Write 8MB (80 values, each 100K)
@@ -908,7 +917,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 	h.sizeAssert("", numKey(50), 0, 0)
 
 	for r := 0; r < 3; r++ {
-		h.reopen()
+		h.reopenDB()
 
 		for cs := 0; cs < n; cs += 10 {
 			for i := 0; i < n; i += 10 {
@@ -955,7 +964,7 @@ func TestDb_ApproximateSizes_MixOfSmallAndLarge(t *testing.T) {
 	}
 
 	for r := 0; r < 3; r++ {
-		h.reopen()
+		h.reopenDB()
 
 		var x uint64
 		for i, n := range sizes {
@@ -1129,17 +1138,17 @@ func TestDb_OverlapInLevel0(t *testing.T) {
 func TestDb_L0_CompactionBug_Issue44_a(t *testing.T) {
 	h := newDbHarness(t)
 
-	h.reopen()
+	h.reopenDB()
 	h.put("b", "v")
-	h.reopen()
+	h.reopenDB()
 	h.delete("b")
 	h.delete("a")
-	h.reopen()
+	h.reopenDB()
 	h.delete("a")
-	h.reopen()
+	h.reopenDB()
 	h.put("a", "v")
-	h.reopen()
-	h.reopen()
+	h.reopenDB()
+	h.reopenDB()
 	h.getKeyVal("(a->v)")
 	h.db.cch <- cWait
 	h.getKeyVal("(a->v)")
@@ -1150,26 +1159,26 @@ func TestDb_L0_CompactionBug_Issue44_a(t *testing.T) {
 func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h := newDbHarness(t)
 
-	h.reopen()
+	h.reopenDB()
 	h.put("", "")
-	h.reopen()
+	h.reopenDB()
 	h.delete("e")
 	h.put("", "")
-	h.reopen()
+	h.reopenDB()
 	h.put("c", "cv")
-	h.reopen()
+	h.reopenDB()
 	h.put("", "")
-	h.reopen()
+	h.reopenDB()
 	h.put("", "")
 	h.db.cch <- cWait
-	h.reopen()
+	h.reopenDB()
 	h.put("d", "dv")
-	h.reopen()
+	h.reopenDB()
 	h.put("", "")
-	h.reopen()
+	h.reopenDB()
 	h.delete("d")
 	h.delete("b")
-	h.reopen()
+	h.reopenDB()
 	h.getKeyVal("(->)(c->cv)")
 	h.db.cch <- cWait
 	h.getKeyVal("(->)(c->cv)")

@@ -165,11 +165,11 @@ func TestCorruptDB_Log(t *testing.T) {
 
 	h.build(100)
 	h.check(100, 100)
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeLog, 19, 1)
 	h.corrupt(desc.TypeLog, log.BlockSize+1000, 1)
 
-	h.open()
+	h.openDB()
 	h.check(36, 36)
 
 	h.close()
@@ -182,10 +182,10 @@ func TestCorruptDB_Table(t *testing.T) {
 	h.compactMem()
 	h.compactRangeAt(0, "", "")
 	h.compactRangeAt(1, "", "")
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeTable, 100, 1)
 
-	h.open()
+	h.openDB()
 	h.check(99, 99)
 
 	h.close()
@@ -196,10 +196,10 @@ func TestCorruptDB_TableIndex(t *testing.T) {
 
 	h.build(10000)
 	h.compactMem()
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeTable, -2000, 500)
 
-	h.open()
+	h.openDB()
 	h.check(5000, 9999)
 
 	h.close()
@@ -216,13 +216,13 @@ func TestCorruptDB_MissingManifest(t *testing.T) {
 	h.compactMem()
 	h.build(1000)
 	h.compactMem()
-	h.close()
+	h.closeDB()
 
 	h.recover()
 	h.check(1000, 1000)
 	h.build(1000)
 	h.compactMem()
-	h.close()
+	h.closeDB()
 
 	h.recover()
 	h.check(1000, 1000)
@@ -238,14 +238,14 @@ func TestCorruptDB_SequenceNumberRecovery(t *testing.T) {
 	h.put("foo", "v3")
 	h.put("foo", "v4")
 	h.put("foo", "v5")
-	h.close()
+	h.closeDB()
 
 	h.recover()
 	h.getVal("foo", "v5")
 	h.put("foo", "v6")
 	h.getVal("foo", "v6")
 
-	h.reopen()
+	h.reopenDB()
 	h.getVal("foo", "v6")
 
 	h.close()
@@ -261,14 +261,14 @@ func TestCorruptDB_SequenceNumberRecoveryTable(t *testing.T) {
 	h.put("foo", "v4")
 	h.put("foo", "v5")
 	h.compactMem()
-	h.close()
+	h.closeDB()
 
 	h.recover()
 	h.getVal("foo", "v5")
 	h.put("foo", "v6")
 	h.getVal("foo", "v6")
 
-	h.reopen()
+	h.reopenDB()
 	h.getVal("foo", "v6")
 
 	h.close()
@@ -280,7 +280,7 @@ func TestCorruptDB_CorruptedManifest(t *testing.T) {
 	h.put("foo", "hello")
 	h.compactMem()
 	h.compactRange("", "")
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeManifest, 0, 1000)
 	h.openAssert(false)
 
@@ -295,10 +295,10 @@ func TestCorruptDB_CompactionInputError(t *testing.T) {
 
 	h.build(10)
 	h.compactMem()
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeTable, 100, 1)
 
-	h.open()
+	h.openDB()
 	h.check(9, 9)
 
 	h.build(10000)
@@ -312,10 +312,10 @@ func TestCorruptDB_UnrelatedKeys(t *testing.T) {
 
 	h.build(10)
 	h.compactMem()
-	h.close()
+	h.closeDB()
 	h.corrupt(desc.TypeTable, 100, 1)
 
-	h.open()
+	h.openDB()
 	h.put(string(tkey(1000)), string(tval(1000, ctValSize)))
 	h.getVal(string(tkey(1000)), string(tval(1000, ctValSize)))
 	h.compactMem()
