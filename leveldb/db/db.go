@@ -190,7 +190,8 @@ func (d *DB) recoverLog() (err error) {
 
 	s.printf("LogRecovery: started, min=%d", s.stLogNum)
 
-	mb := new(memBatch)
+	var mem *memdb.DB
+	batch := new(Batch)
 	cm := newCMem(s)
 
 	logs, skip := files(s.getFiles(desc.TypeLog)), 0
@@ -212,9 +213,9 @@ func (d *DB) recoverLog() (err error) {
 			return
 		}
 
-		if mb.mem != nil {
-			if mb.mem.Len() > 0 {
-				err = cm.flush(mb.mem, 0)
+		if mem != nil {
+			if mem.Len() > 0 {
+				err = cm.flush(mem, 0)
 				if err != nil {
 					return
 				}
@@ -231,23 +232,30 @@ func (d *DB) recoverLog() (err error) {
 			fr = nil
 		}
 
-		mb.mem = memdb.New(icmp)
+		mem = memdb.New(icmp)
 
 		for r.log.Next() {
-			d.seq, err = replayBatch(r.log.Record(), mb)
+			err = batch.decode(r.log.Record())
 			if err != nil {
 				return
 			}
 
-			if mb.mem.Size() > s.o.GetWriteBuffer() {
+			err = batch.memReplay(mem)
+			if err != nil {
+				return
+			}
+
+			d.seq = batch.seq + uint64(batch.len())
+
+			if mem.Size() > s.o.GetWriteBuffer() {
 				// flush to table
-				err = cm.flush(mb.mem, 0)
+				err = cm.flush(mem, 0)
 				if err != nil {
 					return
 				}
 
 				// create new memdb
-				mb.mem = memdb.New(icmp)
+				mem = memdb.New(icmp)
 			}
 		}
 
@@ -266,8 +274,8 @@ func (d *DB) recoverLog() (err error) {
 		return
 	}
 
-	if mb.mem != nil && mb.mem.Len() > 0 {
-		err = cm.flush(mb.mem, 0)
+	if mem != nil && mem.Len() > 0 {
+		err = cm.flush(mem, 0)
 		if err != nil {
 			return
 		}

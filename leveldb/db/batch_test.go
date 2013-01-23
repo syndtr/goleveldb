@@ -18,6 +18,23 @@ import (
 	"testing"
 )
 
+type tbRec struct {
+	t          vType
+	key, value []byte
+}
+
+type testBatch struct {
+	rec []*tbRec
+}
+
+func (p *testBatch) put(key, value []byte, seq uint64) {
+	p.rec = append(p.rec, &tbRec{tVal, key, value})
+}
+
+func (p *testBatch) delete(key []byte, seq uint64) {
+	p.rec = append(p.rec, &tbRec{tDel, key, nil})
+}
+
 func TestBatch(t *testing.T) {
 	b1 := new(Batch)
 	b1.seq = 10009
@@ -30,30 +47,27 @@ func TestBatch(t *testing.T) {
 	b1.Delete([]byte("k"))
 	buf := b1.encode()
 	b2 := new(Batch)
-	var n uint32
-	err := decodeBatchHeader(buf, &b2.seq, &n)
+	err := b2.decode(buf)
 	if err != nil {
-		t.Error("error when decoding batch header: ", err)
+		t.Error("error when decoding batch: ", err)
 	}
 	if b1.seq != b2.seq {
 		t.Errorf("invalid seq number want %d, got %d", b1.seq, b2.seq)
 	}
-	if len(b1.rec) != int(n) {
-		t.Errorf("invalid record length (in header) want %d, got %d", len(b1.rec), n)
+	if b1.len() != b2.len() {
+		t.Fatalf("invalid record length want %d, got %d", b1.len(), b2.len())
 	}
-	n2, err := replayBatch(buf, b2)
+	p1, p2 := new(testBatch), new(testBatch)
+	err = b1.replay(p1)
 	if err != nil {
-		t.Error("error when replaying batch: ", err)
+		t.Fatal("error when replaying batch 1: ", err)
 	}
-	if uint64(n) != n2-b2.seq {
-		t.Errorf("invalid record length (replayBatch ret) want %d, got %d", n, n2-b2.seq)
+	err = b2.replay(p2)
+	if err != nil {
+		t.Fatal("error when replaying batch 2: ", err)
 	}
-	if len(b1.rec) != len(b2.rec) {
-		t.Errorf("invalid record length want %d, got %d", len(b1.rec), len(b2.rec))
-		return
-	}
-	for i := range b1.rec {
-		r1, r2 := &(b1.rec[i]), &(b2.rec[i])
+	for i := range p1.rec {
+		r1, r2 := p1.rec[i], p2.rec[i]
 		if r1.t != r2.t {
 			t.Errorf("invalid type on record '%d' want %d, got %d", i, r1.t, r2.t)
 		}
