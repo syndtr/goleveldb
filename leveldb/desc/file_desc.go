@@ -174,13 +174,11 @@ func (d *FileDesc) SetMainManifest(f File) (err error) {
 		return
 	}
 	defer rw.Close()
-	_, err = rw.WriteString(p.name() + "\n")
+	_, err = fmt.Fprintln(rw, p.name())
 	if err != nil {
 		return
 	}
-	os.Remove(pth)
 	return os.Rename(pthTmp, pth)
-
 }
 
 func (d *FileDesc) Close() {
