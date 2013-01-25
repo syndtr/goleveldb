@@ -15,8 +15,9 @@ package table
 
 import (
 	"bytes"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 type writer struct {

@@ -16,12 +16,13 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"testing"
+
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/desc"
 	"github.com/syndtr/goleveldb/leveldb/log"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"io"
-	"testing"
 )
 
 const ctValSize = 1000

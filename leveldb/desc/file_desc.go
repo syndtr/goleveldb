@@ -16,11 +16,12 @@ package desc
 import (
 	"bytes"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"os"
 	"path"
 	"sync"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
 type FileDesc struct {

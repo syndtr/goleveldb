@@ -15,6 +15,8 @@
 package table
 
 import (
+	"runtime"
+
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
@@ -22,7 +24,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"runtime"
 )
 
 // Reader represent a table reader.

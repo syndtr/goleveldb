@@ -15,11 +15,12 @@ package db
 
 import (
 	"container/list"
+	"sync"
+	"sync/atomic"
+
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"sync"
-	"sync/atomic"
 )
 
 type snapEntry struct {

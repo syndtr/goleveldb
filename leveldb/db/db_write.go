@@ -14,9 +14,10 @@
 package db
 
 import (
+	"time"
+
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"time"
 )
 
 func (d *DB) doWriteLog(b *Batch) error {

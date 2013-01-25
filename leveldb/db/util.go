@@ -15,10 +15,11 @@ package db
 
 import (
 	"encoding/binary"
-	"github.com/syndtr/goleveldb/leveldb/desc"
-	"github.com/syndtr/goleveldb/leveldb/log"
 	"io"
 	"sort"
+
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/log"
 )
 
 type readByteReader interface {

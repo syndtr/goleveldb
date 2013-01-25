@@ -15,10 +15,11 @@ package db
 
 import (
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/desc"
-	"github.com/syndtr/goleveldb/leveldb/log"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/log"
 )
 
 // logging

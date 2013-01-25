@@ -14,8 +14,9 @@
 package db
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/filter"
 	"io"
+
+	"github.com/syndtr/goleveldb/leveldb/filter"
 )
 
 type iFilter struct {

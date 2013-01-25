@@ -16,6 +16,10 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
+	"runtime"
+	"testing"
+
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/desc"
@@ -24,9 +28,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/table"
-	"math/rand"
-	"runtime"
-	"testing"
 )
 
 type stConstructor interface {

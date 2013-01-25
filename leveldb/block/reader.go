@@ -17,9 +17,10 @@ package block
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
+
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
-	"io"
 )
 
 // Reader represent a block reader.

@@ -14,9 +14,10 @@
 package db
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"sync"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
 type cStats struct {

@@ -17,10 +17,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/desc"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb/desc"
 )
 
 var errFileOpen = errors.New("file opened concurrently")

@@ -16,14 +16,15 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/desc"
-	"github.com/syndtr/goleveldb/leveldb/iter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 	"math/rand"
 	"os"
 	"path"
 	"runtime"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 func randomString(r *rand.Rand, n int) []byte {

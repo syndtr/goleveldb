@@ -15,11 +15,6 @@ package db
 
 import (
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb/cache"
-	"github.com/syndtr/goleveldb/leveldb/desc"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -27,6 +22,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 func tkey(i int) []byte {

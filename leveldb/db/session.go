@@ -14,12 +14,13 @@
 package db
 
 import (
+	"sync/atomic"
+	"unsafe"
+
 	"github.com/syndtr/goleveldb/leveldb/desc"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"sync/atomic"
-	"unsafe"
 )
 
 // session represent a persistent database session.

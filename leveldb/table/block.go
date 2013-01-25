@@ -14,12 +14,14 @@
 package table
 
 import (
-	"code.google.com/p/snappy-go/snappy"
 	"encoding/binary"
+	"io"
+
+	"code.google.com/p/snappy-go/snappy"
+
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"io"
 )
 
 // bInfo holds information about where and how long a block is

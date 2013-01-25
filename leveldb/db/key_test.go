@@ -15,8 +15,9 @@ package db
 
 import (
 	"bytes"
-	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
 
 var icmp = &iComparer{comparer.BytesComparer{}}

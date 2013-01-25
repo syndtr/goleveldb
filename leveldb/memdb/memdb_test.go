@@ -15,9 +15,10 @@ package memdb
 
 import (
 	"encoding/binary"
-	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"math/rand"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
 
 func TestPutRemove(t *testing.T) {

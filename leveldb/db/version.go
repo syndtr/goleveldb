@@ -14,12 +14,13 @@
 package db
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/iter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 	"runtime"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 var levelMaxSize [kNumLevels]float64

@@ -15,11 +15,12 @@
 package memdb
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
 const tMaxHeight = 12

@@ -15,10 +15,11 @@
 package opt
 
 import (
+	"sync"
+
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
-	"sync"
 )
 
 type OptionsFlag uint

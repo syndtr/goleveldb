@@ -16,6 +16,7 @@ package block
 import (
 	"bytes"
 	"encoding/binary"
+
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 )

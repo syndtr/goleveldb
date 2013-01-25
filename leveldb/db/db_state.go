@@ -14,10 +14,11 @@
 package db
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
 // Get latest sequence number.

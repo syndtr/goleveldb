@@ -14,8 +14,10 @@
 package table
 
 import (
-	"code.google.com/p/snappy-go/snappy"
 	"encoding/binary"
+
+	"code.google.com/p/snappy-go/snappy"
+
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/desc"

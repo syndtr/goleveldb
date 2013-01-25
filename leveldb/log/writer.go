@@ -16,8 +16,9 @@ package log
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/syndtr/goleveldb/leveldb/hash"
 	"io"
+
+	"github.com/syndtr/goleveldb/leveldb/hash"
 )
 
 const (
