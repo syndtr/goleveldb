@@ -301,7 +301,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 
 	memGet := func(m *memdb.DB) bool {
 		var k []byte
-		k, value, err = m.Get(ikey)
+		k, value, err = m.Find(ikey)
 		if err != nil {
 			return false
 		}

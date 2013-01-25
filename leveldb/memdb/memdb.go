@@ -24,21 +24,14 @@ import (
 
 const tMaxHeight = 12
 
-var (
-	mPtrSize  int
-	mNodeSize int
-)
-
-func init() {
-	node := new(mNode)
-	mPtrSize = int(unsafe.Sizeof(node))
-	mNodeSize = int(unsafe.Sizeof(*node))
-}
-
 type mNode struct {
 	key   []byte
 	value []byte
 	next  []unsafe.Pointer
+}
+
+func newNode(key, value []byte, height int32) *mNode {
+	return &mNode{key, value, make([]unsafe.Pointer, height)}
 }
 
 func (p *mNode) getNext(n int) *mNode {
@@ -63,7 +56,7 @@ type DB struct {
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int32
-	memSize   int64
+	kvSize    int64
 	n         int32
 
 	prev [tMaxHeight]*mNode
@@ -71,18 +64,27 @@ type DB struct {
 
 // New create new initalized in-memory key/value database.
 func New(cmp comparer.BasicComparer) *DB {
-	p := &DB{
+	return &DB{
 		cmp:       cmp,
 		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
 		maxHeight: 1,
+		head:      newNode(nil, nil, tMaxHeight),
 	}
-	p.head = p.newNode(nil, nil, tMaxHeight)
-	return p
 }
 
 // Put insert given key and value to the database. Need external synchronization.
+// Key and value will not be copied; and should not modified after this point.
 func (p *DB) Put(key []byte, value []byte) {
-	p.findGE_NB(key, true)
+	if m, exact := p.findGE_NB(key, true); exact {
+		h := int32(len(m.next))
+		x := newNode(key, value, h)
+		for i, n := range p.prev[:h] {
+			x.setNext_NB(i, m.getNext_NB(i))
+			n.setNext(i, x)
+		}
+		atomic.AddInt64(&p.kvSize, int64(len(value)-len(m.value)))
+		return
+	}
 
 	h := p.randHeight()
 	if h > p.maxHeight {
@@ -92,20 +94,20 @@ func (p *DB) Put(key []byte, value []byte) {
 		atomic.StoreInt32(&p.maxHeight, h)
 	}
 
-	x := p.newNode(key, value, h)
+	x := newNode(key, value, h)
 	for i, n := range p.prev[:h] {
 		x.setNext_NB(i, n.getNext_NB(i))
 		n.setNext(i, x)
 	}
 
-	atomic.AddInt64(&p.memSize, int64(mNodeSize+(mPtrSize*int(h))+len(key)+len(value)))
+	atomic.AddInt64(&p.kvSize, int64(len(key)+len(value)))
 	atomic.AddInt32(&p.n, 1)
 }
 
 // Remove remove given key from the database. Need external synchronization.
 func (p *DB) Remove(key []byte) {
-	x := p.findGE_NB(key, true)
-	if x == nil || x == p.head || p.cmp.Compare(x.key, key) != 0 {
+	x, exact := p.findGE_NB(key, true)
+	if !exact {
 		return
 	}
 
@@ -114,27 +116,30 @@ func (p *DB) Remove(key []byte) {
 		n.setNext(i, n.getNext_NB(i).getNext_NB(i))
 	}
 
-	atomic.AddInt64(&p.memSize, -int64(mNodeSize+(mPtrSize*h)+len(x.key)+len(x.value)))
+	atomic.AddInt64(&p.kvSize, -int64(len(x.key)+len(x.value)))
 	atomic.AddInt32(&p.n, -1)
 }
 
 // Contains return true if given key are in database.
 func (p *DB) Contains(key []byte) bool {
-	x := p.findGE(key, false)
-	if x != nil && x != p.head && p.cmp.Compare(x.key, key) == 0 {
-		return true
-	}
-	return false
+	_, exact := p.findGE(key, false)
+	return exact
 }
 
-// Get return key/value equal or greater than given key.
-func (p *DB) Get(key []byte) (rkey, value []byte, err error) {
-	node := p.findGE(key, false)
-	if node == nil || node == p.head {
-		err = errors.ErrNotFound
-		return
+// Get return value for the given key.
+func (p *DB) Get(key []byte) (value []byte, err error) {
+	if x, exact := p.findGE(key, false); exact {
+		return x.value, nil
 	}
-	return node.key, node.value, nil
+	return nil, errors.ErrNotFound
+}
+
+// Find return key/value equal or greater than given key.
+func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
+	if x, _ := p.findGE(key, false); x != nil {
+		return x.key, x.value, nil
+	}
+	return nil, nil, errors.ErrNotFound
 }
 
 // NewIterator create a new iterator over the database content.
@@ -142,9 +147,9 @@ func (p *DB) NewIterator() *Iterator {
 	return &Iterator{p: p}
 }
 
-// Size return approximate size of memory used by the database.
+// Size return sum of key/value size.
 func (p *DB) Size() int {
-	return int(atomic.LoadInt64(&p.memSize))
+	return int(atomic.LoadInt64(&p.kvSize))
 }
 
 // Len return the number of entries in the database.
@@ -152,62 +157,73 @@ func (p *DB) Len() int {
 	return int(atomic.LoadInt32(&p.n))
 }
 
-func (p *DB) newNode(key, value []byte, height int32) *mNode {
-	return &mNode{key, value, make([]unsafe.Pointer, height)}
-}
-
-func (p *DB) findGE(key []byte, prev bool) *mNode {
+func (p *DB) findGE(key []byte, prev bool) (*mNode, bool) {
 	x := p.head
-	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
+	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
-		next := x.getNext(n)
-		if next != nil && p.cmp.Compare(next.key, key) < 0 {
+		next := x.getNext(h)
+		cmp := 1
+		if next != nil {
+			cmp = p.cmp.Compare(next.key, key)
+		}
+		if cmp < 0 {
 			// Keep searching in this list
 			x = next
 		} else {
 			if prev {
-				p.prev[n] = x
+				p.prev[h] = x
+			} else if cmp == 0 {
+				return next, true
 			}
-			if n == 0 {
-				return next
+			if h == 0 {
+				return next, cmp == 0
 			}
-			n--
+			h--
 		}
 	}
-	return nil
+	return nil, false
 }
 
-func (p *DB) findGE_NB(key []byte, prev bool) *mNode {
+func (p *DB) findGE_NB(key []byte, prev bool) (*mNode, bool) {
 	x := p.head
-	n := int(p.maxHeight) - 1
+	h := int(p.maxHeight) - 1
 	for {
-		next := x.getNext_NB(n)
-		if next != nil && p.cmp.Compare(next.key, key) < 0 {
+		next := x.getNext_NB(h)
+		cmp := 1
+		if next != nil {
+			cmp = p.cmp.Compare(next.key, key)
+		}
+		if cmp < 0 {
 			// Keep searching in this list
 			x = next
 		} else {
 			if prev {
-				p.prev[n] = x
+				p.prev[h] = x
+			} else if cmp == 0 {
+				return next, true
 			}
-			if n == 0 {
-				return next
+			if h == 0 {
+				return next, cmp == 0
 			}
-			n--
+			h--
 		}
 	}
-	return nil
+	return nil, false
 }
 
 func (p *DB) findLT(key []byte) *mNode {
 	x := p.head
-	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
+	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
-		next := x.getNext(n)
+		next := x.getNext(h)
 		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
-			if n == 0 {
+			if h == 0 {
+				if x == p.head {
+					return nil
+				}
 				return x
 			}
-			n--
+			h--
 		} else {
 			x = next
 		}
@@ -217,14 +233,17 @@ func (p *DB) findLT(key []byte) *mNode {
 
 func (p *DB) findLast() *mNode {
 	x := p.head
-	n := int(atomic.LoadInt32(&p.maxHeight)) - 1
+	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
 	for {
-		next := x.getNext(n)
+		next := x.getNext(h)
 		if next == nil {
-			if n == 0 {
+			if h == 0 {
+				if x == p.head {
+					return nil
+				}
 				return x
 			}
-			n--
+			h--
 		} else {
 			x = next
 		}
@@ -248,7 +267,7 @@ type Iterator struct {
 }
 
 func (i *Iterator) Valid() bool {
-	return i.node != nil && i.node != i.p.head
+	return i.node != nil
 }
 
 func (i *Iterator) First() bool {
@@ -262,7 +281,7 @@ func (i *Iterator) Last() bool {
 }
 
 func (i *Iterator) Seek(key []byte) (r bool) {
-	i.node = i.p.findGE(key, false)
+	i.node, _ = i.p.findGE(key, false)
 	return i.Valid()
 }
 
@@ -286,9 +305,6 @@ func (i *Iterator) Prev() bool {
 		return false
 	}
 	i.node = i.p.findLT(i.node.key)
-	if i.node == i.p.head {
-		i.node = nil
-	}
 	return i.Valid()
 }
 

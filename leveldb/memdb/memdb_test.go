@@ -41,30 +41,70 @@ func TestPutRemove(t *testing.T) {
 		}
 	}
 
+	assertSize := func(want int) {
+		got := p.Size()
+		if got != want {
+			t.Errorf("invalid size, want=%d got=%d", want, got)
+		}
+	}
+
+	assertFind := func(key string, want_found bool, want_key string) {
+		rkey, _, err := p.Find([]byte(key))
+		if err == nil {
+			if !want_found {
+				t.Errorf("found key: %q", string(rkey))
+			} else if want_key != string(rkey) {
+				t.Errorf("invalid key, want=%q got=%q", want_key, string(rkey))
+			}
+		} else if want_found {
+			t.Errorf("key %q not found", key)
+		}
+	}
+
 	assertLen(0)
+	assertSize(0)
+	assertExist("", false)
+	assertFind("", false, "")
 	p.Put([]byte("foo"), nil)
 	assertLen(1)
+	assertSize(3)
 	assertExist("foo", true)
 	assertExist("bar", false)
-	p.Put([]byte("bar"), nil)
+	assertFind("foo", true, "foo")
+	assertFind("bar", true, "foo")
+	p.Put([]byte("bar"), []byte("xx"))
 	assertLen(2)
+	assertSize(8)
 	assertExist("bar", true)
+	p.Put([]byte("bar"), []byte("xxx"))
+	assertLen(2)
+	assertSize(9)
+	assertExist("bar", true)
+	p.Put([]byte("bar"), []byte(""))
+	assertSize(6)
 	p.Remove([]byte("foo"))
 	assertLen(1)
 	assertExist("foo", false)
 	p.Remove([]byte("foo"))
+	assertLen(1)
+	assertSize(3)
 	assertExist("bar", true)
+	assertFind("zz", false, "")
 	p.Put([]byte("zz"), nil)
 	assertLen(2)
+	assertSize(5)
 	assertExist("zz", true)
 	p.Remove([]byte("bar"))
 	assertExist("bar", false)
+	assertFind("bar", true, "zz")
 	assertExist("zz", true)
 	p.Remove([]byte("bar"))
 	assertExist("zz", true)
 	p.Remove([]byte("zz"))
 	assertExist("zz", false)
+	assertFind("zz", false, "")
 	assertLen(0)
+	assertSize(0)
 }
 
 func BenchmarkPut(b *testing.B) {
