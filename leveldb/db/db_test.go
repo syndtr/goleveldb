@@ -15,11 +15,6 @@ package db
 
 import (
 	"fmt"
-	"leveldb/cache"
-	"leveldb/desc"
-	"leveldb/errors"
-	"leveldb/filter"
-	"leveldb/opt"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -27,6 +22,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"leveldb/cache"
+	"leveldb/desc"
+	"leveldb/errors"
+	"leveldb/filter"
+	"leveldb/opt"
 )
 
 func tkey(i int) []byte {

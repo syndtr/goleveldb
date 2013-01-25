@@ -15,8 +15,9 @@ package db
 
 import (
 	"bytes"
-	"leveldb/comparer"
 	"testing"
+
+	"leveldb/comparer"
 )
 
 var icmp = &iComparer{comparer.BytesComparer{}}

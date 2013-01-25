@@ -16,6 +16,10 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
+	"runtime"
+	"testing"
+
 	"leveldb/block"
 	"leveldb/comparer"
 	"leveldb/desc"
@@ -24,9 +28,6 @@ import (
 	"leveldb/memdb"
 	"leveldb/opt"
 	"leveldb/table"
-	"math/rand"
-	"runtime"
-	"testing"
 )
 
 type stConstructor interface {

@@ -15,6 +15,8 @@
 package table
 
 import (
+	"runtime"
+
 	"leveldb/block"
 	"leveldb/cache"
 	"leveldb/comparer"
@@ -22,7 +24,6 @@ import (
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
-	"runtime"
 )
 
 // Reader represent a table reader.

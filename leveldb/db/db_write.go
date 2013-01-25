@@ -14,9 +14,10 @@
 package db
 
 import (
+	"time"
+
 	"leveldb/memdb"
 	"leveldb/opt"
-	"time"
 )
 
 func (d *DB) doWriteLog(b *Batch) error {

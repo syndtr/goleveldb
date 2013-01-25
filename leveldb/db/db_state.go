@@ -14,10 +14,11 @@
 package db
 
 import (
-	"leveldb/errors"
-	"leveldb/memdb"
 	"sync/atomic"
 	"unsafe"
+
+	"leveldb/errors"
+	"leveldb/memdb"
 )
 
 // Get latest sequence number.

@@ -15,9 +15,10 @@ package memdb
 
 import (
 	"encoding/binary"
-	"leveldb/comparer"
 	"math/rand"
 	"testing"
+
+	"leveldb/comparer"
 )
 
 func TestPutRemove(t *testing.T) {

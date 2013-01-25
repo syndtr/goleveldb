@@ -17,11 +17,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"testing"
+
 	"leveldb/cache"
 	"leveldb/desc"
 	"leveldb/log"
 	"leveldb/opt"
-	"testing"
 )
 
 const ctValSize = 1000

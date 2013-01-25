@@ -15,6 +15,7 @@ package filter
 
 import (
 	"io"
+
 	"leveldb/hash"
 )
 

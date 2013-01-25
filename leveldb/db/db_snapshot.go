@@ -15,11 +15,12 @@ package db
 
 import (
 	"container/list"
+	"sync"
+	"sync/atomic"
+
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
-	"sync"
-	"sync/atomic"
 )
 
 type snapEntry struct {

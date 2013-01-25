@@ -14,12 +14,13 @@
 package db
 
 import (
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/opt"
 	"runtime"
 	"sync/atomic"
 	"unsafe"
+
+	"leveldb/errors"
+	"leveldb/iter"
+	"leveldb/opt"
 )
 
 var levelMaxSize [kNumLevels]float64

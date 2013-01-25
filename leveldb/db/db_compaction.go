@@ -14,9 +14,10 @@
 package db
 
 import (
-	"leveldb/memdb"
 	"sync"
 	"time"
+
+	"leveldb/memdb"
 )
 
 type cStats struct {

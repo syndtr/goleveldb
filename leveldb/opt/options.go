@@ -15,10 +15,11 @@
 package opt
 
 import (
+	"sync"
+
 	"leveldb/cache"
 	"leveldb/comparer"
 	"leveldb/filter"
-	"sync"
 )
 
 type OptionsFlag uint

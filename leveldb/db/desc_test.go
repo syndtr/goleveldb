@@ -17,10 +17,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"leveldb/desc"
 	"os"
 	"sync"
 	"time"
+
+	"leveldb/desc"
 )
 
 var errFileOpen = errors.New("file opened concurrently")

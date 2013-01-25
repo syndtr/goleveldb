@@ -15,11 +15,12 @@
 package memdb
 
 import (
-	"leveldb/comparer"
-	"leveldb/errors"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
+
+	"leveldb/comparer"
+	"leveldb/errors"
 )
 
 const tMaxHeight = 12

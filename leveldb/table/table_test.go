@@ -15,8 +15,9 @@ package table
 
 import (
 	"bytes"
-	"leveldb/opt"
 	"testing"
+
+	"leveldb/opt"
 )
 
 type writer struct {

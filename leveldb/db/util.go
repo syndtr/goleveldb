@@ -16,9 +16,10 @@ package db
 import (
 	"encoding/binary"
 	"io"
+	"sort"
+
 	"leveldb/desc"
 	"leveldb/log"
-	"sort"
 )
 
 type readByteReader interface {

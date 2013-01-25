@@ -15,12 +15,14 @@ package table
 
 import (
 	"encoding/binary"
+
+	"snappy"
+
 	"leveldb/block"
 	"leveldb/comparer"
 	"leveldb/desc"
 	"leveldb/hash"
 	"leveldb/opt"
-	"snappy"
 )
 
 // Writer represent a table writer.

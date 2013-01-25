@@ -14,15 +14,16 @@
 package db
 
 import (
+	"runtime"
+	"sort"
+	"sync/atomic"
+
 	"leveldb/cache"
 	"leveldb/comparer"
 	"leveldb/desc"
 	"leveldb/iter"
 	"leveldb/opt"
 	"leveldb/table"
-	"runtime"
-	"sort"
-	"sync/atomic"
 )
 
 // table file

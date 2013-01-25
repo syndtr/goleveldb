@@ -16,11 +16,12 @@ package desc
 import (
 	"bytes"
 	"fmt"
-	"leveldb/errors"
 	"os"
 	"path"
 	"sync"
 	"time"
+
+	"leveldb/errors"
 )
 
 type FileDesc struct {

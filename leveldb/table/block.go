@@ -16,10 +16,12 @@ package table
 import (
 	"encoding/binary"
 	"io"
+
+	"snappy"
+
 	"leveldb/errors"
 	"leveldb/hash"
 	"leveldb/opt"
-	"snappy"
 )
 
 // bInfo holds information about where and how long a block is

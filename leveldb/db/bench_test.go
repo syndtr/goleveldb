@@ -16,14 +16,15 @@ package db
 import (
 	"bytes"
 	"fmt"
-	"leveldb/desc"
-	"leveldb/iter"
-	"leveldb/opt"
 	"math/rand"
 	"os"
 	"path"
 	"runtime"
 	"testing"
+
+	"leveldb/desc"
+	"leveldb/iter"
+	"leveldb/opt"
 )
 
 func randomString(r *rand.Rand, n int) []byte {

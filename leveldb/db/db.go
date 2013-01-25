@@ -16,16 +16,17 @@ package db
 
 import (
 	"fmt"
-	"leveldb/desc"
-	"leveldb/errors"
-	"leveldb/iter"
-	"leveldb/memdb"
-	"leveldb/opt"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
+
+	"leveldb/desc"
+	"leveldb/errors"
+	"leveldb/iter"
+	"leveldb/memdb"
+	"leveldb/opt"
 )
 
 // DB represent a database session.

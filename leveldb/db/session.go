@@ -14,12 +14,13 @@
 package db
 
 import (
+	"sync/atomic"
+	"unsafe"
+
 	"leveldb/desc"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
-	"sync/atomic"
-	"unsafe"
 )
 
 // session represent a persistent database session.

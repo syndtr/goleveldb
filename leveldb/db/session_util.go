@@ -15,10 +15,11 @@ package db
 
 import (
 	"fmt"
-	"leveldb/desc"
-	"leveldb/log"
 	"sync/atomic"
 	"unsafe"
+
+	"leveldb/desc"
+	"leveldb/log"
 )
 
 // logging
