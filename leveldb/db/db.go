@@ -534,7 +534,7 @@ drain:
 	// wait for the WaitGroup
 	d.ewg.Wait()
 
-	d.s.tops.purgeCache()
+	d.s.tops.zapCache()
 	cache := d.s.o.GetBlockCache()
 	if cache != nil {
 		cache.Purge(nil)

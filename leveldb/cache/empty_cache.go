@@ -25,6 +25,8 @@ func (EmptyCache) Purge(fin func()) {
 	}
 }
 
+func (EmptyCache) Zap() {}
+
 type emptyCacheNs struct{}
 
 func (emptyCacheNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
@@ -48,6 +50,8 @@ func (emptyCacheNs) Purge(fin func()) {
 		fin()
 	}
 }
+
+func (emptyCacheNs) Zap() {}
 
 type emptyCacheObj struct {
 	value interface{}

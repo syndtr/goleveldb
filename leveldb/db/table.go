@@ -397,8 +397,8 @@ func (t *tOps) remove(f *tFile) {
 	})
 }
 
-func (t *tOps) purgeCache() {
-	t.cache.Purge(nil)
+func (t *tOps) zapCache() {
+	t.cache.Zap()
 }
 
 func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {

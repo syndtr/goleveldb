@@ -71,6 +71,23 @@ func (c *LRUCache) Purge(fin func()) {
 	c.Unlock()
 }
 
+func (c *LRUCache) Zap() {
+	c.Lock()
+	for _, ns := range c.table {
+		for _, n := range ns.table {
+			n.zapped = true
+			n.rNext = nil
+			n.rPrev = nil
+			n.execFin()
+		}
+		ns.table = make(map[uint64]*lruNode)
+	}
+	c.recent.rNext = &c.recent
+	c.recent.rPrev = &c.recent
+	c.size = 0
+	c.Unlock()
+}
+
 func (c *LRUCache) evict() {
 	top := &c.recent
 	for n := c.recent.rPrev; c.size > c.capacity && n != top; {
@@ -174,6 +191,21 @@ func (p *lruNs) Purge(fin func()) {
 	lru.Unlock()
 }
 
+func (p *lruNs) Zap() {
+	lru := p.lru
+
+	lru.Lock()
+	for _, n := range p.table {
+		n.zapped = true
+		if n.rRemove() {
+			lru.size -= n.charge
+		}
+		n.execFin()
+	}
+	p.table = make(map[uint64]*lruNode)
+	lru.Unlock()
+}
+
 type lruNode struct {
 	ns *lruNs
 
@@ -184,6 +216,7 @@ type lruNode struct {
 	charge  int
 	ref     int32
 	deleted bool
+	zapped  bool
 	setfin  func()
 	delfin  func()
 }
@@ -196,23 +229,21 @@ func (n *lruNode) rInsert(at *lruNode) {
 	x.rPrev = n
 }
 
-func (n *lruNode) rRemove() {
+func (n *lruNode) rRemove() bool {
 	// only remove if not already removed
 	if n.rPrev == nil {
-		return
+		return false
 	}
 
 	n.rPrev.rNext = n.rNext
 	n.rNext.rPrev = n.rPrev
 	n.rPrev = nil
 	n.rNext = nil
+
+	return true
 }
 
-func (n *lruNode) doEvict() {
-	// remove elem
-	delete(n.ns.table, n.key)
-
-	// execute finalizer
+func (n *lruNode) execFin() {
 	if n.setfin != nil {
 		n.setfin()
 		n.setfin = nil
@@ -221,6 +252,18 @@ func (n *lruNode) doEvict() {
 		n.delfin()
 		n.delfin = nil
 	}
+}
+
+func (n *lruNode) doEvict() {
+	if n.zapped {
+		return
+	}
+
+	// remove elem
+	delete(n.ns.table, n.key)
+
+	// execute finalizer
+	n.execFin()
 
 	n.value = nil
 }
