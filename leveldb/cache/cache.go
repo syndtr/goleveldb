@@ -25,7 +25,11 @@ type Cache interface {
 	// Delete all caches. Note that the caches will be kept around until all
 	// of its existing handles have been released and the finalizer will
 	// finally be executed.
-	Purge(finalizer func())
+	Purge(fin func())
+
+	// Zap all caches. Unlike Purge, Zap will delete all cache and execute
+	// finalizer immediately, even if its existing handles not yet released.
+	Zap()
 }
 
 type Namespace interface {
@@ -45,6 +49,10 @@ type Namespace interface {
 	// of its existing handles have been released and the finalizer will
 	// finally be executed.
 	Purge(fin func())
+
+	// Zap all caches. Unlike Purge, Zap will delete all cache and execute
+	// finalizer immediately, even if its existing handles not yet released.
+	Zap()
 }
 
 type Object interface {

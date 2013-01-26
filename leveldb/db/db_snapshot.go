@@ -88,6 +88,20 @@ func (d *DB) newSnapshot() *Snapshot {
 	return &Snapshot{d: d, entry: d.snaps.acquire(d.getSeq())}
 }
 
+func (p *Snapshot) isOk() bool {
+	if atomic.LoadUint32(&p.released) != 0 {
+		return false
+	}
+	return !p.d.isClosed()
+}
+
+func (p *Snapshot) ok() error {
+	if atomic.LoadUint32(&p.released) != 0 {
+		return errors.ErrSnapshotReleased
+	}
+	return p.d.rok()
+}
+
 // Get get value for given key of this snapshot of database.
 func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	if atomic.LoadUint32(&p.released) != 0 {
@@ -112,13 +126,17 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
 	}
 
 	d := p.d
-	s := d.s
 
 	if err := d.rok(); err != nil {
 		return &iter.EmptyIterator{err}
 	}
 
-	return newDBIter(p.entry.seq, d.newRawIterator(ro), s.cmp.cmp)
+	return &dbIter{
+		snap: p,
+		cmp:  d.s.cmp.cmp,
+		it:   d.newRawIterator(ro),
+		seq:  p.entry.seq,
+	}
 }
 
 // Release release the snapshot. The caller must not use the snapshot

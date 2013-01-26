@@ -107,7 +107,7 @@ func (h *dbHarness) openAssert(want bool) {
 		if want {
 			h.t.Error("Open: assert: got error: ", err)
 		} else {
-			h.t.Log("Open: assert: got error: ", err)
+			h.t.Log("Open: assert: got error (expected): ", err)
 		}
 	} else {
 		if !want {
@@ -308,7 +308,7 @@ func (h *dbHarness) compactMem() {
 	}
 }
 
-func (h *dbHarness) compactRangeAt(level int, min, max string) {
+func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) {
 	t := h.t
 	db := h.db
 
@@ -326,8 +326,18 @@ func (h *dbHarness) compactRangeAt(level int, min, max string) {
 
 	err := db.wok()
 	if err != nil {
-		t.Error("CompactRangeAt: got error: ", err)
+		if wanterr {
+			t.Log("CompactRangeAt: got error (expected): ", err)
+		} else {
+			t.Error("CompactRangeAt: got error: ", err)
+		}
+	} else if wanterr {
+		t.Error("CompactRangeAt: expect error")
 	}
+}
+
+func (h *dbHarness) compactRangeAt(level int, min, max string) {
+	h.compactRangeAtErr(level, min, max, false)
 }
 
 func (h *dbHarness) compactRange(min, max string) {
@@ -1185,6 +1195,122 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.getKeyVal("(->)(c->cv)")
 
 	h.close()
+}
+
+func TestDb_ManifestWriteError(t *testing.T) {
+	for i := 0; i < 2; i++ {
+		h := newDbHarness(t)
+
+		h.put("foo", "bar")
+		h.getVal("foo", "bar")
+
+		// Mem compaction (will succeed)
+		h.compactMem()
+		h.getVal("foo", "bar")
+		if n := h.db.s.version().tLen(kMaxMemCompactLevel); n != 1 {
+			t.Errorf("invalid total tables, want=1 got=%d", n)
+		}
+
+		if i == 0 {
+			h.desc.SetWriteErr(desc.TypeManifest)
+		} else {
+			h.desc.SetSyncErr(desc.TypeManifest)
+		}
+
+		// Merging compaction (will fail)
+		h.compactRangeAtErr(kMaxMemCompactLevel, "", "", true)
+
+		h.db.Close()
+		h.desc.SetWriteErr(0)
+		h.desc.SetSyncErr(0)
+
+		// Should not lose data
+		h.openDB()
+		h.getVal("foo", "bar")
+
+		h.close()
+	}
+}
+
+func assertErr(t *testing.T, err error, wanterr bool) {
+	if err != nil {
+		if wanterr {
+			t.Log("AssertErr: got error (expected): ", err)
+		} else {
+			t.Error("AssertErr: got error: ", err)
+		}
+	} else if wanterr {
+		t.Error("AssertErr: expect error")
+	}
+}
+
+func TestDb_ClosedIsClosed(t *testing.T) {
+	h := newDbHarness(t)
+	db := h.db
+
+	h.put("k", "v")
+	h.getVal("k", "v")
+
+	iter := db.NewIterator(h.ro)
+	iter.Seek([]byte("k"))
+	testKeyVal(t, iter, "k->v")
+
+	snap, err := db.GetSnapshot()
+	if err != nil {
+		t.Fatal("GetSnapshot: got error: ", err)
+	}
+
+	h.getValr(snap, "k", "v")
+
+	iter2 := snap.NewIterator(h.ro)
+	iter2.Seek([]byte("k"))
+	testKeyVal(t, iter2, "k->v")
+
+	h.put("foo", "v2")
+	h.delete("foo")
+
+	// closing DB
+	h.closeDB()
+
+	assertErr(t, db.Put([]byte("x"), []byte("y"), h.wo), true)
+	_, err = db.Get([]byte("k"), h.ro)
+	assertErr(t, err, true)
+
+	if iter.Valid() {
+		t.Errorf("iter.Valid should false")
+	}
+	assertErr(t, iter.Error(), true)
+	testKeyVal(t, iter, "->")
+	if iter.Seek([]byte("k")) {
+		t.Errorf("iter.Seek should false")
+	}
+	assertErr(t, iter.Error(), true)
+
+	assertErr(t, iter2.Error(), true)
+
+	_, err = snap.Get([]byte("k"), h.ro)
+	assertErr(t, err, true)
+
+	_, err = db.GetSnapshot()
+	assertErr(t, err, true)
+
+	iter3 := db.NewIterator(h.ro)
+	assertErr(t, iter3.Error(), true)
+
+	iter3 = snap.NewIterator(h.ro)
+	assertErr(t, iter3.Error(), true)
+
+	assertErr(t, db.Delete([]byte("k"), h.wo), true)
+
+	_, err = db.GetProperty("leveldb.stats")
+	assertErr(t, err, true)
+
+	_, err = db.GetApproximateSizes([]Range{{[]byte("a"), []byte("z")}})
+	assertErr(t, err, true)
+
+	assertErr(t, db.CompactRange(Range{}), true)
+
+	assertErr(t, db.Close(), true)
 }
 
 type numberComparer struct{}

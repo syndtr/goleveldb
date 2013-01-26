@@ -46,6 +46,8 @@ type testDesc struct {
 
 	emuCh        chan struct{}
 	emuDelaySync desc.FileType
+	emuWriteErr  desc.FileType
+	emuSyncErr   desc.FileType
 	readCnt      uint64
 	readCntEn    desc.FileType
 	readAtCnt    uint64
@@ -81,6 +83,18 @@ func (d *testDesc) ReleaseSync(t desc.FileType) {
 	d.Lock()
 	d.emuDelaySync &= ^t
 	d.wake()
+	d.Unlock()
+}
+
+func (d *testDesc) SetWriteErr(t desc.FileType) {
+	d.Lock()
+	d.emuWriteErr = t
+	d.Unlock()
+}
+
+func (d *testDesc) SetSyncErr(t desc.FileType) {
+	d.Lock()
+	d.emuSyncErr = t
 	d.Unlock()
 }
 
@@ -209,6 +223,13 @@ type testWriter struct {
 }
 
 func (w *testWriter) Write(b []byte) (n int, err error) {
+	p := w.p
+	desc := p.desc
+	desc.Lock()
+	defer desc.Unlock()
+	if desc.emuWriteErr&p.t != 0 {
+		return 0, errors.New("emulated write error")
+	}
 	return w.p.buf.Write(b)
 }
 
@@ -216,12 +237,15 @@ func (w *testWriter) Sync() error {
 	p := w.p
 	desc := p.desc
 	desc.Lock()
+	defer desc.Unlock()
 	for desc.emuDelaySync&p.t != 0 {
 		desc.Unlock()
 		desc.emuCh <- struct{}{}
 		desc.Lock()
 	}
-	desc.Unlock()
+	if desc.emuSyncErr&p.t != 0 {
+		return errors.New("emulated sync error")
+	}
 	return nil
 }
 
