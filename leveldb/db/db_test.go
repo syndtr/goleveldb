@@ -1232,6 +1232,87 @@ func TestDb_ManifestWriteError(t *testing.T) {
 	}
 }
 
+func assertErr(t *testing.T, err error, wanterr bool) {
+	if err != nil {
+		if wanterr {
+			t.Log("AssertErr: got error (expected): ", err)
+		} else {
+			t.Error("AssertErr: got error: ", err)
+		}
+	} else if wanterr {
+		t.Error("AssertErr: expect error")
+	}
+}
+
+func TestDb_ClosedIsClosed(t *testing.T) {
+	h := newDbHarness(t)
+	db := h.db
+
+	h.put("k", "v")
+	h.getVal("k", "v")
+
+	iter := db.NewIterator(h.ro)
+	iter.Seek([]byte("k"))
+	testKeyVal(t, iter, "k->v")
+
+	snap, err := db.GetSnapshot()
+	if err != nil {
+		t.Fatal("GetSnapshot: got error: ", err)
+	}
+
+	h.getValr(snap, "k", "v")
+
+	iter2 := snap.NewIterator(h.ro)
+	iter2.Seek([]byte("k"))
+	testKeyVal(t, iter2, "k->v")
+
+	h.put("foo", "v2")
+	h.delete("foo")
+
+	// closing DB
+	h.closeDB()
+
+	assertErr(t, db.Put([]byte("x"), []byte("y"), h.wo), true)
+	_, err = db.Get([]byte("k"), h.ro)
+	assertErr(t, err, true)
+
+	if iter.Valid() {
+		t.Errorf("iter.Valid should false")
+	}
+	assertErr(t, iter.Error(), true)
+	testKeyVal(t, iter, "->")
+	if iter.Seek([]byte("k")) {
+		t.Errorf("iter.Seek should false")
+	}
+	assertErr(t, iter.Error(), true)
+
+	assertErr(t, iter2.Error(), true)
+
+	_, err = snap.Get([]byte("k"), h.ro)
+	assertErr(t, err, true)
+
+	_, err = db.GetSnapshot()
+	assertErr(t, err, true)
+
+	iter3 := db.NewIterator(h.ro)
+	assertErr(t, iter3.Error(), true)
+
+	iter3 = snap.NewIterator(h.ro)
+	assertErr(t, iter3.Error(), true)
+
+	assertErr(t, db.Delete([]byte("k"), h.wo), true)
+
+	_, err = db.GetProperty("leveldb.stats")
+	assertErr(t, err, true)
+
+	_, err = db.GetApproximateSizes([]Range{{[]byte("a"), []byte("z")}})
+	assertErr(t, err, true)
+
+	assertErr(t, db.CompactRange(Range{}), true)
+
+	assertErr(t, db.Close(), true)
+}
+
 type numberComparer struct{}
 
 func (numberComparer) num(x []byte) (n int) {

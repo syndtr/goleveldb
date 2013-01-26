@@ -352,6 +352,10 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 // database. The result of NewIterator() is initially invalid (caller must
 // call Next or one of Seek method, ie First, Last or Seek).
 func (d *DB) NewIterator(ro *opt.ReadOptions) iter.Iterator {
+	if err := d.rok(); err != nil {
+		return &iter.EmptyIterator{err}
+	}
+
 	p := d.newSnapshot()
 	i := p.NewIterator(ro)
 	x, ok := i.(*dbIter)
