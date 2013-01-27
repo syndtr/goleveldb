@@ -1325,14 +1325,7 @@ func (numberComparer) Name() string {
 }
 
 func (p numberComparer) Compare(a, b []byte) int {
-	// 	return p.num(a) - p.num(b)
-	x, y := p.num(a), p.num(b)
-	if x < y {
-		return -1
-	} else if x > y {
-		return 1
-	}
-	return 0
+	return p.num(a) - p.num(b)
 }
 
 func (numberComparer) Separator(a, b []byte) []byte {
@@ -1345,9 +1338,9 @@ func (numberComparer) Successor(b []byte) []byte {
 
 func TestDb_CustomComparer(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		Flag:     opt.OFCreateIfMissing,
-		Comparer: numberComparer{},
-		// 		WriteBuffer: 50,
+		Flag:        opt.OFCreateIfMissing,
+		Comparer:    numberComparer{},
+		WriteBuffer: 1000,
 	})
 
 	h.put("[10]", "ten")
