@@ -50,6 +50,7 @@ func (c *LRUCache) GetNamespace(id uint64) Namespace {
 
 	p := &lruNs{
 		lru:   c,
+		id:    id,
 		table: make(map[uint64]*lruNode),
 	}
 	c.table[id] = p
@@ -75,16 +76,17 @@ func (c *LRUCache) Zap() {
 	c.Lock()
 	for _, ns := range c.table {
 		for _, n := range ns.table {
-			n.zapped = true
 			n.rNext = nil
 			n.rPrev = nil
 			n.execFin()
 		}
-		ns.table = make(map[uint64]*lruNode)
+		ns.zapped = true
+		ns.table = nil
 	}
 	c.recent.rNext = &c.recent
 	c.recent.rPrev = &c.recent
 	c.size = 0
+	c.table = make(map[uint64]*lruNs)
 	c.Unlock()
 }
 
@@ -99,13 +101,26 @@ func (c *LRUCache) evict() {
 }
 
 type lruNs struct {
-	lru   *LRUCache
-	table map[uint64]*lruNode
+	lru    *LRUCache
+	id     uint64
+	table  map[uint64]*lruNode
+	zapped bool
 }
 
 func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 	lru := p.lru
 	lru.Lock()
+
+	if p.zapped {
+		lru.Unlock()
+		if setf == nil {
+			return
+		}
+		if ok, value, _, fin := setf(); ok {
+			return &emptyCacheObj{value, fin}, true
+		}
+		return
+	}
 
 	n, ok := p.table[key]
 	if ok {
@@ -151,6 +166,14 @@ func (p *lruNs) Delete(key uint64, fin func()) bool {
 	lru := p.lru
 	lru.Lock()
 
+	if p.zapped {
+		lru.Unlock()
+		if fin != nil {
+			fin()
+		}
+		return false
+	}
+
 	n, ok := p.table[key]
 	if !ok {
 		lru.Unlock()
@@ -179,6 +202,10 @@ func (p *lruNs) Purge(fin func()) {
 	lru := p.lru
 
 	lru.Lock()
+	if p.zapped {
+		return
+	}
+
 	for _, n := range p.table {
 		if n.deleted {
 			continue
@@ -195,14 +222,19 @@ func (p *lruNs) Zap() {
 	lru := p.lru
 
 	lru.Lock()
+	if p.zapped {
+		return
+	}
+
 	for _, n := range p.table {
-		n.zapped = true
 		if n.rRemove() {
 			lru.size -= n.charge
 		}
 		n.execFin()
 	}
-	p.table = make(map[uint64]*lruNode)
+	p.zapped = true
+	p.table = nil
+	delete(lru.table, p.id)
 	lru.Unlock()
 }
 
@@ -216,7 +248,6 @@ type lruNode struct {
 	charge  int
 	ref     int32
 	deleted bool
-	zapped  bool
 	setfin  func()
 	delfin  func()
 }
@@ -255,7 +286,7 @@ func (n *lruNode) execFin() {
 }
 
 func (n *lruNode) doEvict() {
-	if n.zapped {
+	if n.ns.zapped {
 		return
 	}
 
