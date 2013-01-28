@@ -175,23 +175,30 @@ func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
 	return t.dataEnd
 }
 
+func (t *Reader) getBlock(bi *bInfo, ro opt.ReadOptionsGetter) (b *block.Reader, err error) {
+	buf, err := bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
+	if err != nil {
+		return
+	}
+	b, err = block.NewReader(buf, t.o.GetComparer())
+	return
+}
+
 func (t *Reader) getDataIter(bi *bInfo, ro opt.ReadOptionsGetter) (it *block.Iterator, cache cache.Object, err error) {
 	var b *block.Reader
 
 	if t.cache != nil {
-		cache, _ = t.cache.Get(bi.offset, func() (ok bool, value interface{}, charge int, fin func()) {
-			var buf []byte
-			buf, err = bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
-			if err != nil {
+		var ok bool
+		cache, ok = t.cache.Get(bi.offset, func() (ok bool, value interface{}, charge int, fin func()) {
+			if ro.HasFlag(opt.RFDontFillCache) {
 				return
 			}
-			b, err = block.NewReader(buf, t.o.GetComparer())
-			if err != nil {
-				return
+			b, err = t.getBlock(bi, ro)
+			if err == nil {
+				ok = true
+				value = b
+				charge = int(bi.size)
 			}
-			ok = true
-			value = b
-			charge = int(bi.size)
 			return
 		})
 
@@ -199,16 +206,16 @@ func (t *Reader) getDataIter(bi *bInfo, ro opt.ReadOptionsGetter) (it *block.Ite
 			return
 		}
 
-		if b == nil {
+		if !ok {
+			b, err = t.getBlock(bi, ro)
+			if err != nil {
+				return
+			}
+		} else if b == nil {
 			b = cache.Value().(*block.Reader)
 		}
 	} else {
-		var buf []byte
-		buf, err = bi.readAll(t.r, ro.HasFlag(opt.RFVerifyChecksums))
-		if err != nil {
-			return
-		}
-		b, err = block.NewReader(buf, t.o.GetComparer())
+		b, err = t.getBlock(bi, ro)
 		if err != nil {
 			return
 		}
