@@ -341,7 +341,9 @@ func (c *compaction) newIterator() iter.Iterator {
 	}
 	its := make([]iter.Iterator, 0, icap)
 
-	ro := &opt.ReadOptions{}
+	ro := &opt.ReadOptions{
+		Flag: opt.RFDontFillCache,
+	}
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {

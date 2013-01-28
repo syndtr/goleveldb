@@ -392,7 +392,7 @@ func (t *tOps) remove(f *tFile) {
 	t.cachens.Delete(num, func() {
 		f.file.Remove()
 		if ns != nil {
-			ns.Purge(nil)
+			ns.Zap()
 		}
 	})
 }

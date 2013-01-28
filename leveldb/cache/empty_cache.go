@@ -30,11 +30,12 @@ func (EmptyCache) Zap() {}
 type emptyCacheNs struct{}
 
 func (emptyCacheNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
-	ok, value, _, fin := setf()
-	if !ok {
+	if setf == nil {
 		return
 	}
-	obj = &emptyCacheObj{value, fin}
+	if ok, value, _, fin := setf(); ok {
+		return &emptyCacheObj{value, fin}, ok
+	}
 	return
 }
 

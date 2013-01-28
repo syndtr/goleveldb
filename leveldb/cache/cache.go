@@ -29,6 +29,8 @@ type Cache interface {
 
 	// Zap all caches. Unlike Purge, Zap will delete all cache and execute
 	// finalizer immediately, even if its existing handles not yet released.
+	// Zap also delete namespace from namespace table, in this case emptying
+	// namespace table.
 	Zap()
 }
 
@@ -52,6 +54,7 @@ type Namespace interface {
 
 	// Zap all caches. Unlike Purge, Zap will delete all cache and execute
 	// finalizer immediately, even if its existing handles not yet released.
+	// Zap also delete namespace from namespace table.
 	Zap()
 }
 
