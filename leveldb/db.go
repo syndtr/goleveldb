@@ -11,8 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-// Package db provide implementation of LevelDB database.
-package db
+package leveldb
 
 import (
 	"fmt"

@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package db
+package leveldb
 
 import (
 	"sync/atomic"
