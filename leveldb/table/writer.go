@@ -20,14 +20,14 @@ import (
 
 	"leveldb/block"
 	"leveldb/comparer"
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/hash"
 	"leveldb/opt"
 )
 
 // Writer represent a table writer.
 type Writer struct {
-	w   desc.Writer
+	w   descriptor.Writer
 	o   opt.OptionsGetter
 	cmp comparer.Comparer
 
@@ -44,7 +44,7 @@ type Writer struct {
 }
 
 // NewWriter create new initialized table writer.
-func NewWriter(w desc.Writer, o opt.OptionsGetter) *Writer {
+func NewWriter(w descriptor.Writer, o opt.OptionsGetter) *Writer {
 	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
 	// Creating blocks
 	t.data = block.NewWriter(o.GetBlockRestartInterval())

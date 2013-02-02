@@ -20,7 +20,7 @@ import (
 
 	"leveldb/cache"
 	"leveldb/comparer"
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/iter"
 	"leveldb/opt"
 	"leveldb/table"
@@ -28,7 +28,7 @@ import (
 
 // table file
 type tFile struct {
-	file     desc.File
+	file     descriptor.File
 	seekLeft int32
 	size     uint64
 	min, max iKey
@@ -48,7 +48,7 @@ func (t *tFile) incrSeek() int32 {
 	return atomic.AddInt32(&t.seekLeft, -1)
 }
 
-func newTFile(file desc.File, size uint64, min, max iKey) *tFile {
+func newTFile(file descriptor.File, size uint64, min, max iKey) *tFile {
 	f := &tFile{
 		file: file,
 		size: size,
@@ -405,7 +405,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 	num := f.file.Num()
 
 	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
-		var r desc.Reader
+		var r descriptor.Reader
 		r, err = f.file.Open()
 		if err != nil {
 			return
@@ -441,8 +441,8 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 type tWriter struct {
 	t *tOps
 
-	file desc.File
-	w    desc.Writer
+	file descriptor.File
+	w    descriptor.Writer
 	tw   *table.Writer
 
 	notFirst    bool

@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"testing"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/iter"
 	"leveldb/opt"
 )
@@ -73,7 +73,7 @@ var benchDB = path.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Getuid
 
 type dbBench struct {
 	b    *testing.B
-	desc desc.Desc
+	desc descriptor.Desc
 	db   *DB
 
 	o  *opt.Options
@@ -93,7 +93,7 @@ func openDBBench(b *testing.B) *dbBench {
 	}
 
 	p := &dbBench{b: b}
-	p.desc, err = desc.OpenFile(benchDB)
+	p.desc, err = descriptor.OpenFile(benchDB)
 	if err != nil {
 		b.Fatal("cannot open desc: ", err)
 	}

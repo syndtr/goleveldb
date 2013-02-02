@@ -15,7 +15,7 @@
 //
 // Create or open a database:
 //
-//	mydesc, err := desc.OpenFile("path/to/db")
+//	mydesc, err := descriptor.OpenFile("path/to/db")
 //	...
 //	mydb, err := db.Open(mydesc, &opt.Options{Flag: opt.OFCreateIfMissing})
 //	...

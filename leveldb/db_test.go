@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"leveldb/cache"
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/filter"
 	"leveldb/opt"
@@ -498,11 +498,11 @@ func TestDb_GetFromFrozen(t *testing.T) {
 	h.put("foo", "v1")
 	h.getVal("foo", "v1")
 
-	h.desc.DelaySync(desc.TypeTable)         // Block sync calls
+	h.desc.DelaySync(descriptor.TypeTable)   // Block sync calls
 	h.put("k1", strings.Repeat("x", 100000)) // Fill memtable
 	h.put("k2", strings.Repeat("y", 100000)) // Trigger compaction
 	h.getVal("foo", "v1")
-	h.desc.ReleaseSync(desc.TypeTable) // Release sync calls
+	h.desc.ReleaseSync(descriptor.TypeTable) // Release sync calls
 
 	h.reopenDB()
 	h.getVal("foo", "v1")
@@ -751,12 +751,12 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 	runAllOpts(t, func(h *dbHarness) {
 		h.o.WriteBuffer = 1000000
 
-		h.desc.DelaySync(desc.TypeTable)
+		h.desc.DelaySync(descriptor.TypeTable)
 		h.put("foo", "v1")
 		h.put("big1", strings.Repeat("x", 10000000))
 		h.put("big2", strings.Repeat("y", 1000))
 		h.put("bar", "v2")
-		h.desc.ReleaseSync(desc.TypeTable)
+		h.desc.ReleaseSync(descriptor.TypeTable)
 
 		h.reopenDB()
 		h.getVal("foo", "v1")
@@ -1212,9 +1212,9 @@ func TestDb_ManifestWriteError(t *testing.T) {
 		}
 
 		if i == 0 {
-			h.desc.SetWriteErr(desc.TypeManifest)
+			h.desc.SetWriteErr(descriptor.TypeManifest)
 		} else {
-			h.desc.SetSyncErr(desc.TypeManifest)
+			h.desc.SetSyncErr(descriptor.TypeManifest)
 		}
 
 		// Merging compaction (will fail)
@@ -1432,10 +1432,10 @@ func TestDb_BloomFilter(t *testing.T) {
 	h.compactMem()
 
 	// Prevent auto compactions triggered by seeks
-	h.desc.DelaySync(desc.TypeTable)
+	h.desc.DelaySync(descriptor.TypeTable)
 
 	// Lookup present keys. Should rarely read from small sstable.
-	h.desc.SetReadAtCounter(desc.TypeTable)
+	h.desc.SetReadAtCounter(descriptor.TypeTable)
 	for i := 0; i < n; i++ {
 		h.getVal(key(i), key(i))
 	}
@@ -1457,7 +1457,7 @@ func TestDb_BloomFilter(t *testing.T) {
 		t.Errorf("num of sstable I/O reads of missing keys was more than %d, got %d", max, cnt)
 	}
 
-	h.desc.ReleaseSync(desc.TypeTable)
+	h.desc.ReleaseSync(descriptor.TypeTable)
 	h.close()
 }
 

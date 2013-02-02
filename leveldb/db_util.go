@@ -14,7 +14,7 @@
 package leveldb
 
 import (
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/iter"
 	"leveldb/opt"
 )
@@ -57,18 +57,18 @@ func (d *DB) cleanFiles() {
 		}
 	}
 
-	for _, f := range s.getFiles(desc.TypeAll) {
+	for _, f := range s.getFiles(descriptor.TypeAll) {
 		keep := true
 		switch f.Type() {
-		case desc.TypeManifest:
+		case descriptor.TypeManifest:
 			keep = !s.manifest.closed() && f.Num() >= s.manifest.file.Num()
-		case desc.TypeLog:
+		case descriptor.TypeLog:
 			if d.flog != nil && !d.flog.closed() {
 				keep = f.Num() >= d.flog.file.Num()
 			} else {
 				keep = f.Num() >= d.log.file.Num()
 			}
-		case desc.TypeTable:
+		case descriptor.TypeTable:
 			_, keep = tables[f.Num()]
 		}
 

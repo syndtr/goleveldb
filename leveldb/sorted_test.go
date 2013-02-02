@@ -22,7 +22,7 @@ import (
 
 	"leveldb/block"
 	"leveldb/comparer"
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/filter"
 	"leveldb/iter"
 	"leveldb/memdb"
@@ -80,9 +80,9 @@ func (p *stConstructor_Block) customTest(h *stHarness) {}
 type stConstructor_Table struct {
 	t *testing.T
 
-	file desc.File
-	w    desc.Writer
-	r    desc.Reader
+	file descriptor.File
+	w    descriptor.Writer
+	r    descriptor.Reader
 	tw   *table.Writer
 	tr   *table.Reader
 }
@@ -90,7 +90,7 @@ type stConstructor_Table struct {
 func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 	p.t = t
 
-	p.file = newTestDesc(nil).GetFile(0, desc.TypeTable)
+	p.file = newTestDesc(nil).GetFile(0, descriptor.TypeTable)
 	p.w, _ = p.file.Create()
 
 	o := &opt.Options{

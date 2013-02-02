@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/opt"
@@ -25,7 +25,7 @@ import (
 
 // session represent a persistent database session.
 type session struct {
-	desc   desc.Desc
+	desc   descriptor.Desc
 	o      *iOptions
 	cmp    *iComparer
 	filter *iFilter
@@ -40,7 +40,7 @@ type session struct {
 	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
-func newSession(d desc.Desc, o *opt.Options) *session {
+func newSession(d descriptor.Desc, o *opt.Options) *session {
 	s := new(session)
 	s.desc = d
 	s.o = &iOptions{s, o}

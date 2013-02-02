@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 )
 
 var errFileOpen = errors.New("file opened concurrently")
@@ -45,13 +45,13 @@ type testDesc struct {
 	manifest *testFilePtr
 
 	emuCh        chan struct{}
-	emuDelaySync desc.FileType
-	emuWriteErr  desc.FileType
-	emuSyncErr   desc.FileType
+	emuDelaySync descriptor.FileType
+	emuWriteErr  descriptor.FileType
+	emuSyncErr   descriptor.FileType
 	readCnt      uint64
-	readCntEn    desc.FileType
+	readCntEn    descriptor.FileType
 	readAtCnt    uint64
-	readAtCntEn  desc.FileType
+	readAtCntEn  descriptor.FileType
 }
 
 func newTestDesc(log testDescLogging) *testDesc {
@@ -72,27 +72,27 @@ func (d *testDesc) wake() {
 	}
 }
 
-func (d *testDesc) DelaySync(t desc.FileType) {
+func (d *testDesc) DelaySync(t descriptor.FileType) {
 	d.Lock()
 	d.emuDelaySync |= t
 	d.wake()
 	d.Unlock()
 }
 
-func (d *testDesc) ReleaseSync(t desc.FileType) {
+func (d *testDesc) ReleaseSync(t descriptor.FileType) {
 	d.Lock()
 	d.emuDelaySync &= ^t
 	d.wake()
 	d.Unlock()
 }
 
-func (d *testDesc) SetWriteErr(t desc.FileType) {
+func (d *testDesc) SetWriteErr(t descriptor.FileType) {
 	d.Lock()
 	d.emuWriteErr = t
 	d.Unlock()
 }
 
-func (d *testDesc) SetSyncErr(t desc.FileType) {
+func (d *testDesc) SetSyncErr(t descriptor.FileType) {
 	d.Lock()
 	d.emuSyncErr = t
 	d.Unlock()
@@ -110,13 +110,13 @@ func (d *testDesc) ResetReadCounter() {
 	d.Unlock()
 }
 
-func (d *testDesc) SetReadCounter(t desc.FileType) {
+func (d *testDesc) SetReadCounter(t descriptor.FileType) {
 	d.Lock()
 	d.readCntEn = t
 	d.Unlock()
 }
 
-func (d *testDesc) countRead(t desc.FileType) {
+func (d *testDesc) countRead(t descriptor.FileType) {
 	d.Lock()
 	if d.readCntEn&t != 0 {
 		d.readCnt++
@@ -136,13 +136,13 @@ func (d *testDesc) ResetReadAtCounter() {
 	d.Unlock()
 }
 
-func (d *testDesc) SetReadAtCounter(t desc.FileType) {
+func (d *testDesc) SetReadAtCounter(t descriptor.FileType) {
 	d.Lock()
 	d.readAtCntEn = t
 	d.Unlock()
 }
 
-func (d *testDesc) countReadAt(t desc.FileType) {
+func (d *testDesc) countReadAt(t descriptor.FileType) {
 	d.Lock()
 	if d.readAtCntEn&t != 0 {
 		d.readAtCnt++
@@ -171,11 +171,11 @@ func (d *testDesc) Print(str string) {
 	d.Unlock()
 }
 
-func (d *testDesc) GetFile(num uint64, t desc.FileType) desc.File {
+func (d *testDesc) GetFile(num uint64, t descriptor.FileType) descriptor.File {
 	return &testFilePtr{desc: d, num: num, t: t}
 }
 
-func (d *testDesc) GetFiles(t desc.FileType) (r []desc.File) {
+func (d *testDesc) GetFiles(t descriptor.FileType) (r []descriptor.File) {
 	d.Lock()
 	defer d.Unlock()
 	for _, f := range d.files {
@@ -187,7 +187,7 @@ func (d *testDesc) GetFiles(t desc.FileType) (r []desc.File) {
 	return
 }
 
-func (d *testDesc) GetMainManifest() (f desc.File, err error) {
+func (d *testDesc) GetMainManifest() (f descriptor.File, err error) {
 	d.Lock()
 	defer d.Unlock()
 	if d.manifest == nil {
@@ -196,10 +196,10 @@ func (d *testDesc) GetMainManifest() (f desc.File, err error) {
 	return d.manifest, nil
 }
 
-func (d *testDesc) SetMainManifest(f desc.File) error {
+func (d *testDesc) SetMainManifest(f descriptor.File) error {
 	p, ok := f.(*testFilePtr)
 	if !ok {
-		return desc.ErrInvalidFile
+		return descriptor.ErrInvalidFile
 	}
 	d.Lock()
 	d.manifest = p
@@ -295,7 +295,7 @@ func (r *testReader) Close() error {
 type testFile struct {
 	desc *testDesc
 	num  uint64
-	t    desc.FileType
+	t    descriptor.FileType
 
 	buf    bytes.Buffer
 	opened bool
@@ -304,14 +304,14 @@ type testFile struct {
 type testFilePtr struct {
 	desc *testDesc
 	num  uint64
-	t    desc.FileType
+	t    descriptor.FileType
 }
 
 func (p *testFilePtr) id() uint64 {
 	return (p.num << 8) | uint64(p.t)
 }
 
-func (p *testFilePtr) Open() (r desc.Reader, err error) {
+func (p *testFilePtr) Open() (r descriptor.Reader, err error) {
 	desc := p.desc
 
 	desc.Lock()
@@ -333,7 +333,7 @@ func (p *testFilePtr) Open() (r desc.Reader, err error) {
 	return
 }
 
-func (p *testFilePtr) Create() (w desc.Writer, err error) {
+func (p *testFilePtr) Create() (w descriptor.Writer, err error) {
 	desc := p.desc
 
 	desc.Lock()
@@ -356,7 +356,7 @@ func (p *testFilePtr) Create() (w desc.Writer, err error) {
 	return &testWriter{f}, nil
 }
 
-func (p *testFilePtr) Rename(num uint64, t desc.FileType) error {
+func (p *testFilePtr) Rename(num uint64, t descriptor.FileType) error {
 	desc := p.desc
 
 	desc.Lock()
@@ -391,7 +391,7 @@ func (p *testFilePtr) Exist() bool {
 	return exist
 }
 
-func (p *testFilePtr) Type() desc.FileType {
+func (p *testFilePtr) Type() descriptor.FileType {
 	desc := p.desc
 	desc.Lock()
 	defer desc.Unlock()

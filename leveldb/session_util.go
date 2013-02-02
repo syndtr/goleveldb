@@ -18,7 +18,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/log"
 )
 
@@ -40,19 +40,19 @@ func (s *session) logDropFunc(tag string, num uint64) log.DropFunc {
 
 // file utils
 
-func (s *session) getLogFile(num uint64) desc.File {
-	return s.desc.GetFile(num, desc.TypeLog)
+func (s *session) getLogFile(num uint64) descriptor.File {
+	return s.desc.GetFile(num, descriptor.TypeLog)
 }
 
-func (s *session) getTableFile(num uint64) desc.File {
-	return s.desc.GetFile(num, desc.TypeTable)
+func (s *session) getTableFile(num uint64) descriptor.File {
+	return s.desc.GetFile(num, descriptor.TypeTable)
 }
 
-func (s *session) getTempFile(num uint64) desc.File {
-	return s.desc.GetFile(num, desc.TypeTemp)
+func (s *session) getTempFile(num uint64) descriptor.File {
+	return s.desc.GetFile(num, descriptor.TypeTemp)
 }
 
-func (s *session) getFiles(t desc.FileType) []desc.File {
+func (s *session) getFiles(t descriptor.FileType) []descriptor.File {
 	return s.desc.GetFiles(t)
 }
 
@@ -167,7 +167,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 
 // Create a new manifest file; need external synchronization.
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
-	w, err := newLogWriter(s.desc.GetFile(num, desc.TypeManifest))
+	w, err := newLogWriter(s.desc.GetFile(num, descriptor.TypeManifest))
 	if err != nil {
 		return
 	}

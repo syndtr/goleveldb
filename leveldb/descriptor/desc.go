@@ -11,8 +11,8 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-// Package desc provides I/O abstraction for LevelDB.
-package desc
+// Package descriptor provides I/O abstraction for LevelDB.
+package descriptor
 
 import (
 	"errors"

@@ -21,7 +21,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iter"
 	"leveldb/memdb"
@@ -81,7 +81,7 @@ func open(s *session) (db *DB, err error) {
 }
 
 // Open open or create database from given desc.
-func Open(d desc.Desc, o *opt.Options) (db *DB, err error) {
+func Open(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
 	s := newSession(d, o)
 
 	err = s.recover()
@@ -99,11 +99,11 @@ func Open(d desc.Desc, o *opt.Options) (db *DB, err error) {
 
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
-func Recover(d desc.Desc, o *opt.Options) (db *DB, err error) {
+func Recover(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
 	s := newSession(d, o)
 
 	// get all files
-	ff := files(s.getFiles(desc.TypeAll))
+	ff := files(s.getFiles(descriptor.TypeAll))
 	ff.sort()
 
 	s.printf("Recover: started, files=%d", len(ff))
@@ -114,7 +114,7 @@ func Recover(d desc.Desc, o *opt.Options) (db *DB, err error) {
 	ro := &opt.ReadOptions{}
 	var nt *tFile
 	for _, f := range ff {
-		if f.Type() != desc.TypeTable {
+		if f.Type() != descriptor.TypeTable {
 			continue
 		}
 
@@ -194,7 +194,7 @@ func (d *DB) recoverLog() (err error) {
 	batch := new(Batch)
 	cm := newCMem(s)
 
-	logs, skip := files(s.getFiles(desc.TypeLog)), 0
+	logs, skip := files(s.getFiles(descriptor.TypeLog)), 0
 	logs.sort()
 	for _, log := range logs {
 		if log.Num() < s.stLogNum {

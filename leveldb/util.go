@@ -18,7 +18,7 @@ import (
 	"io"
 	"sort"
 
-	"leveldb/desc"
+	"leveldb/descriptor"
 	"leveldb/log"
 )
 
@@ -65,7 +65,7 @@ func shorten(str string) string {
 	return str[:5] + "..." + str[len(str)-5:]
 }
 
-type files []desc.File
+type files []descriptor.File
 
 func (p files) Len() int {
 	return len(p)
@@ -84,12 +84,12 @@ func (p files) sort() {
 }
 
 type logReader struct {
-	file   desc.File
-	reader desc.Reader
+	file   descriptor.File
+	reader descriptor.Reader
 	log    *log.Reader
 }
 
-func newLogReader(file desc.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
+func newLogReader(file descriptor.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
 	r := new(logReader)
 	r.file = file
 	r.reader, err = file.Open()
@@ -119,12 +119,12 @@ func (r *logReader) remove() error {
 }
 
 type logWriter struct {
-	file   desc.File
-	writer desc.Writer
+	file   descriptor.File
+	writer descriptor.Writer
 	log    *log.Writer
 }
 
-func newLogWriter(file desc.File) (p *logWriter, err error) {
+func newLogWriter(file descriptor.File) (p *logWriter, err error) {
 	w := new(logWriter)
 	w.file = file
 	w.writer, err = file.Create()
