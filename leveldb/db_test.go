@@ -289,7 +289,7 @@ func (h *dbHarness) compactMem() {
 		return
 	}
 
-	// create new memdb and log
+	// create new memdb and journal
 	_, err := db.newMem()
 	if err != nil {
 		t.Error("newMem: got error: ", err)
@@ -733,7 +733,7 @@ func TestDb_Recover(t *testing.T) {
 	})
 }
 
-func TestDb_RecoverWithEmptyLog(t *testing.T) {
+func TestDb_RecoverWithEmptyJournal(t *testing.T) {
 	runAllOpts(t, func(h *dbHarness) {
 		h.put("foo", "v1")
 		h.put("foo", "v2")
@@ -792,7 +792,7 @@ func TestDb_MinorCompactionsHappen(t *testing.T) {
 	h.close()
 }
 
-func TestDb_RecoverWithLargeLog(t *testing.T) {
+func TestDb_RecoverWithLargeJournal(t *testing.T) {
 	h := newDbHarness(t)
 
 	h.put("big1", strings.Repeat("1", 200000))
@@ -802,7 +802,7 @@ func TestDb_RecoverWithLargeLog(t *testing.T) {
 	h.tablesPerLevel("")
 
 	// Make sure that if we re-open with a small write buffer size that
-	// we flush table files in the middle of a large log file.
+	// we flush table files in the middle of a large journal file.
 	h.o.WriteBuffer = 100000
 	h.reopenDB()
 	h.getVal("big1", strings.Repeat("1", 200000))

@@ -62,11 +62,11 @@ func (d *DB) cleanFiles() {
 		switch f.Type() {
 		case descriptor.TypeManifest:
 			keep = !s.manifest.closed() && f.Num() >= s.manifest.file.Num()
-		case descriptor.TypeLog:
-			if d.flog != nil && !d.flog.closed() {
-				keep = f.Num() >= d.flog.file.Num()
+		case descriptor.TypeJournal:
+			if d.fjournal != nil && !d.fjournal.closed() {
+				keep = f.Num() >= d.fjournal.file.Num()
 			} else {
-				keep = f.Num() >= d.log.file.Num()
+				keep = f.Num() >= d.journal.file.Num()
 			}
 		case descriptor.TypeTable:
 			_, keep = tables[f.Num()]

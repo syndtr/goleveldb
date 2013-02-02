@@ -25,7 +25,7 @@ import (
 const (
 	_ uint64 = iota
 	tagComparer
-	tagLogNum
+	tagJournalNum
 	tagNextNum
 	tagSeq
 	tagCompactPointer
@@ -33,10 +33,10 @@ const (
 	tagNewTable
 	// 8 was used for large value refs
 	_
-	tagPrevLogNum
+	tagPrevJournalNum
 )
 
-const tagMax = tagPrevLogNum
+const tagMax = tagPrevJournalNum
 
 var tagBytesCache [tagMax + 1][]byte
 
@@ -76,8 +76,8 @@ type sessionRecord struct {
 	hasComparer bool
 	comparer    string
 
-	hasLogNum bool
-	logNum    uint64
+	hasJournalNum bool
+	journalNum    uint64
 
 	hasNextNum bool
 	nextNum    uint64
@@ -95,9 +95,9 @@ func (p *sessionRecord) setComparer(name string) {
 	p.comparer = name
 }
 
-func (p *sessionRecord) setLogNum(num uint64) {
-	p.hasLogNum = true
-	p.logNum = num
+func (p *sessionRecord) setJournalNum(num uint64) {
+	p.hasJournalNum = true
+	p.journalNum = num
 }
 
 func (p *sessionRecord) setNextNum(num uint64) {
@@ -158,12 +158,12 @@ func (p *sessionRecord) encodeTo(w io.Writer) (err error) {
 		}
 	}
 
-	if p.hasLogNum {
-		_, err = w.Write(tagBytesCache[tagLogNum])
+	if p.hasJournalNum {
+		_, err = w.Write(tagBytesCache[tagJournalNum])
 		if err != nil {
 			return
 		}
-		err = putUvarint(p.logNum)
+		err = putUvarint(p.journalNum)
 		if err != nil {
 			return
 		}
@@ -276,12 +276,12 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 				p.comparer = string(cmp)
 				p.hasComparer = true
 			}
-		case tagLogNum:
-			p.logNum, err = binary.ReadUvarint(r)
+		case tagJournalNum:
+			p.journalNum, err = binary.ReadUvarint(r)
 			if err == nil {
-				p.hasLogNum = true
+				p.hasJournalNum = true
 			}
-		case tagPrevLogNum:
+		case tagPrevJournalNum:
 			err = errors.ErrInvalid("unsupported db format")
 			break
 		case tagNextNum:

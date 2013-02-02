@@ -23,19 +23,19 @@ type FileType uint32
 
 const (
 	TypeManifest FileType = 1 << iota
-	TypeLog
+	TypeJournal
 	TypeTable
 	TypeTemp
 
-	TypeAll = TypeManifest | TypeLog | TypeTable | TypeTemp
+	TypeAll = TypeManifest | TypeJournal | TypeTable | TypeTemp
 )
 
 func (t FileType) String() string {
 	switch t {
 	case TypeManifest:
 		return "manifest"
-	case TypeLog:
-		return "log"
+	case TypeJournal:
+		return "journal"
 	case TypeTable:
 		return "table"
 	case TypeTemp:

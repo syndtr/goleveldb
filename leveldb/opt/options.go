@@ -74,7 +74,7 @@ type Options struct {
 	// Specify the database flag.
 	Flag OptionsFlag
 
-	// Amount of data to build up in memory (backed by an unsorted log
+	// Amount of data to build up in memory (backed by an unsorted journal
 	// on disk) before converting to a sorted on-disk file.
 	//
 	// Larger values increase performance, especially during bulk loads.

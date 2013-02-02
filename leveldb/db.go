@@ -37,13 +37,14 @@ type DB struct {
 	wlock  chan struct{}      // writer mutex
 	wqueue chan *Batch        // writer queue
 	wack   chan error         // writer ack
-	lch    chan *Batch        // log writer chan
-	lack   chan error         // log writer ack
+	jch    chan *Batch        // journal writer chan
+	jack   chan error         // journal writer ack
 	ewg    sync.WaitGroup     // exit WaitGroup
 	cstats [kNumLevels]cStats // Compaction stats
 
 	mem       unsafe.Pointer
-	log, flog *logWriter
+	journal   *journalWriter
+	fjournal  *journalWriter
 	seq, fseq uint64
 	snaps     *snaps
 	closed    uint32
@@ -58,13 +59,13 @@ func open(s *session) (db *DB, err error) {
 		wlock:  make(chan struct{}, 1),
 		wqueue: make(chan *Batch),
 		wack:   make(chan error),
-		lch:    make(chan *Batch),
-		lack:   make(chan error),
+		jch:    make(chan *Batch),
+		jack:   make(chan error),
 		seq:    s.stSeq,
 		snaps:  newSnaps(),
 	}
 
-	err = db.recoverLog()
+	err = db.recoverJournal()
 	if err != nil {
 		return
 	}
@@ -73,7 +74,7 @@ func open(s *session) (db *DB, err error) {
 	db.cleanFiles()
 
 	go db.compaction()
-	go db.writeLog()
+	go db.writeJournal()
 	// wait for compaction goroutine
 	db.cch <- cWait
 
@@ -184,31 +185,31 @@ func Recover(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
 	return open(s)
 }
 
-func (d *DB) recoverLog() (err error) {
+func (d *DB) recoverJournal() (err error) {
 	s := d.s
 	icmp := s.cmp
 
-	s.printf("LogRecovery: started, min=%d", s.stLogNum)
+	s.printf("JournalRecovery: started, min=%d", s.stJournalNum)
 
 	var mem *memdb.DB
 	batch := new(Batch)
 	cm := newCMem(s)
 
-	logs, skip := files(s.getFiles(descriptor.TypeLog)), 0
-	logs.sort()
-	for _, log := range logs {
-		if log.Num() < s.stLogNum {
+	journals, skip := files(s.getFiles(descriptor.TypeJournal)), 0
+	journals.sort()
+	for _, journal := range journals {
+		if journal.Num() < s.stJournalNum {
 			skip++
 			continue
 		}
-		s.markFileNum(log.Num())
+		s.markFileNum(journal.Num())
 	}
 
-	var r, fr *logReader
-	for _, log := range logs[skip:] {
-		s.printf("LogRecovery: recovering, num=%d", log.Num())
+	var r, fr *journalReader
+	for _, journal := range journals[skip:] {
+		s.printf("JournalRecovery: recovering, num=%d", journal.Num())
 
-		r, err = newLogReader(log, true, s.logDropFunc("log", log.Num()))
+		r, err = newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))
 		if err != nil {
 			return
 		}
@@ -234,8 +235,8 @@ func (d *DB) recoverLog() (err error) {
 
 		mem = memdb.New(icmp)
 
-		for r.log.Next() {
-			err = batch.decode(r.log.Record())
+		for r.journal.Next() {
+			err = batch.decode(r.journal.Record())
 			if err != nil {
 				return
 			}
@@ -259,7 +260,7 @@ func (d *DB) recoverLog() (err error) {
 			}
 		}
 
-		err = r.log.Error()
+		err = r.journal.Error()
 		if err != nil {
 			return
 		}
@@ -268,7 +269,7 @@ func (d *DB) recoverLog() (err error) {
 		fr = r
 	}
 
-	// create new log
+	// create new journal
 	_, err = d.newMem()
 	if err != nil {
 		return
@@ -281,7 +282,7 @@ func (d *DB) recoverLog() (err error) {
 		}
 	}
 
-	err = cm.commit(d.log.file.Num(), d.seq)
+	err = cm.commit(d.journal.file.Num(), d.seq)
 	if err != nil {
 		return
 	}
@@ -528,8 +529,8 @@ drain:
 	}
 	close(d.wlock)
 
-	// wake log writer goroutine
-	d.lch <- nil
+	// wake journal writer goroutine
+	d.jch <- nil
 
 	// wake Compaction goroutine
 	d.cch <- cClose
@@ -543,8 +544,8 @@ drain:
 		cache.Purge(nil)
 	}
 
-	if d.log != nil {
-		d.log.close()
+	if d.journal != nil {
+		d.journal.close()
 	}
 	if d.s.manifest != nil {
 		d.s.manifest.close()

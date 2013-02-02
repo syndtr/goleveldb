@@ -25,13 +25,13 @@ var cases = []struct {
 	ftype FileType
 	num   uint64
 }{
-	{"100.log", TypeLog, 100},
-	{"0.log", TypeLog, 0},
+	{"100.log", TypeJournal, 100},
+	{"0.log", TypeJournal, 0},
 	{"0.sst", TypeTable, 0},
 	{"0.dbtmp", TypeTemp, 0},
 	{"MANIFEST-2", TypeManifest, 2},
 	{"MANIFEST-7", TypeManifest, 7},
-	{"18446744073709551615.log", TypeLog, 18446744073709551615},
+	{"18446744073709551615.log", TypeJournal, 18446744073709551615},
 }
 
 var invalidCases = []string{

@@ -20,29 +20,29 @@ import (
 	"leveldb/opt"
 )
 
-func (d *DB) doWriteLog(b *Batch) error {
-	err := d.log.log.Append(b.encode())
+func (d *DB) doWriteJournal(b *Batch) error {
+	err := d.journal.journal.Append(b.encode())
 	if err == nil && b.sync {
-		err = d.log.writer.Sync()
+		err = d.journal.writer.Sync()
 	}
 	return err
 }
 
-func (d *DB) writeLog() {
+func (d *DB) writeJournal() {
 	// register to the WaitGroup
 	d.ewg.Add(1)
 
-	for b := range d.lch {
+	for b := range d.jch {
 		if b == nil {
 			break
 		}
 
-		// write log
-		d.lack <- d.doWriteLog(b)
+		// write journal
+		d.jack <- d.doWriteJournal(b)
 	}
 
-	close(d.lch)
-	close(d.lack)
+	close(d.jch)
+	close(d.jack)
 	d.ewg.Done()
 }
 
@@ -77,7 +77,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 			continue
 		}
 
-		// create new memdb and log
+		// create new memdb and journal
 		m, err = d.newMem()
 		if err != nil {
 			return
@@ -142,17 +142,17 @@ drain:
 	// set batch first seq number relative from last seq
 	b.seq = d.seq + 1
 
-	// write log concurrently if it is large enough
+	// write journal concurrently if it is large enough
 	if b.size() >= (128 << 10) {
-		d.lch <- b
+		d.jch <- b
 		b.memReplay(mem)
-		err = <-d.lack
+		err = <-d.jack
 		if err != nil {
 			b.revertMemReplay(mem)
 			return
 		}
 	} else {
-		err = d.doWriteLog(b)
+		err = d.doWriteJournal(b)
 		if err != nil {
 			return
 		}

@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package log
+package journal
 
 import (
 	"bytes"
@@ -74,7 +74,7 @@ func (h *Harness) Test() {
 	}
 }
 
-func TestLogSimpleRandomShort(t *testing.T) {
+func TestJournalSimpleRandomShort(t *testing.T) {
 	h := NewHarness(t)
 	for i := 0; i < 100; i++ {
 		v := randomString(rand.Intn(10))
@@ -83,7 +83,7 @@ func TestLogSimpleRandomShort(t *testing.T) {
 	h.Test()
 }
 
-func TestLogSimpleRandomLong(t *testing.T) {
+func TestJournalSimpleRandomLong(t *testing.T) {
 	h := NewHarness(t)
 	for i := 0; i < 20; i++ {
 		v := randomString(rand.Intn(BlockSize * 3))

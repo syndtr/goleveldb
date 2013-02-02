@@ -1,4 +1,4 @@
-// Copyright (c) 2012, Suryandaru Triandana <syndtr@gmail.com>
+// Copyright (c) 2012, Suryandaru Triandana <syndtr@gmaiw.com>
 // All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be
@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package log
+package journal
 
 import (
 	"bytes"
@@ -35,7 +35,7 @@ const (
 )
 
 const (
-	// Log block size.
+	// Journal block size.
 	BlockSize = 32768
 
 	// Header is checksum (4 bytes), length (2 bytes), type (1 byte).
@@ -44,7 +44,7 @@ const (
 
 var sixZero [6]byte
 
-// Writer represent a log writer.
+// Writer represent a journal writer.
 type Writer struct {
 	w   io.Writer
 	buf bytes.Buffer
@@ -52,28 +52,28 @@ type Writer struct {
 	boff int
 }
 
-// NewWriter create new initialized log writer.
+// NewWriter create new initialized journal writer.
 func NewWriter(w io.Writer) *Writer {
 	return &Writer{w: w}
 }
 
-// Append append record to the log.
-func (l *Writer) Append(record []byte) (err error) {
+// Append append record to the journal.
+func (w *Writer) Append(record []byte) (err error) {
 	begin := true
 	for {
-		leftover := BlockSize - l.boff
+		leftover := BlockSize - w.boff
 		if leftover < kHeaderSize {
 			// Switch to a new block
 			if leftover > 0 {
-				_, err = l.w.Write(sixZero[:leftover])
+				_, err = w.w.Write(sixZero[:leftover])
 				if err != nil {
 					return
 				}
 			}
-			l.boff = 0
+			w.boff = 0
 		}
 
-		avail := BlockSize - l.boff - kHeaderSize
+		avail := BlockSize - w.boff - kHeaderSize
 		fragLen := len(record)
 		end := true
 		if fragLen > avail {
@@ -90,7 +90,7 @@ func (l *Writer) Append(record []byte) (err error) {
 			rtype = tLast
 		}
 
-		err = l.write(rtype, record[:fragLen])
+		err = w.write(rtype, record[:fragLen])
 		if err != nil {
 			return
 		}
@@ -98,7 +98,7 @@ func (l *Writer) Append(record []byte) (err error) {
 		record = record[fragLen:]
 		begin = false
 
-		l.boff += kHeaderSize + fragLen
+		w.boff += kHeaderSize + fragLen
 
 		if len(record) <= 0 {
 			break
@@ -107,9 +107,9 @@ func (l *Writer) Append(record []byte) (err error) {
 	return
 }
 
-func (l *Writer) write(rtype uint, record []byte) (err error) {
+func (w *Writer) write(rtype uint, record []byte) (err error) {
 	rlen := len(record)
-	buf := &l.buf
+	buf := &w.buf
 	buf.Reset()
 
 	crc := hash.NewCRC32C()
@@ -121,9 +121,9 @@ func (l *Writer) write(rtype uint, record []byte) (err error) {
 	buf.WriteByte(byte(rlen >> 8))
 	buf.WriteByte(byte(rtype))
 
-	_, err = buf.WriteTo(l.w)
+	_, err = buf.WriteTo(w.w)
 	if err == nil {
-		_, err = l.w.Write(record)
+		_, err = w.w.Write(record)
 	}
 	return err
 }

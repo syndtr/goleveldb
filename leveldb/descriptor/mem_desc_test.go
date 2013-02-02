@@ -34,8 +34,8 @@ func TestMemDesc(t *testing.T) {
 	if got := buf.String(); got != "abc" {
 		t.Fatalf("Read: invalid value, want=abc got=%s", got)
 	}
-	f.Rename(2, TypeLog)
-	if f.Num() != 2 && f.Type() != TypeLog {
+	f.Rename(2, TypeJournal)
+	if f.Num() != 2 && f.Type() != TypeJournal {
 		t.Fatal("invalid file number and type")
 	}
 	if _, err := f.Open(); err != nil {
@@ -44,7 +44,7 @@ func TestMemDesc(t *testing.T) {
 	if ff := m.GetFiles(TypeAll); len(ff) != 1 {
 		t.Fatal("invalid GetFiles len")
 	} else {
-		if ff[0].Num() != 2 && ff[0].Type() != TypeLog {
+		if ff[0].Num() != 2 && ff[0].Type() != TypeJournal {
 			t.Fatal("invalid file number and type")
 		}
 	}

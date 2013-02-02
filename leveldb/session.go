@@ -31,13 +31,13 @@ type session struct {
 	filter *iFilter
 	tops   *tOps
 
-	manifest *logWriter
+	manifest *journalWriter
 
-	stVersion unsafe.Pointer   // current version
-	stFileNum uint64           // current unused file number
-	stLogNum  uint64           // current log file number; need external synchronization
-	stSeq     uint64           // last mem compacted seq; need external synchronization
-	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
+	stVersion    unsafe.Pointer   // current version
+	stFileNum    uint64           // current unused file number
+	stJournalNum uint64           // current journal file number; need external synchronization
+	stSeq        uint64           // last mem compacted seq; need external synchronization
+	stCPtrs      [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
 func newSession(d descriptor.Desc, o *opt.Options) *session {
@@ -71,7 +71,7 @@ func (s *session) recover() (err error) {
 		return
 	}
 
-	r, err := newLogReader(file, true, s.logDropFunc("manifest", file.Num()))
+	r, err := newJournalReader(file, true, s.journalDropFunc("manifest", file.Num()))
 	if err != nil {
 		return
 	}
@@ -81,9 +81,9 @@ func (s *session) recover() (err error) {
 	staging := s.version_NB().newStaging()
 	srec := new(sessionRecord)
 
-	for r.log.Next() {
+	for r.journal.Next() {
 		rec := new(sessionRecord)
-		err = rec.decode(r.log.Record())
+		err = rec.decode(r.journal.Record())
 		if err != nil {
 			continue
 		}
@@ -102,8 +102,8 @@ func (s *session) recover() (err error) {
 		// commit record to version staging
 		staging.commit(rec)
 
-		if rec.hasLogNum {
-			srec.setLogNum(rec.logNum)
+		if rec.hasJournalNum {
+			srec.setJournalNum(rec.journalNum)
 		}
 		if rec.hasNextNum {
 			srec.setNextNum(rec.nextNum)
@@ -113,8 +113,8 @@ func (s *session) recover() (err error) {
 		}
 	}
 
-	// check for error in log reader
-	err = r.log.Error()
+	// check for error in journal reader
+	err = r.journal.Error()
 	if err != nil {
 		return
 	}
@@ -122,8 +122,8 @@ func (s *session) recover() (err error) {
 	switch false {
 	case srec.hasNextNum:
 		err = errors.ErrCorrupt("manifest missing next file number")
-	case srec.hasLogNum:
-		err = errors.ErrCorrupt("manifest missing log file number")
+	case srec.hasJournalNum:
+		err = errors.ErrCorrupt("manifest missing journal file number")
 	case srec.hasSeq:
 		err = errors.ErrCorrupt("manifest missing seq number")
 	}
@@ -131,7 +131,7 @@ func (s *session) recover() (err error) {
 		return
 	}
 
-	s.manifest = &logWriter{file: file}
+	s.manifest = &journalWriter{file: file}
 	s.setVersion(staging.finish())
 	s.setFileNum(srec.nextNum)
 	s.recordCommited(srec)
@@ -145,7 +145,7 @@ func (s *session) commit(r *sessionRecord) (err error) {
 	nv := s.version_NB().spawn(r)
 
 	if s.manifest.closed() {
-		// manifest log writer not yet created, create one
+		// manifest journal writer not yet created, create one
 		err = s.createManifest(s.allocFileNum(), r, nv)
 	} else {
 		err = s.flushManifest(r)

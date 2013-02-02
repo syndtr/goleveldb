@@ -19,7 +19,7 @@ import (
 	"sort"
 
 	"leveldb/descriptor"
-	"leveldb/log"
+	"leveldb/journal"
 )
 
 type readByteReader interface {
@@ -83,72 +83,72 @@ func (p files) sort() {
 	sort.Sort(p)
 }
 
-type logReader struct {
-	file   descriptor.File
-	reader descriptor.Reader
-	log    *log.Reader
+type journalReader struct {
+	file    descriptor.File
+	reader  descriptor.Reader
+	journal *journal.Reader
 }
 
-func newLogReader(file descriptor.File, checksum bool, dropf log.DropFunc) (p *logReader, err error) {
-	r := new(logReader)
+func newJournalReader(file descriptor.File, checksum bool, dropf journal.DropFunc) (p *journalReader, err error) {
+	r := new(journalReader)
 	r.file = file
 	r.reader, err = file.Open()
 	if err != nil {
 		return
 	}
-	r.log = log.NewReader(r.reader, checksum, dropf)
+	r.journal = journal.NewReader(r.reader, checksum, dropf)
 	return r, nil
 }
 
-func (r *logReader) closed() bool {
+func (r *journalReader) closed() bool {
 	return r.reader == nil
 }
 
-func (r *logReader) close() {
+func (r *journalReader) close() {
 	if r.closed() {
 		return
 	}
 	r.reader.Close()
 	r.reader = nil
-	r.log = nil
+	r.journal = nil
 }
 
-func (r *logReader) remove() error {
+func (r *journalReader) remove() error {
 	r.close()
 	return r.file.Remove()
 }
 
-type logWriter struct {
-	file   descriptor.File
-	writer descriptor.Writer
-	log    *log.Writer
+type journalWriter struct {
+	file    descriptor.File
+	writer  descriptor.Writer
+	journal *journal.Writer
 }
 
-func newLogWriter(file descriptor.File) (p *logWriter, err error) {
-	w := new(logWriter)
+func newJournalWriter(file descriptor.File) (p *journalWriter, err error) {
+	w := new(journalWriter)
 	w.file = file
 	w.writer, err = file.Create()
 	if err != nil {
 		return
 	}
-	w.log = log.NewWriter(w.writer)
+	w.journal = journal.NewWriter(w.writer)
 	return w, nil
 }
 
-func (w *logWriter) closed() bool {
+func (w *journalWriter) closed() bool {
 	return w.writer == nil
 }
 
-func (w *logWriter) close() {
+func (w *journalWriter) close() {
 	if w.closed() {
 		return
 	}
 	w.writer.Close()
 	w.writer = nil
-	w.log = nil
+	w.journal = nil
 }
 
-func (w *logWriter) remove() error {
+func (w *journalWriter) remove() error {
 	w.close()
 	return w.file.Remove()
 }

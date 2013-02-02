@@ -40,17 +40,17 @@ func (d *DB) newMem() (m *memdb.DB, err error) {
 	s := d.s
 
 	num := s.allocFileNum()
-	w, err := newLogWriter(s.getLogFile(num))
+	w, err := newJournalWriter(s.getJournalFile(num))
 	if err != nil {
 		s.reuseFileNum(num)
 		return
 	}
 
-	old := d.log
-	d.log = w
+	old := d.journal
+	d.journal = w
 	if old != nil {
 		old.close()
-		d.flog = old
+		d.fjournal = old
 	}
 
 	d.fseq = d.seq
@@ -90,8 +90,8 @@ func (d *DB) getFrozenMem() *memdb.DB {
 
 // Drop frozen mem; assume that mem wasn't nil and frozen mem present.
 func (d *DB) dropFrozenMem() {
-	d.flog.remove()
-	d.flog = nil
+	d.fjournal.remove()
+	d.fjournal = nil
 	for {
 		old := d.mem
 		mem := &memSet{cur: (*memSet)(old).cur}

@@ -237,7 +237,7 @@ func (p *file) name() string {
 	switch p.t {
 	case TypeManifest:
 		return fmt.Sprintf("MANIFEST-%d", p.num)
-	case TypeLog:
+	case TypeJournal:
 		return fmt.Sprintf("%d.log", p.num)
 	case TypeTable:
 		return fmt.Sprintf("%d.sst", p.num)
@@ -260,7 +260,7 @@ func (p *file) parse(name string) bool {
 	if err == nil {
 		switch tail {
 		case "log":
-			p.t = TypeLog
+			p.t = TypeJournal
 		case "sst":
 			p.t = TypeTable
 		case "dbtmp":

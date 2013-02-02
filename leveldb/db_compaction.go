@@ -113,8 +113,8 @@ func (c *cMem) reset() {
 	c.rec = new(sessionRecord)
 }
 
-func (c *cMem) commit(log, seq uint64) error {
-	c.rec.setLogNum(log)
+func (c *cMem) commit(journal, seq uint64) error {
+	c.rec.setJournalNum(journal)
 	c.rec.setSeq(seq)
 
 	// Commit changes
@@ -180,7 +180,7 @@ func (d *DB) memCompaction(mem *memdb.DB) {
 	d.transact(func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.commit(d.log.file.Num(), d.fseq)
+		return c.commit(d.journal.file.Num(), d.fseq)
 	})
 
 	stats.write = c.t.size

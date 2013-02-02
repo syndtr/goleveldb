@@ -19,7 +19,7 @@ import (
 	"unsafe"
 
 	"leveldb/descriptor"
-	"leveldb/log"
+	"leveldb/journal"
 )
 
 // logging
@@ -32,7 +32,7 @@ func (s *session) printf(format string, v ...interface{}) {
 	s.desc.Print(fmt.Sprintf(format, v...))
 }
 
-func (s *session) logDropFunc(tag string, num uint64) log.DropFunc {
+func (s *session) journalDropFunc(tag string, num uint64) journal.DropFunc {
 	return func(n int, reason string) {
 		s.printf("%s[%d] dropping %d bytes: %s", tag, num, n, reason)
 	}
@@ -40,8 +40,8 @@ func (s *session) logDropFunc(tag string, num uint64) log.DropFunc {
 
 // file utils
 
-func (s *session) getLogFile(num uint64) descriptor.File {
-	return s.desc.GetFile(num, descriptor.TypeLog)
+func (s *session) getJournalFile(num uint64) descriptor.File {
+	return s.desc.GetFile(num, descriptor.TypeJournal)
 }
 
 func (s *session) getTableFile(num uint64) descriptor.File {
@@ -133,11 +133,11 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 	r.setNextNum(s.fileNum())
 
 	if snapshot {
-		if !r.hasLogNum {
-			r.setLogNum(s.stLogNum)
+		if !r.hasJournalNum {
+			r.setJournalNum(s.stJournalNum)
 		}
 
-		if !r.hasLogNum {
+		if !r.hasJournalNum {
 			r.setSeq(s.stSeq)
 		}
 
@@ -152,8 +152,8 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 // Mark if record has been commited, this will update session state;
 // need external synchronization.
 func (s *session) recordCommited(r *sessionRecord) {
-	if r.hasLogNum {
-		s.stLogNum = r.logNum
+	if r.hasJournalNum {
+		s.stJournalNum = r.journalNum
 	}
 
 	if r.hasSeq {
@@ -167,7 +167,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 
 // Create a new manifest file; need external synchronization.
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
-	w, err := newLogWriter(s.desc.GetFile(num, descriptor.TypeManifest))
+	w, err := newJournalWriter(s.desc.GetFile(num, descriptor.TypeManifest))
 	if err != nil {
 		return
 	}
@@ -194,7 +194,7 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 		}
 	}()
 
-	err = w.log.Append(r.encode())
+	err = w.journal.Append(r.encode())
 	if err != nil {
 		return
 	}
@@ -210,7 +210,7 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 // Flush record to disk.
 func (s *session) flushManifest(r *sessionRecord) (err error) {
 	s.fillRecord(r, false)
-	err = s.manifest.log.Append(r.encode())
+	err = s.manifest.journal.Append(r.encode())
 	if err != nil {
 		return
 	}

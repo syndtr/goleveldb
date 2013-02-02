@@ -21,7 +21,7 @@ import (
 
 	"leveldb/cache"
 	"leveldb/descriptor"
-	"leveldb/log"
+	"leveldb/journal"
 	"leveldb/opt"
 )
 
@@ -161,14 +161,14 @@ func (h *dbCorruptHarness) check(min, max int) {
 	}
 }
 
-func TestCorruptDB_Log(t *testing.T) {
+func TestCorruptDB_Journal(t *testing.T) {
 	h := newDbCorruptHarness(t)
 
 	h.build(100)
 	h.check(100, 100)
 	h.closeDB()
-	h.corrupt(descriptor.TypeLog, 19, 1)
-	h.corrupt(descriptor.TypeLog, log.BlockSize+1000, 1)
+	h.corrupt(descriptor.TypeJournal, 19, 1)
+	h.corrupt(descriptor.TypeJournal, journal.BlockSize+1000, 1)
 
 	h.openDB()
 	h.check(36, 36)
