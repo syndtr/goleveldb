@@ -11,9 +11,9 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-// Package iter provides interface and implementation for iterate over
+// Package iterator provides interface and implementation to traverse over
 // contents of a database.
-package iter
+package iterator
 
 type IteratorSeeker interface {
 	// An iterator is either positioned at a key/value pair, or

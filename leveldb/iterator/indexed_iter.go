@@ -11,7 +11,7 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-package iter
+package iterator
 
 // IteratorIndexer is the interface that group IteratorSeeker and basic Get
 // method. An index of indexed iterator need to implement this interface.

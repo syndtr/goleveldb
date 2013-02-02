@@ -19,7 +19,7 @@ import (
 	"unsafe"
 
 	"leveldb/errors"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 )
 
@@ -177,7 +177,7 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 	return
 }
 
-func (v *version) getIterators(ro *opt.ReadOptions) (its []iter.Iterator) {
+func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 	s := v.s
 	icmp := s.cmp
 
@@ -192,7 +192,7 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iter.Iterator) {
 			continue
 		}
 
-		it := iter.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
+		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
 		its = append(its, it)
 	}
 

@@ -15,7 +15,7 @@ package leveldb
 
 import (
 	"leveldb/descriptor"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 )
 
@@ -23,7 +23,7 @@ import (
 // This interface implemented by both *DB and *Snapshot.
 type Reader interface {
 	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
-	NewIterator(ro *opt.ReadOptions) iter.Iterator
+	NewIterator(ro *opt.ReadOptions) iterator.Iterator
 }
 
 // Range represent key range.

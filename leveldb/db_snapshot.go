@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 
 	"leveldb/errors"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 )
 
@@ -120,15 +120,15 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 
 // NewIterator return an iterator over the contents of this snapshot of
 // database.
-func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iter.Iterator {
+func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if atomic.LoadUint32(&p.released) != 0 {
-		return &iter.EmptyIterator{errors.ErrSnapshotReleased}
+		return &iterator.EmptyIterator{errors.ErrSnapshotReleased}
 	}
 
 	d := p.d
 
 	if err := d.rok(); err != nil {
-		return &iter.EmptyIterator{err}
+		return &iterator.EmptyIterator{err}
 	}
 
 	return &dbIter{

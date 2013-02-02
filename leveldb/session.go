@@ -19,7 +19,7 @@ import (
 
 	"leveldb/descriptor"
 	"leveldb/errors"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 )
 
@@ -330,7 +330,7 @@ func (c *compaction) shouldStopBefore(key iKey) bool {
 	return false
 }
 
-func (c *compaction) newIterator() iter.Iterator {
+func (c *compaction) newIterator() iterator.Iterator {
 	s := c.s
 	icmp := s.cmp
 
@@ -339,7 +339,7 @@ func (c *compaction) newIterator() iter.Iterator {
 	if c.level == 0 {
 		icap = len(c.tables[0]) + 1
 	}
-	its := make([]iter.Iterator, 0, icap)
+	its := make([]iterator.Iterator, 0, icap)
 
 	ro := &opt.ReadOptions{
 		Flag: opt.RFDontFillCache,
@@ -355,10 +355,10 @@ func (c *compaction) newIterator() iter.Iterator {
 				its = append(its, s.tops.newIterator(t, ro))
 			}
 		} else {
-			it := iter.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
+			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
 			its = append(its, it)
 		}
 	}
 
-	return iter.NewMergedIterator(its, icmp)
+	return iterator.NewMergedIterator(its, icmp)
 }

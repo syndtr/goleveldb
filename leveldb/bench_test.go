@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"leveldb/descriptor"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 )
 
@@ -246,7 +246,7 @@ func (p *dbBench) seeks() {
 	b.StopTimer()
 }
 
-func (p *dbBench) newIter() iter.Iterator {
+func (p *dbBench) newIter() iterator.Iterator {
 	iter := p.db.NewIterator(p.ro)
 	err := iter.Error()
 	if err != nil {

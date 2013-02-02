@@ -23,7 +23,7 @@ import (
 
 	"leveldb/descriptor"
 	"leveldb/errors"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/memdb"
 	"leveldb/opt"
 )
@@ -350,9 +350,9 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 // NewIterator return an iterator over the contents of the latest snapshot of
 // database. The result of NewIterator() is initially invalid (caller must
 // call Next or one of Seek method, ie First, Last or Seek).
-func (d *DB) NewIterator(ro *opt.ReadOptions) iter.Iterator {
+func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.rok(); err != nil {
-		return &iter.EmptyIterator{err}
+		return &iterator.EmptyIterator{err}
 	}
 
 	p := d.newSnapshot()

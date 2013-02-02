@@ -21,7 +21,7 @@ import (
 	"leveldb/cache"
 	"leveldb/comparer"
 	"leveldb/descriptor"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/opt"
 	"leveldb/table"
 )
@@ -229,9 +229,9 @@ func (i *tFilesIter) Prev() bool {
 	return true
 }
 
-func (i *tFilesIter) Get() (it iter.Iterator, err error) {
+func (i *tFilesIter) Get() (it iterator.Iterator, err error) {
 	if i.pos < 0 || i.pos >= len(i.tt) {
-		return &iter.EmptyIterator{}, nil
+		return &iterator.EmptyIterator{}, nil
 	}
 	return i.tops.newIterator(i.tt[i.pos], i.ro), nil
 }
@@ -317,7 +317,7 @@ func (t *tOps) create() (w *tWriter, err error) {
 	}, nil
 }
 
-func (t *tOps) createFrom(src iter.Iterator) (f *tFile, n int, err error) {
+func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	w, err := t.create()
 	if err != nil {
 		return
@@ -345,14 +345,14 @@ func (t *tOps) createFrom(src iter.Iterator) (f *tFile, n int, err error) {
 	return
 }
 
-func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iter.Iterator {
+func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 	c, err := t.lookup(f)
 	if err != nil {
-		return &iter.EmptyIterator{err}
+		return &iterator.EmptyIterator{err}
 	}
 	it := c.Value().(*table.Reader).NewIterator(ro)
-	if p, ok := it.(*iter.IndexedIterator); ok {
-		runtime.SetFinalizer(p, func(x *iter.IndexedIterator) {
+	if p, ok := it.(*iterator.IndexedIterator); ok {
+		runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
 			c.Release()
 		})
 	} else {

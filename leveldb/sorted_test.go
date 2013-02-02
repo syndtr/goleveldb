@@ -24,7 +24,7 @@ import (
 	"leveldb/comparer"
 	"leveldb/descriptor"
 	"leveldb/filter"
-	"leveldb/iter"
+	"leveldb/iterator"
 	"leveldb/memdb"
 	"leveldb/opt"
 	"leveldb/table"
@@ -34,7 +34,7 @@ type stConstructor interface {
 	init(t *testing.T, ho *stHarnessOpt) error
 	add(key, value string) error
 	finish() (int, error)
-	newIterator() iter.Iterator
+	newIterator() iterator.Iterator
 	customTest(h *stHarness)
 }
 
@@ -71,7 +71,7 @@ func (p *stConstructor_Block) finish() (size int, err error) {
 	return
 }
 
-func (p *stConstructor_Block) newIterator() iter.Iterator {
+func (p *stConstructor_Block) newIterator() iterator.Iterator {
 	return p.br.NewIterator()
 }
 
@@ -131,7 +131,7 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 	return int(fsize), nil
 }
 
-func (p *stConstructor_Table) newIterator() iter.Iterator {
+func (p *stConstructor_Table) newIterator() iterator.Iterator {
 	return p.tr.NewIterator(&opt.ReadOptions{})
 }
 
@@ -176,7 +176,7 @@ func (p *stConstructor_MemDB) finish() (size int, err error) {
 	return int(p.mem.Size()), nil
 }
 
-func (p *stConstructor_MemDB) newIterator() iter.Iterator {
+func (p *stConstructor_MemDB) newIterator() iterator.Iterator {
 	return p.mem.NewIterator()
 }
 
@@ -210,12 +210,12 @@ func (p *stConstructor_MergedMemDB) finish() (size int, err error) {
 	return
 }
 
-func (p *stConstructor_MergedMemDB) newIterator() iter.Iterator {
-	var its []iter.Iterator
+func (p *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
+	var its []iterator.Iterator
 	for _, m := range p.mem {
 		its = append(its, m.NewIterator())
 	}
-	return iter.NewMergedIterator(its, comparer.BytesComparer{})
+	return iterator.NewMergedIterator(its, comparer.BytesComparer{})
 }
 
 func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}
@@ -252,7 +252,7 @@ func (p *stConstructor_DB) finish() (size int, err error) {
 	return p.desc.Sizes(), nil
 }
 
-func (p *stConstructor_DB) newIterator() iter.Iterator {
+func (p *stConstructor_DB) newIterator() iterator.Iterator {
 	return p.db.NewIterator(p.ro)
 }
 
