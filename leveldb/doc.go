@@ -11,11 +11,11 @@
 //   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
 //   for names of contributors.
 
-// Package leveldb implements LevelDB key/value database.
+// Package leveldb provides implementation of LevelDB key/value database.
 //
 // Create or open a database:
 //
-//	mydesc, err := desc.OpenFile("path/to/db")
+//	mydesc, err := descriptor.OpenFile("path/to/db")
 //	...
 //	mydb, err := db.Open(mydesc, &opt.Options{Flag: opt.OFCreateIfMissing})
 //	...

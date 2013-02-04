@@ -20,15 +20,15 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/iter"
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 // Reader represent a table reader.
 type Reader struct {
-	r desc.Reader
+	r descriptor.Reader
 	o opt.OptionsGetter
 
 	meta   *block.Reader
@@ -40,7 +40,7 @@ type Reader struct {
 }
 
 // NewReader create new initialized table reader.
-func NewReader(r desc.Reader, size uint64, o opt.OptionsGetter, cache cache.Namespace) (p *Reader, err error) {
+func NewReader(r descriptor.Reader, size uint64, o opt.OptionsGetter, cache cache.Namespace) (p *Reader, err error) {
 	mb, ib, err := readFooter(r, size)
 	if err != nil {
 		return
@@ -106,10 +106,10 @@ out:
 }
 
 // NewIterator create new iterator over the table.
-func (t *Reader) NewIterator(ro opt.ReadOptionsGetter) iter.Iterator {
+func (t *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 	index_iter := &indexIter{t: t, ro: ro}
 	t.index.InitIterator(&index_iter.Iterator)
-	return iter.NewIndexedIterator(index_iter)
+	return iterator.NewIndexedIterator(index_iter)
 }
 
 // Get lookup for given key on the table. Get returns errors.ErrNotFound if
@@ -134,7 +134,7 @@ func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte,
 
 	// get the data block
 	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
-		var it iter.Iterator
+		var it iterator.Iterator
 		var cache cache.Object
 		it, cache, err = t.getDataIter(bi, ro)
 		if err != nil {
@@ -232,7 +232,7 @@ type indexIter struct {
 	ro opt.ReadOptionsGetter
 }
 
-func (i *indexIter) Get() (it iter.Iterator, err error) {
+func (i *indexIter) Get() (it iterator.Iterator, err error) {
 	bi := new(bInfo)
 	_, err = bi.decodeFrom(i.Value())
 	if err != nil {

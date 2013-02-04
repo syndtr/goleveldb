@@ -20,14 +20,14 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/desc"
+	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 // Writer represent a table writer.
 type Writer struct {
-	w   desc.Writer
+	w   descriptor.Writer
 	o   opt.OptionsGetter
 	cmp comparer.Comparer
 
@@ -44,7 +44,7 @@ type Writer struct {
 }
 
 // NewWriter create new initialized table writer.
-func NewWriter(w desc.Writer, o opt.OptionsGetter) *Writer {
+func NewWriter(w descriptor.Writer, o opt.OptionsGetter) *Writer {
 	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
 	// Creating blocks
 	t.data = block.NewWriter(o.GetBlockRestartInterval())

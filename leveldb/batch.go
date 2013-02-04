@@ -1,0 +1,216 @@
+// Copyright (c) 2012, Suryandaru Triandana <syndtr@gmail.com>
+// All rights reserved.
+//
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// This LevelDB Go implementation is based on LevelDB C++ implementation.
+// Which contains the following header:
+//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
+//   Use of this source code is governed by a BSD-style license that can be
+//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
+//   for names of contributors.
+
+package leveldb
+
+import (
+	"encoding/binary"
+
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
+)
+
+var (
+	errBatchTooShort  = errors.ErrCorrupt("batch in too short")
+	errBatchBadRecord = errors.ErrCorrupt("bad record in batch")
+)
+
+const kBatchHdrLen = 8 + 4
+
+type batchReplay interface {
+	put(key, value []byte, seq uint64)
+	delete(key []byte, seq uint64)
+}
+
+// Batch represent a write batch.
+type Batch struct {
+	buf  []byte
+	rLen int
+	seq  uint64
+	sync bool
+}
+
+func (b *Batch) grow(n int) {
+	off := len(b.buf)
+	if off == 0 {
+		// include headers
+		off = kBatchHdrLen
+		n += off
+	}
+	if cap(b.buf)-off >= n {
+		return
+	}
+	buf := make([]byte, 2*cap(b.buf)+n)
+	copy(buf, b.buf)
+	b.buf = buf[:off]
+}
+
+func (b *Batch) appendRec(t vType, key, value []byte) {
+	n := 1 + binary.MaxVarintLen32 + len(key)
+	if t == tVal {
+		n += binary.MaxVarintLen32 + len(value)
+	}
+	b.grow(n)
+	off := len(b.buf)
+	buf := b.buf[:off+n]
+	buf[off] = byte(t)
+	off += 1
+	off += binary.PutUvarint(buf[off:], uint64(len(key)))
+	copy(buf[off:], key)
+	off += len(key)
+	if t == tVal {
+		off += binary.PutUvarint(buf[off:], uint64(len(value)))
+		copy(buf[off:], value)
+		off += len(value)
+	}
+	b.buf = buf[:off]
+}
+
+// Put put given key/value to the batch for insert operation.
+func (b *Batch) Put(key, value []byte) {
+	b.appendRec(tVal, key, value)
+	b.rLen++
+}
+
+// Delete put given key to the batch for delete operation.
+func (b *Batch) Delete(key []byte) {
+	b.appendRec(tDel, key, nil)
+	b.rLen++
+}
+
+// Reset reset contents of the batch.
+func (b *Batch) Reset() {
+	b.buf = nil
+	b.seq = 0
+	b.rLen = 0
+	b.sync = false
+}
+
+func (b *Batch) init(sync bool) {
+	b.sync = sync
+}
+
+func (b *Batch) put(key, value []byte, seq uint64) {
+	if b.rLen == 0 {
+		b.seq = seq
+	}
+	b.Put(key, value)
+}
+
+func (b *Batch) delete(key []byte, seq uint64) {
+	if b.rLen == 0 {
+		b.seq = seq
+	}
+	b.Delete(key)
+}
+
+func (b *Batch) append(p *Batch) {
+	if p.rLen > 0 {
+		b.grow(len(p.buf) - kBatchHdrLen)
+		b.buf = append(b.buf, p.buf...)
+	}
+	if p.sync {
+		b.sync = true
+	}
+}
+
+func (b *Batch) len() int {
+	return b.rLen
+}
+
+func (b *Batch) size() int {
+	return len(b.buf)
+}
+
+func (b *Batch) encode() []byte {
+	b.grow(0)
+	binary.LittleEndian.PutUint64(b.buf, b.seq)
+	binary.LittleEndian.PutUint32(b.buf[8:], uint32(b.rLen))
+
+	return b.buf
+}
+
+func (b *Batch) decode(buf []byte) error {
+	if len(buf) < kBatchHdrLen {
+		return errBatchTooShort
+	}
+
+	b.seq = binary.LittleEndian.Uint64(buf)
+	b.rLen = int(binary.LittleEndian.Uint32(buf[8:]))
+	b.buf = buf
+
+	return nil
+}
+
+func (b *Batch) decodeRec(f func(i int, t vType, key, value []byte)) error {
+	off := kBatchHdrLen
+	for i := 0; i < b.rLen; i++ {
+		if off >= len(b.buf) {
+			return errors.ErrCorrupt("invalid batch record length")
+		}
+
+		t := vType(b.buf[off])
+		if t > tVal {
+			return errors.ErrCorrupt("invalid batch record type in batch")
+		}
+		off += 1
+
+		x, n := binary.Uvarint(b.buf[off:])
+		off += n
+		if n <= 0 || off+int(x) > len(b.buf) {
+			return errBatchBadRecord
+		}
+		key := b.buf[off : off+int(x)]
+		off += int(x)
+
+		var value []byte
+		if t == tVal {
+			x, n := binary.Uvarint(b.buf[off:])
+			off += n
+			if n <= 0 || off+int(x) > len(b.buf) {
+				return errBatchBadRecord
+			}
+			value = b.buf[off : off+int(x)]
+			off += int(x)
+		}
+
+		f(i, t, key, value)
+	}
+
+	return nil
+}
+
+func (b *Batch) replay(to batchReplay) error {
+	return b.decodeRec(func(i int, t vType, key, value []byte) {
+		switch t {
+		case tVal:
+			to.put(key, value, b.seq+uint64(i))
+		case tDel:
+			to.delete(key, b.seq+uint64(i))
+		}
+	})
+}
+
+func (b *Batch) memReplay(to *memdb.DB) error {
+	return b.decodeRec(func(i int, t vType, key, value []byte) {
+		ikey := newIKey(key, b.seq+uint64(i), t)
+		to.Put(ikey, value)
+	})
+}
+
+func (b *Batch) revertMemReplay(to *memdb.DB) error {
+	return b.decodeRec(func(i int, t vType, key, value []byte) {
+		ikey := newIKey(key, b.seq+uint64(i), t)
+		to.Remove(ikey)
+	})
+}
