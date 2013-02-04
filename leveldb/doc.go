@@ -15,40 +15,40 @@
 //
 // Create or open a database:
 //
-//	mydesc, err := descriptor.OpenFile("path/to/db")
+//	desc, err := descriptor.OpenFile("path/to/db")
 //	...
-//	mydb, err := db.Open(mydesc, &opt.Options{Flag: opt.OFCreateIfMissing})
+//	db, err := leveldb.Open(desc, &opt.Options{Flag: opt.OFCreateIfMissing})
 //	...
 //
 // Read or modify the database content:
 //
 //	ro := &opt.ReadOptions{}
 //	wo := &opt.WriteOptions{}
-//	data, err := mydb.Get([]byte("key"), ro)
+//	data, err := db.Get([]byte("key"), ro)
 //	...
-//	err = mydb.Put([]byte("key"), []byte("value"), wo)
+//	err = db.Put([]byte("key"), []byte("value"), wo)
 //	...
-//	err = mydb.Delete([]byte("key"), wo)
+//	err = db.Delete([]byte("key"), wo)
 //	...
 //
 // Iterate over database content:
 //
-//	myiter := mydb.NewIterator(ro)
-//	for myiter.Next() {
-//		key := myiter.Key()
-//		value := myiter.Value()
+//	iter := db.NewIterator(ro)
+//	for iter.Next() {
+//		key := iter.Key()
+//		value := iter.Value()
 //		...
 //	}
-//	err = myiter.Error()
+//	err = iter.Error()
 //	...
 //
 // Batch writes:
 //
-//	batch := new(db.Batch)
+//	batch := new(leveldb.Batch)
 //	batch.Put([]byte("foo"), []byte("value"))
 //	batch.Put([]byte("bar"), []byte("another value"))
 //	batch.Delete([]byte("baz"))
-//	err = mydb.Write(batch, wo)
+//	err = db.Write(batch, wo)
 //	...
 //
 // Use bloom filter:
@@ -57,6 +57,6 @@
 //		Flag:   opt.OFCreateIfMissing,
 //		Filter: filter.NewBloomFilter(10),
 //	}
-//	mydb, err := db.Open(mydesc, o)
+//	db, err := leveldb.Open(desc, o)
 //	...
 package leveldb
