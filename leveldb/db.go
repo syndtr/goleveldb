@@ -73,6 +73,7 @@ func open(s *session) (db *DB, err error) {
 	// remove any obsolete files
 	db.cleanFiles()
 
+	db.ewg.Add(2)
 	go db.compaction()
 	go db.writeJournal()
 	// wait for compaction goroutine
