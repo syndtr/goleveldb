@@ -393,8 +393,6 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 }
 
 func (d *DB) compaction() {
-	// register to the WaitGroup
-	d.ewg.Add(1)
 	defer func() {
 		if x := recover(); x != nil {
 			if x != d {

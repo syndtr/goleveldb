@@ -29,9 +29,6 @@ func (d *DB) doWriteJournal(b *Batch) error {
 }
 
 func (d *DB) writeJournal() {
-	// register to the WaitGroup
-	d.ewg.Add(1)
-
 	for b := range d.jch {
 		if b == nil {
 			break

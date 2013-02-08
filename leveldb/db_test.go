@@ -1471,8 +1471,8 @@ func TestDb_Concurrent(t *testing.T) {
 		var cnt [n]uint32
 
 		for i := 0; i < n; i++ {
+			wg.Add(1)
 			go func(i int) {
-				wg.Add(1)
 				var put, get, found uint
 				defer func() {
 					t.Logf("goroutine %d stopped after %d ops, put=%d get=%d found=%d missing=%d",
