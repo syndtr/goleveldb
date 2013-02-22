@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
@@ -61,7 +62,10 @@ func OpenFile(dbpath string) (d *FileDesc, err error) {
 		return
 	}
 
-	return &FileDesc{path: dbpath, lock: lock, log: log}, nil
+	d = &FileDesc{path: dbpath, lock: lock, log: log}
+	runtime.SetFinalizer(d, (*FileDesc).Close)
+
+	return
 }
 
 // Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
@@ -182,9 +186,11 @@ func (d *FileDesc) SetMainManifest(f File) (err error) {
 	return os.Rename(pthTmp, pth)
 }
 
-func (d *FileDesc) Close() {
-	setFileLock(d.lock, false)
-	d.lock.Close()
+func (d *FileDesc) Close() error {
+	if err := setFileLock(d.lock, false); err != nil {
+		return err
+	}
+	return d.lock.Close()
 }
 
 type file struct {
