@@ -79,6 +79,7 @@ func open(s *session) (db *DB, err error) {
 	// wait for compaction goroutine
 	db.cch <- cWait
 
+	runtime.SetFinalizer(db, (*DB).Close)
 	return
 }
 
