@@ -73,7 +73,7 @@ var benchDB = path.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Getuid
 
 type dbBench struct {
 	b    *testing.B
-	desc descriptor.Desc
+	desc *descriptor.FileDesc
 	db   *DB
 
 	o  *opt.Options

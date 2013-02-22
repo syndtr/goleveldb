@@ -106,7 +106,4 @@ type Desc interface {
 
 	// Set main manifest to 'f'.
 	SetMainManifest(f File) error
-
-	// Close descriptor
-	Close()
 }

@@ -63,8 +63,6 @@ func (m *MemDesc) SetMainManifest(f File) error {
 	return nil
 }
 
-func (*MemDesc) Close() {}
-
 type memReader struct {
 	bytes.Reader
 }
