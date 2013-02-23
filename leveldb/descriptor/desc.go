@@ -68,7 +68,7 @@ type File interface {
 	// Should return os.ErrNotExist if the file does not exist.
 	Open() (r Reader, err error)
 
-	// Create file write. Truncate if file already exist.
+	// Create file for write. Truncate if file already exist.
 	Create() (w Writer, err error)
 
 	// Rename to given number and type.
@@ -97,13 +97,14 @@ type Desc interface {
 	// Get file with given number and type.
 	GetFile(number uint64, t FileType) File
 
-	// Get all files.
+	// Get all files that match given file types; multiple file type
+	// may OR'ed together.
 	GetFiles(t FileType) []File
 
-	// Get main manifest.
+	// Get main manifest file.
 	// Should return os.ErrNotExist if there's no main manifest.
 	GetMainManifest() (f File, err error)
 
-	// Set main manifest to 'f'.
+	// Set main manifest to given file.
 	SetMainManifest(f File) error
 }
