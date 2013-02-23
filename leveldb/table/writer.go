@@ -18,6 +18,12 @@ import (
 	"leveldb/opt"
 )
 
+const (
+	// Written to disk; don't modify.
+	kNoCompression     = 0
+	kSnappyCompression = 1
+)
+
 // Writer represent a table writer.
 type Writer struct {
 	w   descriptor.Writer
@@ -181,15 +187,15 @@ func (t *Writer) CountBlock() int {
 }
 
 func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
-	compression := opt.NoCompression
+	compression := kNoCompression
 	if !raw {
-		compression = t.o.GetCompressionType()
-	}
-	switch compression {
-	case opt.SnappyCompression:
-		buf, err = snappy.Encode(nil, buf)
-		if err != nil {
-			return
+		switch t.o.GetCompressionType() {
+		case opt.DefaultCompression, opt.SnappyCompression:
+			compression = kSnappyCompression
+			buf, err = snappy.Encode(nil, buf)
+			if err != nil {
+				return
+			}
 		}
 	}
 

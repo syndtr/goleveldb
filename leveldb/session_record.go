@@ -10,23 +10,19 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-
-	"leveldb/errors"
 )
 
 // These numbers are written to disk and should not be changed.
 const (
-	_ uint64 = iota
-	tagComparer
-	tagJournalNum
-	tagNextNum
-	tagSeq
-	tagCompactPointer
-	tagDeletedTable
-	tagNewTable
+	tagComparer       = 1
+	tagJournalNum     = 2
+	tagNextNum        = 3
+	tagSeq            = 4
+	tagCompactPointer = 5
+	tagDeletedTable   = 6
+	tagNewTable       = 7
 	// 8 was used for large value refs
-	_
-	tagPrevJournalNum
+	tagPrevJournalNum = 9
 )
 
 const tagMax = tagPrevJournalNum
@@ -72,6 +68,9 @@ type sessionRecord struct {
 	hasJournalNum bool
 	journalNum    uint64
 
+	hasPrevJournalNum bool
+	prevJournalNum    uint64
+
 	hasNextNum bool
 	nextNum    uint64
 
@@ -91,6 +90,11 @@ func (p *sessionRecord) setComparer(name string) {
 func (p *sessionRecord) setJournalNum(num uint64) {
 	p.hasJournalNum = true
 	p.journalNum = num
+}
+
+func (p *sessionRecord) setPrevJournalNum(num uint64) {
+	p.hasPrevJournalNum = true
+	p.prevJournalNum = num
 }
 
 func (p *sessionRecord) setNextNum(num uint64) {
@@ -275,8 +279,10 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 				p.hasJournalNum = true
 			}
 		case tagPrevJournalNum:
-			err = errors.ErrInvalid("unsupported db format")
-			break
+			p.prevJournalNum, err = binary.ReadUvarint(r)
+			if err == nil {
+				p.hasPrevJournalNum = true
+			}
 		case tagNextNum:
 			p.nextNum, err = binary.ReadUvarint(r)
 			if err == nil {

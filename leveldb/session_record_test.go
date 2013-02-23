@@ -55,6 +55,7 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 
 	v.setComparer("foo")
 	v.setJournalNum(big + 100)
+	v.setPrevJournalNum(big + 99)
 	v.setNextNum(big + 200)
 	v.setSeq(big + 1000)
 	test()

@@ -190,18 +190,18 @@ func (d *DB) recoverJournal() (err error) {
 	batch := new(Batch)
 	cm := newCMem(s)
 
-	journals, skip := files(s.getFiles(descriptor.TypeJournal)), 0
+	journals := files(s.getFiles(descriptor.TypeJournal))
 	journals.sort()
+	rJournals := make([]descriptor.File, 0, len(journals))
 	for _, journal := range journals {
-		if journal.Num() < s.stJournalNum {
-			skip++
-			continue
+		if journal.Num() >= s.stJournalNum || journal.Num() == s.stPrevJournalNum {
+			s.markFileNum(journal.Num())
+			rJournals = append(rJournals, journal)
 		}
-		s.markFileNum(journal.Num())
 	}
 
 	var r, fr *journalReader
-	for _, journal := range journals[skip:] {
+	for _, journal := range rJournals {
 		s.printf("JournalRecovery: recovering, num=%d", journal.Num())
 
 		r, err = newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))

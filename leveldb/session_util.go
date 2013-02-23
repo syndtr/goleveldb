@@ -145,6 +145,10 @@ func (s *session) recordCommited(r *sessionRecord) {
 		s.stJournalNum = r.journalNum
 	}
 
+	if r.hasPrevJournalNum {
+		s.stPrevJournalNum = r.prevJournalNum
+	}
+
 	if r.hasSeq {
 		s.stSeq = r.seq
 	}

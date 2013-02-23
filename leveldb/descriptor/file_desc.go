@@ -246,11 +246,11 @@ func (p *file) Remove() error {
 func (p *file) name() string {
 	switch p.t {
 	case TypeManifest:
-		return fmt.Sprintf("MANIFEST-%d", p.num)
+		return fmt.Sprintf("MANIFEST-%06d", p.num)
 	case TypeJournal:
-		return fmt.Sprintf("%d.log", p.num)
+		return fmt.Sprintf("%06d.log", p.num)
 	case TypeTable:
-		return fmt.Sprintf("%d.sst", p.num)
+		return fmt.Sprintf("%06d.sst", p.num)
 	default:
 		panic("invalid file type")
 	}

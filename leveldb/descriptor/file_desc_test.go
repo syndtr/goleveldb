@@ -18,11 +18,11 @@ var cases = []struct {
 	ftype FileType
 	num   uint64
 }{
-	{"100.log", TypeJournal, 100},
-	{"0.log", TypeJournal, 0},
-	{"0.sst", TypeTable, 0},
-	{"MANIFEST-2", TypeManifest, 2},
-	{"MANIFEST-7", TypeManifest, 7},
+	{"000100.log", TypeJournal, 100},
+	{"000000.log", TypeJournal, 0},
+	{"000000.sst", TypeTable, 0},
+	{"MANIFEST-000002", TypeManifest, 2},
+	{"MANIFEST-000007", TypeManifest, 7},
 	{"18446744073709551615.log", TypeJournal, 18446744073709551615},
 }
 
