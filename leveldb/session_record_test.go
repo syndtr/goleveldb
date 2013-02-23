@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package leveldb
 
 import (
@@ -62,6 +55,7 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 
 	v.setComparer("foo")
 	v.setJournalNum(big + 100)
+	v.setPrevJournalNum(big + 99)
 	v.setNextNum(big + 200)
 	v.setSeq(big + 1000)
 	test()

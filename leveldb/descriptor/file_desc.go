@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package descriptor
 
 import (
@@ -18,12 +11,14 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
+// FileDesc provide implementation of file-system backed leveldb descriptor.
 type FileDesc struct {
 	path string
 	lock *os.File
@@ -32,6 +27,9 @@ type FileDesc struct {
 	mu   sync.Mutex
 }
 
+// OpenFile create new initialized FileDesc for given path. This will also
+// hold file lock; thus any subsequent attempt to open same file path will
+// fail.
 func OpenFile(dbpath string) (d *FileDesc, err error) {
 	err = os.MkdirAll(dbpath, 0755)
 	if err != nil {
@@ -61,7 +59,10 @@ func OpenFile(dbpath string) (d *FileDesc, err error) {
 		return
 	}
 
-	return &FileDesc{path: dbpath, lock: lock, log: log}, nil
+	d = &FileDesc{path: dbpath, lock: lock, log: log}
+	runtime.SetFinalizer(d, (*FileDesc).Close)
+
+	return
 }
 
 // Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
@@ -84,6 +85,7 @@ func itoa(buf *[]byte, i int, wid int) {
 	*buf = append(*buf, b[bp:]...)
 }
 
+// Print write given str to the log file.
 func (d *FileDesc) Print(str string) {
 	t := time.Now()
 	year, month, day := t.Date()
@@ -118,10 +120,13 @@ func (d *FileDesc) Print(str string) {
 	d.mu.Unlock()
 }
 
+// GetFile get file with given number and type.
 func (d *FileDesc) GetFile(number uint64, t FileType) File {
 	return &file{desc: d, num: number, t: t}
 }
 
+// GetFiles get all files that match given file types; multiple file
+// type may OR'ed together.
 func (d *FileDesc) GetFiles(t FileType) (r []File) {
 	dir, err := os.Open(d.path)
 	if err != nil {
@@ -142,6 +147,7 @@ func (d *FileDesc) GetFiles(t FileType) (r []File) {
 	return
 }
 
+// GetMainManifest get main manifest file.
 func (d *FileDesc) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
@@ -163,6 +169,7 @@ func (d *FileDesc) GetMainManifest() (f File, err error) {
 	return p, nil
 }
 
+// SetMainManifest set main manifest to given file.
 func (d *FileDesc) SetMainManifest(f File) (err error) {
 	p, ok := f.(*file)
 	if !ok {
@@ -182,9 +189,12 @@ func (d *FileDesc) SetMainManifest(f File) (err error) {
 	return os.Rename(pthTmp, pth)
 }
 
-func (d *FileDesc) Close() {
-	setFileLock(d.lock, false)
-	d.lock.Close()
+// Close closes the descriptor and release the lock.
+func (d *FileDesc) Close() error {
+	if err := setFileLock(d.lock, false); err != nil {
+		return err
+	}
+	return d.lock.Close()
 }
 
 type file struct {
@@ -236,13 +246,11 @@ func (p *file) Remove() error {
 func (p *file) name() string {
 	switch p.t {
 	case TypeManifest:
-		return fmt.Sprintf("MANIFEST-%d", p.num)
+		return fmt.Sprintf("MANIFEST-%06d", p.num)
 	case TypeJournal:
-		return fmt.Sprintf("%d.log", p.num)
+		return fmt.Sprintf("%06d.log", p.num)
 	case TypeTable:
-		return fmt.Sprintf("%d.sst", p.num)
-	case TypeTemp:
-		return fmt.Sprintf("%d.dbtmp", p.num)
+		return fmt.Sprintf("%06d.sst", p.num)
 	default:
 		panic("invalid file type")
 	}
@@ -263,8 +271,6 @@ func (p *file) parse(name string) bool {
 			p.t = TypeJournal
 		case "sst":
 			p.t = TypeTable
-		case "dbtmp":
-			p.t = TypeTemp
 		default:
 			return false
 		}

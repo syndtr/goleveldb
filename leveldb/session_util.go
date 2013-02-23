@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package leveldb
 
 import (
@@ -46,10 +39,6 @@ func (s *session) getJournalFile(num uint64) descriptor.File {
 
 func (s *session) getTableFile(num uint64) descriptor.File {
 	return s.desc.GetFile(num, descriptor.TypeTable)
-}
-
-func (s *session) getTempFile(num uint64) descriptor.File {
-	return s.desc.GetFile(num, descriptor.TypeTemp)
 }
 
 func (s *session) getFiles(t descriptor.FileType) []descriptor.File {
@@ -154,6 +143,10 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 func (s *session) recordCommited(r *sessionRecord) {
 	if r.hasJournalNum {
 		s.stJournalNum = r.journalNum
+	}
+
+	if r.hasPrevJournalNum {
+		s.stPrevJournalNum = r.prevJournalNum
 	}
 
 	if r.hasSeq {

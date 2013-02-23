@@ -12,6 +12,7 @@ import (
 	"sync"
 )
 
+// MemDesc provide implementation of memory backed leveldb descriptor.
 type MemDesc struct {
 	mu       sync.Mutex
 	files    map[uint64]*memFile
@@ -24,12 +25,16 @@ func (m *MemDesc) init() {
 	}
 }
 
+// Print will do nothing.
 func (*MemDesc) Print(str string) {}
 
+// GetFile get file with given number and type.
 func (m *MemDesc) GetFile(num uint64, t FileType) File {
 	return &memFilePtr{m: m, num: num, t: t}
 }
 
+// GetFiles get all files that match given file types; multiple file
+// type may OR'ed together.
 func (m *MemDesc) GetFiles(t FileType) (r []File) {
 	m.mu.Lock()
 	m.init()
@@ -43,6 +48,7 @@ func (m *MemDesc) GetFiles(t FileType) (r []File) {
 	return
 }
 
+// GetMainManifest get main manifest file.
 func (m *MemDesc) GetMainManifest() (f File, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -52,6 +58,7 @@ func (m *MemDesc) GetMainManifest() (f File, err error) {
 	return m.manifest, nil
 }
 
+// SetMainManifest set main manifest to given file.
 func (m *MemDesc) SetMainManifest(f File) error {
 	p, ok := f.(*memFilePtr)
 	if !ok {
@@ -62,8 +69,6 @@ func (m *MemDesc) SetMainManifest(f File) error {
 	m.mu.Unlock()
 	return nil
 }
-
-func (*MemDesc) Close() {}
 
 type memReader struct {
 	bytes.Reader

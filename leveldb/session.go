@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package leveldb
 
 import (
@@ -33,11 +26,12 @@ type session struct {
 
 	manifest *journalWriter
 
-	stVersion    unsafe.Pointer   // current version
-	stFileNum    uint64           // current unused file number
-	stJournalNum uint64           // current journal file number; need external synchronization
-	stSeq        uint64           // last mem compacted seq; need external synchronization
-	stCPtrs      [kNumLevels]iKey // compact pointers; need external synchronization
+	stVersion        unsafe.Pointer   // current version
+	stFileNum        uint64           // current unused file number
+	stJournalNum     uint64           // current journal file number; need external synchronization
+	stPrevJournalNum uint64           // prev journal file number; no longer used; for compatibility with older version of leveldb
+	stSeq            uint64           // last mem compacted seq; need external synchronization
+	stCPtrs          [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
 func newSession(d descriptor.Desc, o *opt.Options) *session {
@@ -104,6 +98,9 @@ func (s *session) recover() (err error) {
 
 		if rec.hasJournalNum {
 			srec.setJournalNum(rec.journalNum)
+		}
+		if rec.hasPrevJournalNum {
+			srec.setPrevJournalNum(rec.prevJournalNum)
 		}
 		if rec.hasNextNum {
 			srec.setNextNum(rec.nextNum)

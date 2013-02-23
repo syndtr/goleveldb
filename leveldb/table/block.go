@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package table
 
 import (
@@ -21,7 +14,6 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/hash"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 // bInfo holds information about where and how long a block is
@@ -91,12 +83,15 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 		}
 	}
 
-	compression := opt.Compression(raw[len(raw)-1])
+	compression := raw[len(raw)-1]
 	b = raw[:len(raw)-1]
 
 	switch compression {
-	case opt.SnappyCompression:
+	case kNoCompression:
+	case kSnappyCompression:
 		return snappy.Decode(nil, b)
+	default:
+		err = errors.ErrCorrupt("bad block type")
 	}
 
 	return

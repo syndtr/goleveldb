@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package descriptor
 
 import (
@@ -25,12 +18,11 @@ var cases = []struct {
 	ftype FileType
 	num   uint64
 }{
-	{"100.log", TypeJournal, 100},
-	{"0.log", TypeJournal, 0},
-	{"0.sst", TypeTable, 0},
-	{"0.dbtmp", TypeTemp, 0},
-	{"MANIFEST-2", TypeManifest, 2},
-	{"MANIFEST-7", TypeManifest, 7},
+	{"000100.log", TypeJournal, 100},
+	{"000000.log", TypeJournal, 0},
+	{"000000.sst", TypeTable, 0},
+	{"MANIFEST-000002", TypeManifest, 2},
+	{"MANIFEST-000007", TypeManifest, 7},
 	{"18446744073709551615.log", TypeJournal, 18446744073709551615},
 }
 

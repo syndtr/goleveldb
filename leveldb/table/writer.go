@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package table
 
 import (
@@ -23,6 +16,12 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+)
+
+const (
+	// Written to disk; don't modify.
+	kNoCompression     = 0
+	kSnappyCompression = 1
 )
 
 // Writer represent a table writer.
@@ -188,15 +187,15 @@ func (t *Writer) CountBlock() int {
 }
 
 func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
-	compression := opt.NoCompression
+	compression := kNoCompression
 	if !raw {
-		compression = t.o.GetCompressionType()
-	}
-	switch compression {
-	case opt.SnappyCompression:
-		buf, err = snappy.Encode(nil, buf)
-		if err != nil {
-			return
+		switch t.o.GetCompressionType() {
+		case opt.DefaultCompression, opt.SnappyCompression:
+			compression = kSnappyCompression
+			buf, err = snappy.Encode(nil, buf)
+			if err != nil {
+				return
+			}
 		}
 	}
 

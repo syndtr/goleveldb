@@ -4,13 +4,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This LevelDB Go implementation is based on LevelDB C++ implementation.
-// Which contains the following header:
-//   Copyright (c) 2011 The LevelDB Authors. All rights reserved.
-//   Use of this source code is governed by a BSD-style license that can be
-//   found in the LEVELDBCPP_LICENSE file. See the LEVELDBCPP_AUTHORS file
-//   for names of contributors.
-
 package leveldb
 
 import (
@@ -79,6 +72,7 @@ func open(s *session) (db *DB, err error) {
 	// wait for compaction goroutine
 	db.cch <- cWait
 
+	runtime.SetFinalizer(db, (*DB).Close)
 	return
 }
 
@@ -196,18 +190,18 @@ func (d *DB) recoverJournal() (err error) {
 	batch := new(Batch)
 	cm := newCMem(s)
 
-	journals, skip := files(s.getFiles(descriptor.TypeJournal)), 0
+	journals := files(s.getFiles(descriptor.TypeJournal))
 	journals.sort()
+	rJournals := make([]descriptor.File, 0, len(journals))
 	for _, journal := range journals {
-		if journal.Num() < s.stJournalNum {
-			skip++
-			continue
+		if journal.Num() >= s.stJournalNum || journal.Num() == s.stPrevJournalNum {
+			s.markFileNum(journal.Num())
+			rJournals = append(rJournals, journal)
 		}
-		s.markFileNum(journal.Num())
 	}
 
 	var r, fr *journalReader
-	for _, journal := range journals[skip:] {
+	for _, journal := range rJournals {
 		s.printf("JournalRecovery: recovering, num=%d", journal.Num())
 
 		r, err = newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))
