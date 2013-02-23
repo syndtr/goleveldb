@@ -41,10 +41,6 @@ func (s *session) getTableFile(num uint64) descriptor.File {
 	return s.desc.GetFile(num, descriptor.TypeTable)
 }
 
-func (s *session) getTempFile(num uint64) descriptor.File {
-	return s.desc.GetFile(num, descriptor.TypeTemp)
-}
-
 func (s *session) getFiles(t descriptor.FileType) []descriptor.File {
 	return s.desc.GetFiles(t)
 }

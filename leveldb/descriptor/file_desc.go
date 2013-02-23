@@ -251,8 +251,6 @@ func (p *file) name() string {
 		return fmt.Sprintf("%d.log", p.num)
 	case TypeTable:
 		return fmt.Sprintf("%d.sst", p.num)
-	case TypeTemp:
-		return fmt.Sprintf("%d.dbtmp", p.num)
 	default:
 		panic("invalid file type")
 	}
@@ -273,8 +271,6 @@ func (p *file) parse(name string) bool {
 			p.t = TypeJournal
 		case "sst":
 			p.t = TypeTable
-		case "dbtmp":
-			p.t = TypeTemp
 		default:
 			return false
 		}

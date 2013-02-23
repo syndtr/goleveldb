@@ -18,9 +18,8 @@ const (
 	TypeManifest FileType = 1 << iota
 	TypeJournal
 	TypeTable
-	TypeTemp
 
-	TypeAll = TypeManifest | TypeJournal | TypeTable | TypeTemp
+	TypeAll = TypeManifest | TypeJournal | TypeTable
 )
 
 func (t FileType) String() string {
@@ -31,8 +30,6 @@ func (t FileType) String() string {
 		return "journal"
 	case TypeTable:
 		return "table"
-	case TypeTemp:
-		return "temp"
 	}
 	return "<unknown>"
 }
