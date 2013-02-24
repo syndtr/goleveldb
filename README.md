@@ -15,6 +15,12 @@ Create or open a database:
 	db, err := leveldb.Open(desc, &opt.Options{Flag: opt.OFCreateIfMissing})
 	...
 
+Closing the database also incolves closing its descriptor:
+
+	...
+	err := db.Close()
+	desc.Close()
+
 Read or modify the database content:
 
 	ro := &opt.ReadOptions{}
