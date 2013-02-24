@@ -41,19 +41,28 @@ type Comparer interface {
 	// by any clients of this package.
 	Name() string
 
-	// Advanced functions: these are used to reduce the space requirements
-	// for internal data structures like index blocks.
+	// Advanced functions:
 
 	// If 'a' < 'b', changes 'a' to a short string in [a,b).
-	// Simple comparer implementations may return with 'a' unchanged,
+	//
+	// This is an advanced function that's used to reduce the space
+	// requirements for internal data structures such as index blocks.
+	//
+	// Simple Comparer implementations may return with 'a' unchanged,
 	// i.e., an implementation of this method that does nothing is correct.
+	//
 	// NOTE: Don't modify content of either 'a' or 'b', if modification
 	// is necessary copy it first. It is ok to return slice of it.
 	Separator(a, b []byte) []byte
 
 	// Changes 'b' to a short string >= 'b'.
-	// Simple comparer implementations may return with 'b' unchanged,
+	//
+	// This is an advanced function that's used to reduce the space
+	// requirements for internal data structures such as index blocks.
+	//
+	// Simple Comparer implementations may return with 'b' unchanged,
 	// i.e., an implementation of this method that does nothing is correct.
+	//
 	// NOTE: Don't modify content of 'b', if modification is necessary
 	// copy it first. It is ok to return slice of it.
 	Successor(b []byte) []byte
