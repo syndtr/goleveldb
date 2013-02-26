@@ -131,7 +131,9 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 		}
 
 		for level, ik := range s.stCPtrs {
-			r.addCompactPointer(level, ik)
+			if ik != nil {
+				r.addCompactPointer(level, ik)
+			}
 		}
 
 		r.setComparer(s.cmp.cmp.Name())

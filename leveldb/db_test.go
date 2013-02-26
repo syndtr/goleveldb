@@ -863,6 +863,26 @@ func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 	h.close()
 }
 
+func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
+	h := newDbHarness(t)
+	h.o.WriteBuffer = 100000
+
+	h.reopenDB()
+
+	maxTables := kNumLevels + kL0_StopWritesTrigger
+
+	value := strings.Repeat("v", 2*h.o.WriteBuffer)
+	for i := 0; i < 5*maxTables; i++ {
+		h.put("key", value)
+		n := h.totalTables()
+		if n > maxTables {
+			t.Errorf("total tables exceed %d, got=%d, iter=%d", maxTables, n, i)
+		}
+	}
+
+	h.close()
+}
+
 func TestDb_SparseMerge(t *testing.T) {
 	h := newDbHarness(t)
 	h.o.CompressionType = opt.NoCompression
