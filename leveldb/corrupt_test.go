@@ -13,9 +13,9 @@ import (
 	"testing"
 
 	"leveldb/cache"
-	"leveldb/descriptor"
 	"leveldb/journal"
 	"leveldb/opt"
+	"leveldb/storage"
 )
 
 const ctValSize = 1000
@@ -38,7 +38,7 @@ func (h *dbCorruptHarness) recover() {
 	t := p.t
 
 	var err error
-	p.db, err = Recover(h.desc, h.o)
+	p.db, err = Recover(h.stor, h.o)
 	if err != nil {
 		t.Fatal("Repair: got error: ", err)
 	}
@@ -60,12 +60,12 @@ func (h *dbCorruptHarness) build(n int) {
 	}
 }
 
-func (h *dbCorruptHarness) corrupt(ft descriptor.FileType, offset, n int) {
+func (h *dbCorruptHarness) corrupt(ft storage.FileType, offset, n int) {
 	p := &h.dbHarness
 	t := p.t
 
-	var file descriptor.File
-	for _, f := range p.desc.GetFiles(ft) {
+	var file storage.File
+	for _, f := range p.stor.GetFiles(ft) {
 		if file == nil || f.Num() > file.Num() {
 			file = f
 		}
@@ -160,8 +160,8 @@ func TestCorruptDB_Journal(t *testing.T) {
 	h.build(100)
 	h.check(100, 100)
 	h.closeDB()
-	h.corrupt(descriptor.TypeJournal, 19, 1)
-	h.corrupt(descriptor.TypeJournal, journal.BlockSize+1000, 1)
+	h.corrupt(storage.TypeJournal, 19, 1)
+	h.corrupt(storage.TypeJournal, journal.BlockSize+1000, 1)
 
 	h.openDB()
 	h.check(36, 36)
@@ -177,7 +177,7 @@ func TestCorruptDB_Table(t *testing.T) {
 	h.compactRangeAt(0, "", "")
 	h.compactRangeAt(1, "", "")
 	h.closeDB()
-	h.corrupt(descriptor.TypeTable, 100, 1)
+	h.corrupt(storage.TypeTable, 100, 1)
 
 	h.openDB()
 	h.check(99, 99)
@@ -191,7 +191,7 @@ func TestCorruptDB_TableIndex(t *testing.T) {
 	h.build(10000)
 	h.compactMem()
 	h.closeDB()
-	h.corrupt(descriptor.TypeTable, -2000, 500)
+	h.corrupt(storage.TypeTable, -2000, 500)
 
 	h.openDB()
 	h.check(5000, 9999)
@@ -275,7 +275,7 @@ func TestCorruptDB_CorruptedManifest(t *testing.T) {
 	h.compactMem()
 	h.compactRange("", "")
 	h.closeDB()
-	h.corrupt(descriptor.TypeManifest, 0, 1000)
+	h.corrupt(storage.TypeManifest, 0, 1000)
 	h.openAssert(false)
 
 	h.recover()
@@ -290,7 +290,7 @@ func TestCorruptDB_CompactionInputError(t *testing.T) {
 	h.build(10)
 	h.compactMem()
 	h.closeDB()
-	h.corrupt(descriptor.TypeTable, 100, 1)
+	h.corrupt(storage.TypeTable, 100, 1)
 
 	h.openDB()
 	h.check(9, 9)
@@ -307,7 +307,7 @@ func TestCorruptDB_UnrelatedKeys(t *testing.T) {
 	h.build(10)
 	h.compactMem()
 	h.closeDB()
-	h.corrupt(descriptor.TypeTable, 100, 1)
+	h.corrupt(storage.TypeTable, 100, 1)
 
 	h.openDB()
 	h.put(string(tkey(1000)), string(tval(1000, ctValSize)))

@@ -15,9 +15,9 @@ import (
 	"runtime"
 	"testing"
 
-	"leveldb/descriptor"
 	"leveldb/iterator"
 	"leveldb/opt"
+	"leveldb/storage"
 )
 
 func randomString(r *rand.Rand, n int) []byte {
@@ -66,7 +66,7 @@ var benchDB = path.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Getuid
 
 type dbBench struct {
 	b    *testing.B
-	desc *descriptor.FileDesc
+	stor *storage.FileStorage
 	db   *DB
 
 	o  *opt.Options
@@ -86,9 +86,9 @@ func openDBBench(b *testing.B) *dbBench {
 	}
 
 	p := &dbBench{b: b}
-	p.desc, err = descriptor.OpenFile(benchDB)
+	p.stor, err = storage.OpenFile(benchDB)
 	if err != nil {
-		b.Fatal("cannot open desc: ", err)
+		b.Fatal("cannot open stor: ", err)
 	}
 
 	p.o = &opt.Options{
@@ -97,7 +97,7 @@ func openDBBench(b *testing.B) *dbBench {
 	p.ro = &opt.ReadOptions{}
 	p.wo = &opt.WriteOptions{}
 
-	p.db, err = Open(p.desc, p.o)
+	p.db, err = Open(p.stor, p.o)
 	if err != nil {
 		b.Fatal("cannot open db: ", err)
 	}
@@ -108,10 +108,10 @@ func openDBBench(b *testing.B) *dbBench {
 
 func (p *dbBench) reopen() {
 	p.db.Close()
-	p.desc.Close()
+	p.stor.Close()
 
 	var err error
-	p.db, err = Open(p.desc, p.o)
+	p.db, err = Open(p.stor, p.o)
 	if err != nil {
 		p.b.Fatal("Reopen: got error: ", err)
 	}
@@ -250,7 +250,7 @@ func (p *dbBench) newIter() iterator.Iterator {
 
 func (p *dbBench) close() {
 	p.db.Close()
-	p.desc.Close()
+	p.stor.Close()
 	os.RemoveAll(benchDB)
 	p.db = nil
 	p.keys = nil

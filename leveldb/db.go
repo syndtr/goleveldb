@@ -14,11 +14,11 @@ import (
 	"sync"
 	"unsafe"
 
-	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/iterator"
 	"leveldb/memdb"
 	"leveldb/opt"
+	"leveldb/storage"
 )
 
 // DB represent a database session.
@@ -76,9 +76,9 @@ func open(s *session) (db *DB, err error) {
 	return
 }
 
-// Open open or create database from given desc.
-func Open(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
-	s := newSession(d, o)
+// Open open or create database from given storage.
+func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
+	s := newSession(p, o)
 
 	err = s.recover()
 	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
@@ -95,11 +95,11 @@ func Open(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
 
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
-func Recover(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
-	s := newSession(d, o)
+func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
+	s := newSession(p, o)
 
 	// get all files
-	ff := files(s.getFiles(descriptor.TypeAll))
+	ff := files(s.getFiles(storage.TypeAll))
 	ff.sort()
 
 	s.printf("Recover: started, files=%d", len(ff))
@@ -110,7 +110,7 @@ func Recover(d descriptor.Desc, o *opt.Options) (db *DB, err error) {
 	ro := &opt.ReadOptions{}
 	var nt *tFile
 	for _, f := range ff {
-		if f.Type() != descriptor.TypeTable {
+		if f.Type() != storage.TypeTable {
 			continue
 		}
 
@@ -190,9 +190,9 @@ func (d *DB) recoverJournal() (err error) {
 	batch := new(Batch)
 	cm := newCMem(s)
 
-	journals := files(s.getFiles(descriptor.TypeJournal))
+	journals := files(s.getFiles(storage.TypeJournal))
 	journals.sort()
-	rJournals := make([]descriptor.File, 0, len(journals))
+	rJournals := make([]storage.File, 0, len(journals))
 	for _, journal := range journals {
 		if journal.Num() >= s.stJournalNum || journal.Num() == s.stPrevJournalNum {
 			s.markFileNum(journal.Num())
@@ -387,9 +387,9 @@ func (d *DB) GetSnapshot() (snap *Snapshot, err error) {
 //
 //  "leveldb.num-files-at-level<N>" - return the number of files at level <N>,
 //     where <N> is an ASCII representation of a level number (e.g. "0").
-//  "leveldb.stats" - returns a multi-line string that describes statistics
+//  "leveldb.stats" - returns a multi-line string that storribes statistics
 //     about the internal operation of the DB.
-//  "leveldb.sstables" - returns a multi-line string that describes all
+//  "leveldb.sstables" - returns a multi-line string that storribes all
 //     of the sstables that make up the db contents.
 func (d *DB) GetProperty(prop string) (value string, err error) {
 	err = d.rok()

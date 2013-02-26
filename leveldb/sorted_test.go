@@ -15,11 +15,11 @@ import (
 
 	"leveldb/block"
 	"leveldb/comparer"
-	"leveldb/descriptor"
 	"leveldb/filter"
 	"leveldb/iterator"
 	"leveldb/memdb"
 	"leveldb/opt"
+	"leveldb/storage"
 	"leveldb/table"
 )
 
@@ -73,9 +73,9 @@ func (p *stConstructor_Block) customTest(h *stHarness) {}
 type stConstructor_Table struct {
 	t *testing.T
 
-	file descriptor.File
-	w    descriptor.Writer
-	r    descriptor.Reader
+	file storage.File
+	w    storage.Writer
+	r    storage.Reader
 	tw   *table.Writer
 	tr   *table.Reader
 }
@@ -83,7 +83,7 @@ type stConstructor_Table struct {
 func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 	p.t = t
 
-	p.file = newTestDesc(nil).GetFile(0, descriptor.TypeTable)
+	p.file = newTestingStorage(nil).GetFile(0, storage.TypeTable)
 	p.w, _ = p.file.Create()
 
 	o := &opt.Options{
@@ -216,7 +216,7 @@ func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}
 type stConstructor_DB struct {
 	t *testing.T
 
-	desc *testDesc
+	stor *testingStorage
 	ro   *opt.ReadOptions
 	wo   *opt.WriteOptions
 	db   *DB
@@ -225,14 +225,14 @@ type stConstructor_DB struct {
 func (p *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 	ho.Randomize = true
 	p.t = t
-	p.desc = newTestDesc(nil)
+	p.stor = newTestingStorage(nil)
 	o := &opt.Options{
 		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,
 	}
 	p.ro = &opt.ReadOptions{}
 	p.wo = &opt.WriteOptions{}
-	p.db, err = Open(p.desc, o)
+	p.db, err = Open(p.stor, o)
 	return
 }
 
@@ -242,7 +242,7 @@ func (p *stConstructor_DB) add(key, value string) error {
 }
 
 func (p *stConstructor_DB) finish() (size int, err error) {
-	return p.desc.Sizes(), nil
+	return p.stor.Sizes(), nil
 }
 
 func (p *stConstructor_DB) newIterator() iterator.Iterator {

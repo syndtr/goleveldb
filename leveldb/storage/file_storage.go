@@ -4,7 +4,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package descriptor
+package storage
 
 import (
 	"bytes"
@@ -18,8 +18,8 @@ import (
 	"leveldb/errors"
 )
 
-// FileDesc provide implementation of file-system backed leveldb descriptor.
-type FileDesc struct {
+// FileStorage provide implementation of file-system backed storage.
+type FileStorage struct {
 	path string
 	lock *os.File
 	log  *os.File
@@ -27,10 +27,10 @@ type FileDesc struct {
 	mu   sync.Mutex
 }
 
-// OpenFile create new initialized FileDesc for given path. This will also
+// OpenFile create new initialized FileStorage for given path. This will also
 // hold file lock; thus any subsequent attempt to open same file path will
 // fail.
-func OpenFile(dbpath string) (d *FileDesc, err error) {
+func OpenFile(dbpath string) (d *FileStorage, err error) {
 	err = os.MkdirAll(dbpath, 0755)
 	if err != nil {
 		return
@@ -59,8 +59,8 @@ func OpenFile(dbpath string) (d *FileDesc, err error) {
 		return
 	}
 
-	d = &FileDesc{path: dbpath, lock: lock, log: log}
-	runtime.SetFinalizer(d, (*FileDesc).Close)
+	d = &FileStorage{path: dbpath, lock: lock, log: log}
+	runtime.SetFinalizer(d, (*FileStorage).Close)
 
 	return
 }
@@ -86,7 +86,7 @@ func itoa(buf *[]byte, i int, wid int) {
 }
 
 // Print write given str to the log file.
-func (d *FileDesc) Print(str string) {
+func (d *FileStorage) Print(str string) {
 	t := time.Now()
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
@@ -121,13 +121,13 @@ func (d *FileDesc) Print(str string) {
 }
 
 // GetFile get file with given number and type.
-func (d *FileDesc) GetFile(number uint64, t FileType) File {
-	return &file{desc: d, num: number, t: t}
+func (d *FileStorage) GetFile(number uint64, t FileType) File {
+	return &file{stor: d, num: number, t: t}
 }
 
 // GetFiles get all files that match given file types; multiple file
 // type may OR'ed together.
-func (d *FileDesc) GetFiles(t FileType) (r []File) {
+func (d *FileStorage) GetFiles(t FileType) (r []File) {
 	dir, err := os.Open(d.path)
 	if err != nil {
 		return
@@ -137,18 +137,18 @@ func (d *FileDesc) GetFiles(t FileType) (r []File) {
 	if err != nil {
 		return
 	}
-	p := &file{desc: d}
+	p := &file{stor: d}
 	for _, name := range names {
 		if p.parse(name) && (p.t&t) != 0 {
 			r = append(r, p)
-			p = &file{desc: d}
+			p = &file{stor: d}
 		}
 	}
 	return
 }
 
 // GetMainManifest get main manifest file.
-func (d *FileDesc) GetMainManifest() (f File, err error) {
+func (d *FileStorage) GetMainManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
@@ -162,7 +162,7 @@ func (d *FileDesc) GetMainManifest() (f File, err error) {
 		return
 	}
 	b := buf.Bytes()
-	p := &file{desc: d}
+	p := &file{stor: d}
 	if len(b) < 1 || b[len(b)-1] != '\n' || !p.parse(string(b[:len(b)-1])) {
 		return nil, errors.ErrCorrupt("invalid CURRENT file")
 	}
@@ -170,7 +170,7 @@ func (d *FileDesc) GetMainManifest() (f File, err error) {
 }
 
 // SetMainManifest set main manifest to given file.
-func (d *FileDesc) SetMainManifest(f File) (err error) {
+func (d *FileStorage) SetMainManifest(f File) (err error) {
 	p, ok := f.(*file)
 	if !ok {
 		return ErrInvalidFile
@@ -189,8 +189,8 @@ func (d *FileDesc) SetMainManifest(f File) (err error) {
 	return os.Rename(pthTmp, pth)
 }
 
-// Close closes the descriptor and release the lock.
-func (d *FileDesc) Close() error {
+// Close closes the storage and release the lock.
+func (d *FileStorage) Close() error {
 	if err := setFileLock(d.lock, false); err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (d *FileDesc) Close() error {
 }
 
 type file struct {
-	desc *FileDesc
+	stor *FileStorage
 	num  uint64
 	t    FileType
 }
@@ -258,7 +258,7 @@ func (p *file) name() string {
 }
 
 func (p *file) path() string {
-	return path.Join(p.desc.path, p.name())
+	return path.Join(p.stor.path, p.name())
 }
 
 func (p *file) parse(name string) bool {

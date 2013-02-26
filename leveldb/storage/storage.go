@@ -4,8 +4,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Package descriptor provides I/O abstraction for LevelDB.
-package descriptor
+// Package storage provides storage abstraction for LevelDB.
+package storage
 
 import (
 	"errors"
@@ -80,7 +80,7 @@ type File interface {
 	Remove() error
 }
 
-type Desc interface {
+type Storage interface {
 	// Print a string, for logging.
 	Print(str string)
 

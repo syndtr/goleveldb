@@ -4,7 +4,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package descriptor
+package storage
 
 import (
 	"bytes"
@@ -12,30 +12,30 @@ import (
 	"sync"
 )
 
-// MemDesc provide implementation of memory backed leveldb descriptor.
-type MemDesc struct {
+// MemStorage provide implementation of memory backed storage.
+type MemStorage struct {
 	mu       sync.Mutex
 	files    map[uint64]*memFile
 	manifest *memFilePtr
 }
 
-func (m *MemDesc) init() {
+func (m *MemStorage) init() {
 	if m.files == nil {
 		m.files = make(map[uint64]*memFile)
 	}
 }
 
 // Print will do nothing.
-func (*MemDesc) Print(str string) {}
+func (*MemStorage) Print(str string) {}
 
 // GetFile get file with given number and type.
-func (m *MemDesc) GetFile(num uint64, t FileType) File {
+func (m *MemStorage) GetFile(num uint64, t FileType) File {
 	return &memFilePtr{m: m, num: num, t: t}
 }
 
 // GetFiles get all files that match given file types; multiple file
 // type may OR'ed together.
-func (m *MemDesc) GetFiles(t FileType) (r []File) {
+func (m *MemStorage) GetFiles(t FileType) (r []File) {
 	m.mu.Lock()
 	m.init()
 	for num, f := range m.files {
@@ -49,7 +49,7 @@ func (m *MemDesc) GetFiles(t FileType) (r []File) {
 }
 
 // GetMainManifest get main manifest file.
-func (m *MemDesc) GetMainManifest() (f File, err error) {
+func (m *MemStorage) GetMainManifest() (f File, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.manifest == nil {
@@ -59,7 +59,7 @@ func (m *MemDesc) GetMainManifest() (f File, err error) {
 }
 
 // SetMainManifest set main manifest to given file.
-func (m *MemDesc) SetMainManifest(f File) error {
+func (m *MemStorage) SetMainManifest(f File) error {
 	p, ok := f.(*memFilePtr)
 	if !ok {
 		return ErrInvalidFile
@@ -85,7 +85,7 @@ func (*memFile) Sync() error  { return nil }
 func (*memFile) Close() error { return nil }
 
 type memFilePtr struct {
-	m   *MemDesc
+	m   *MemStorage
 	num uint64
 	t   FileType
 }

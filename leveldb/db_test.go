@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"leveldb/cache"
-	"leveldb/descriptor"
 	"leveldb/errors"
 	"leveldb/filter"
 	"leveldb/opt"
+	"leveldb/storage"
 )
 
 func tkey(i int) []byte {
@@ -35,7 +35,7 @@ func tval(seed, n int) []byte {
 type dbHarness struct {
 	t *testing.T
 
-	desc *testDesc
+	stor *testingStorage
 	db   *DB
 	o    *opt.Options
 	ro   *opt.ReadOptions
@@ -56,7 +56,7 @@ func newDbHarness(t *testing.T) *dbHarness {
 
 func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 	h.t = t
-	h.desc = newTestDesc(t)
+	h.stor = newTestingStorage(t)
 	h.o = o
 	h.ro = &opt.ReadOptions{}
 	h.wo = &opt.WriteOptions{}
@@ -66,7 +66,7 @@ func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 
 func (h *dbHarness) openDB() {
 	var err error
-	h.db, err = Open(h.desc, h.o)
+	h.db, err = Open(h.stor, h.o)
 	if err != nil {
 		h.t.Fatal("Open: got error: ", err)
 	}
@@ -89,13 +89,13 @@ func (h *dbHarness) close() {
 	h.closeDB()
 	h.o = nil
 	h.db = nil
-	h.desc = nil
+	h.stor = nil
 	runtime.GC()
 }
 
 func (h *dbHarness) openAssert(want bool) {
 	var err error
-	h.db, err = Open(h.desc, h.o)
+	h.db, err = Open(h.stor, h.o)
 	if err != nil {
 		if want {
 			h.t.Error("Open: assert: got error: ", err)
@@ -491,11 +491,11 @@ func TestDb_GetFromFrozen(t *testing.T) {
 	h.put("foo", "v1")
 	h.getVal("foo", "v1")
 
-	h.desc.DelaySync(descriptor.TypeTable)   // Block sync calls
+	h.stor.DelaySync(storage.TypeTable)      // Block sync calls
 	h.put("k1", strings.Repeat("x", 100000)) // Fill memtable
 	h.put("k2", strings.Repeat("y", 100000)) // Trigger compaction
 	h.getVal("foo", "v1")
-	h.desc.ReleaseSync(descriptor.TypeTable) // Release sync calls
+	h.stor.ReleaseSync(storage.TypeTable) // Release sync calls
 
 	h.reopenDB()
 	h.getVal("foo", "v1")
@@ -744,12 +744,12 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 	runAllOpts(t, func(h *dbHarness) {
 		h.o.WriteBuffer = 1000000
 
-		h.desc.DelaySync(descriptor.TypeTable)
+		h.stor.DelaySync(storage.TypeTable)
 		h.put("foo", "v1")
 		h.put("big1", strings.Repeat("x", 10000000))
 		h.put("big2", strings.Repeat("y", 1000))
 		h.put("bar", "v2")
-		h.desc.ReleaseSync(descriptor.TypeTable)
+		h.stor.ReleaseSync(storage.TypeTable)
 
 		h.reopenDB()
 		h.getVal("foo", "v1")
@@ -1205,17 +1205,17 @@ func TestDb_ManifestWriteError(t *testing.T) {
 		}
 
 		if i == 0 {
-			h.desc.SetWriteErr(descriptor.TypeManifest)
+			h.stor.SetWriteErr(storage.TypeManifest)
 		} else {
-			h.desc.SetSyncErr(descriptor.TypeManifest)
+			h.stor.SetSyncErr(storage.TypeManifest)
 		}
 
 		// Merging compaction (will fail)
 		h.compactRangeAtErr(kMaxMemCompactLevel, "", "", true)
 
 		h.db.Close()
-		h.desc.SetWriteErr(0)
-		h.desc.SetSyncErr(0)
+		h.stor.SetWriteErr(0)
+		h.stor.SetSyncErr(0)
 
 		// Should not lose data
 		h.openDB()
@@ -1425,14 +1425,14 @@ func TestDb_BloomFilter(t *testing.T) {
 	h.compactMem()
 
 	// Prevent auto compactions triggered by seeks
-	h.desc.DelaySync(descriptor.TypeTable)
+	h.stor.DelaySync(storage.TypeTable)
 
 	// Lookup present keys. Should rarely read from small sstable.
-	h.desc.SetReadAtCounter(descriptor.TypeTable)
+	h.stor.SetReadAtCounter(storage.TypeTable)
 	for i := 0; i < n; i++ {
 		h.getVal(key(i), key(i))
 	}
-	cnt := int(h.desc.ReadAtCounter())
+	cnt := int(h.stor.ReadAtCounter())
 	t.Logf("lookup of %d present keys yield %d sstable I/O reads", n, cnt)
 
 	if min, max := n, n+2*n/100; cnt < min || cnt > max {
@@ -1440,17 +1440,17 @@ func TestDb_BloomFilter(t *testing.T) {
 	}
 
 	// Lookup missing keys. Should rarely read from either sstable.
-	h.desc.ResetReadAtCounter()
+	h.stor.ResetReadAtCounter()
 	for i := 0; i < n; i++ {
 		h.get(key(i)+".missing", false)
 	}
-	cnt = int(h.desc.ReadAtCounter())
+	cnt = int(h.stor.ReadAtCounter())
 	t.Logf("lookup of %d missing keys yield %d sstable I/O reads", n, cnt)
 	if max := 3 * n / 100; cnt > max {
 		t.Errorf("num of sstable I/O reads of missing keys was more than %d, got %d", max, cnt)
 	}
 
-	h.desc.ReleaseSync(descriptor.TypeTable)
+	h.stor.ReleaseSync(storage.TypeTable)
 	h.close()
 }
 

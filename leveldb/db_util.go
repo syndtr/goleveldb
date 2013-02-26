@@ -7,9 +7,9 @@
 package leveldb
 
 import (
-	"leveldb/descriptor"
 	"leveldb/iterator"
 	"leveldb/opt"
+	"leveldb/storage"
 )
 
 // Reader is the interface that wraps basic Get and NewIterator methods.
@@ -50,18 +50,18 @@ func (d *DB) cleanFiles() {
 		}
 	}
 
-	for _, f := range s.getFiles(descriptor.TypeAll) {
+	for _, f := range s.getFiles(storage.TypeAll) {
 		keep := true
 		switch f.Type() {
-		case descriptor.TypeManifest:
+		case storage.TypeManifest:
 			keep = !s.manifest.closed() && f.Num() >= s.manifest.file.Num()
-		case descriptor.TypeJournal:
+		case storage.TypeJournal:
 			if d.fjournal != nil && !d.fjournal.closed() {
 				keep = f.Num() >= d.fjournal.file.Num()
 			} else {
 				keep = f.Num() >= d.journal.file.Num()
 			}
-		case descriptor.TypeTable:
+		case storage.TypeTable:
 			_, keep = tables[f.Num()]
 		}
 

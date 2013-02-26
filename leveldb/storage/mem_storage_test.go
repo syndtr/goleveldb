@@ -4,15 +4,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package descriptor
+package storage
 
 import (
 	"bytes"
 	"testing"
 )
 
-func TestMemDesc(t *testing.T) {
-	m := new(MemDesc)
+func TestMemStorage(t *testing.T) {
+	m := new(MemStorage)
 
 	f := m.GetFile(1, TypeTable)
 	if f.Num() != 1 && f.Type() != TypeTable {
