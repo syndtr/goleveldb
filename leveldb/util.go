@@ -40,7 +40,7 @@ func sliceBytesTest(b []byte) (valid bool, v, rest []byte) {
 func readBytes(r readByteReader) (b []byte, err error) {
 	var n uint64
 	n, err = binary.ReadUvarint(r)
-	if err != nil {
+	if err != nil || n <= 0 {
 		return
 	}
 	b = make([]byte, n)
