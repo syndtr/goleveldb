@@ -419,7 +419,7 @@ func numKey(num int) string {
 var _bloom_filter = filter.NewBloomFilter(10)
 
 func runAllOpts(t *testing.T, f func(h *dbHarness)) {
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		h := newDbHarness(t)
 		switch i {
 		case 0:
@@ -427,6 +427,8 @@ func runAllOpts(t *testing.T, f func(h *dbHarness)) {
 			h.o.Filter = _bloom_filter
 		case 2:
 			h.o.CompressionType = opt.NoCompression
+		case 3:
+			h.reopenDB()
 		}
 		f(h)
 		h.close()
