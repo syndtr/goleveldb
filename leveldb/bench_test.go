@@ -22,7 +22,6 @@ import (
 
 func randomString(r *rand.Rand, n int) []byte {
 	b := new(bytes.Buffer)
-	b.Grow(n)
 	for i := 0; i < n; i++ {
 		b.WriteByte(' ' + byte(r.Intn(95)))
 	}
