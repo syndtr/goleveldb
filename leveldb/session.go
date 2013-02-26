@@ -10,15 +10,15 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 // session represent a persistent database session.
 type session struct {
-	desc   descriptor.Desc
+	stor   storage.Storage
 	o      *iOptions
 	cmp    *iComparer
 	filter *iFilter
@@ -34,9 +34,9 @@ type session struct {
 	stCPtrs          [kNumLevels]iKey // compact pointers; need external synchronization
 }
 
-func newSession(d descriptor.Desc, o *opt.Options) *session {
+func newSession(d storage.Storage, o *opt.Options) *session {
 	s := new(session)
-	s.desc = d
+	s.stor = d
 	s.o = &iOptions{s, o}
 	s.cmp = &iComparer{o.GetComparer()}
 	filter := o.GetFilter()
@@ -60,7 +60,7 @@ func (s *session) create() (err error) {
 
 // Recover a database session; need external synchronization.
 func (s *session) recover() (err error) {
-	file, err := s.desc.GetMainManifest()
+	file, err := s.stor.GetMainManifest()
 	if err != nil {
 		return
 	}

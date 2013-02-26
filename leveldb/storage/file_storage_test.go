@@ -4,7 +4,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-package descriptor
+package storage
 
 import (
 	"fmt"
@@ -51,7 +51,7 @@ var invalidCases = []string{
 	"100.lop",
 }
 
-func TestFileDesc_CreateFileName(t *testing.T) {
+func TestFileStorage_CreateFileName(t *testing.T) {
 	for _, c := range cases {
 		f := &file{num: c.num, t: c.ftype}
 		if f.name() != c.name {
@@ -60,7 +60,7 @@ func TestFileDesc_CreateFileName(t *testing.T) {
 	}
 }
 
-func TestFileDesc_ParseFileName(t *testing.T) {
+func TestFileStorage_ParseFileName(t *testing.T) {
 	for _, c := range cases {
 		f := new(file)
 		if !f.parse(c.name) {
@@ -76,7 +76,7 @@ func TestFileDesc_ParseFileName(t *testing.T) {
 	}
 }
 
-func TestFileDesc_InvalidFileName(t *testing.T) {
+func TestFileStorage_InvalidFileName(t *testing.T) {
 	for _, name := range invalidCases {
 		f := new(file)
 		if f.parse(name) {
@@ -85,7 +85,7 @@ func TestFileDesc_InvalidFileName(t *testing.T) {
 	}
 }
 
-func TestFileDesc_Flock(t *testing.T) {
+func TestFileStorage_Flock(t *testing.T) {
 	pth := path.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
 
 	_, err := os.Stat(pth)

@@ -11,8 +11,8 @@ import (
 	"io"
 	"sort"
 
-	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/journal"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type readByteReader interface {
@@ -58,7 +58,7 @@ func shorten(str string) string {
 	return str[:5] + "..." + str[len(str)-5:]
 }
 
-type files []descriptor.File
+type files []storage.File
 
 func (p files) Len() int {
 	return len(p)
@@ -77,12 +77,12 @@ func (p files) sort() {
 }
 
 type journalReader struct {
-	file    descriptor.File
-	reader  descriptor.Reader
+	file    storage.File
+	reader  storage.Reader
 	journal *journal.Reader
 }
 
-func newJournalReader(file descriptor.File, checksum bool, dropf journal.DropFunc) (p *journalReader, err error) {
+func newJournalReader(file storage.File, checksum bool, dropf journal.DropFunc) (p *journalReader, err error) {
 	r := new(journalReader)
 	r.file = file
 	r.reader, err = file.Open()
@@ -112,12 +112,12 @@ func (r *journalReader) remove() error {
 }
 
 type journalWriter struct {
-	file    descriptor.File
-	writer  descriptor.Writer
+	file    storage.File
+	writer  storage.Writer
 	journal *journal.Writer
 }
 
-func newJournalWriter(file descriptor.File) (p *journalWriter, err error) {
+func newJournalWriter(file storage.File) (p *journalWriter, err error) {
 	w := new(journalWriter)
 	w.file = file
 	w.writer, err = file.Create()

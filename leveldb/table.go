@@ -13,15 +13,15 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
 )
 
 // table file
 type tFile struct {
-	file     descriptor.File
+	file     storage.File
 	seekLeft int32
 	size     uint64
 	min, max iKey
@@ -41,7 +41,7 @@ func (t *tFile) incrSeek() int32 {
 	return atomic.AddInt32(&t.seekLeft, -1)
 }
 
-func newTFile(file descriptor.File, size uint64, min, max iKey) *tFile {
+func newTFile(file storage.File, size uint64, min, max iKey) *tFile {
 	f := &tFile{
 		file: file,
 		size: size,
@@ -398,7 +398,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 	num := f.file.Num()
 
 	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
-		var r descriptor.Reader
+		var r storage.Reader
 		r, err = f.file.Open()
 		if err != nil {
 			return
@@ -434,8 +434,8 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 type tWriter struct {
 	t *tOps
 
-	file descriptor.File
-	w    descriptor.Writer
+	file storage.File
+	w    storage.Writer
 	tw   *table.Writer
 
 	notFirst    bool

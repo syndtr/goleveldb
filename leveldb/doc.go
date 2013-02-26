@@ -8,9 +8,9 @@
 //
 // Create or open a database:
 //
-//	desc, err := descriptor.OpenFile("path/to/db")
+//	stor, err := storage.OpenFile("path/to/db")
 //	...
-//	db, err := leveldb.Open(desc, &opt.Options{Flag: opt.OFCreateIfMissing})
+//	db, err := leveldb.Open(stor, &opt.Options{Flag: opt.OFCreateIfMissing})
 //	...
 //
 // Read or modify the database content:
@@ -50,6 +50,6 @@
 //		Flag:   opt.OFCreateIfMissing,
 //		Filter: filter.NewBloomFilter(10),
 //	}
-//	db, err := leveldb.Open(desc, o)
+//	db, err := leveldb.Open(stor, o)
 //	...
 package leveldb

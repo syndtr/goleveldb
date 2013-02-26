@@ -11,18 +11,18 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/syndtr/goleveldb/leveldb/descriptor"
 	"github.com/syndtr/goleveldb/leveldb/journal"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 // logging
 
 func (s *session) print(v ...interface{}) {
-	s.desc.Print(fmt.Sprint(v...))
+	s.stor.Print(fmt.Sprint(v...))
 }
 
 func (s *session) printf(format string, v ...interface{}) {
-	s.desc.Print(fmt.Sprintf(format, v...))
+	s.stor.Print(fmt.Sprintf(format, v...))
 }
 
 func (s *session) journalDropFunc(tag string, num uint64) journal.DropFunc {
@@ -33,16 +33,16 @@ func (s *session) journalDropFunc(tag string, num uint64) journal.DropFunc {
 
 // file utils
 
-func (s *session) getJournalFile(num uint64) descriptor.File {
-	return s.desc.GetFile(num, descriptor.TypeJournal)
+func (s *session) getJournalFile(num uint64) storage.File {
+	return s.stor.GetFile(num, storage.TypeJournal)
 }
 
-func (s *session) getTableFile(num uint64) descriptor.File {
-	return s.desc.GetFile(num, descriptor.TypeTable)
+func (s *session) getTableFile(num uint64) storage.File {
+	return s.stor.GetFile(num, storage.TypeTable)
 }
 
-func (s *session) getFiles(t descriptor.FileType) []descriptor.File {
-	return s.desc.GetFiles(t)
+func (s *session) getFiles(t storage.FileType) []storage.File {
+	return s.stor.GetFiles(t)
 }
 
 // session state
@@ -160,7 +160,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 
 // Create a new manifest file; need external synchronization.
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
-	w, err := newJournalWriter(s.desc.GetFile(num, descriptor.TypeManifest))
+	w, err := newJournalWriter(s.stor.GetFile(num, storage.TypeManifest))
 	if err != nil {
 		return
 	}
@@ -197,7 +197,7 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 		return
 	}
 
-	return s.desc.SetMainManifest(w.file)
+	return s.stor.SetMainManifest(w.file)
 }
 
 // Flush record to disk.
