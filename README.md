@@ -10,16 +10,17 @@ Usage
 
 Create or open a database:
 
-	desc, err := descriptor.OpenFile("path/to/db")
+	stor, err := storage.OpenFile("path/to/db")
 	...
-	db, err := leveldb.Open(desc, &opt.Options{Flag: opt.OFCreateIfMissing})
+	db, err := leveldb.Open(stor, &opt.Options{Flag: opt.OFCreateIfMissing})
 	...
 
-Closing the database also incolves closing its descriptor:
+Closing the database also involves closing its storage:
 
+	err = db.Close()
 	...
-	err := db.Close()
-	desc.Close()
+	err = stor.Close()
+	...
 
 Read or modify the database content:
 
@@ -58,7 +59,7 @@ Use bloom filter:
 		Flag:   opt.OFCreateIfMissing,
 		Filter: filter.NewBloomFilter(10),
 	}
-	db, err := leveldb.Open(desc, o)
+	db, err := leveldb.Open(stor, o)
 	...
 
 Documentation
