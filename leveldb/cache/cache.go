@@ -12,6 +12,9 @@ package cache
 type SetFunc func() (ok bool, value interface{}, charge int, fin func())
 
 type Cache interface {
+	// Set cache capacity.
+	SetCapacity(capacity int)
+
 	// Get caches namespace for given id.
 	GetNamespace(id uint64) Namespace
 

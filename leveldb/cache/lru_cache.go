@@ -32,6 +32,14 @@ func NewLRUCache(capacity int) *LRUCache {
 	return c
 }
 
+// SetCapacity set cache capacity.
+func (c *LRUCache) SetCapacity(capacity int) {
+	c.Lock()
+	c.capacity = capacity
+	c.evict()
+	c.Unlock()
+}
+
 // GetNamespace return namespace object for given id.
 func (c *LRUCache) GetNamespace(id uint64) Namespace {
 	c.Lock()
