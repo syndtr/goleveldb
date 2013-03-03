@@ -81,9 +81,9 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	s := newSession(p, o)
 
 	err = s.recover()
-	if os.IsNotExist(err) && o.HasFlag(opt.OFCreateIfMissing) {
+	if os.IsNotExist(err) && s.o.HasFlag(opt.OFCreateIfMissing) {
 		err = s.create()
-	} else if err == nil && o.HasFlag(opt.OFErrorIfExist) {
+	} else if err == nil && s.o.HasFlag(opt.OFErrorIfExist) {
 		err = os.ErrExist
 	}
 	if err != nil {
@@ -287,6 +287,12 @@ func (d *DB) recoverJournal() (err error) {
 	}
 
 	return
+}
+
+// GetOptionsSetter return OptionsSetter for this database. OptionsSetter
+// allows safely set options of an opened database.
+func (d *DB) GetOptionsSetter() opt.OptionsSetter {
+	return d.s.o
 }
 
 func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
