@@ -52,9 +52,13 @@ func (o *iOptions) SetMaxOpenFiles(max int) error {
 }
 
 func (o *iOptions) SetBlockCache(cache cache.Cache) error {
+	oldcache := o.Options.GetBlockCache()
 	err := o.Options.SetBlockCache(cache)
 	if err != nil {
 		return err
+	}
+	if oldcache != nil {
+		oldcache.Purge(nil)
 	}
 	o.s.tops.cache.Purge(nil)
 	return nil
