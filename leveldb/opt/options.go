@@ -8,11 +8,27 @@
 package opt
 
 import (
+	"errors"
 	"sync"
 
 	"leveldb/cache"
 	"leveldb/comparer"
 	"leveldb/filter"
+)
+
+var (
+	ErrInvalid    = errors.New("invalid value")
+	ErrNotSet     = errors.New("not set")
+	ErrNotAllowed = errors.New("not allowed")
+)
+
+const (
+	DefaultWriteBuffer          = 4 << 20
+	DefaultMaxOpenFiles         = 1000
+	DefaultBlockCacheSize       = 8 << 20
+	DefaultBlockSize            = 4096
+	DefaultBlockRestartInterval = 16
+	DefaultCompressionType      = SnappyCompression
 )
 
 type OptionsFlag uint
@@ -132,7 +148,7 @@ type Options struct {
 	// Default: NULL
 	Filter filter.Filter
 
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 // OptionsGetter wraps methods used to get sanitized options.
@@ -148,8 +164,30 @@ type OptionsGetter interface {
 	GetFilter() filter.Filter
 }
 
+// OptionsSetter wraps methods used to set options.
+type OptionsSetter interface {
+	SetComparer(cmp comparer.Comparer) error
+	SetFlag(flag OptionsFlag) error
+	ClearFlag(flag OptionsFlag) error
+	SetWriteBuffer(size int) error
+	SetMaxOpenFiles(max int) error
+	SetBlockCache(cache cache.Cache) error
+	SetBlockCacheCapacity(capacity int) error
+	SetBlockSize(size int) error
+	SetBlockRestartInterval(interval int) error
+	SetCompressionType(compression Compression) error
+	SetFilter(p filter.Filter) error
+}
+
+// Getter
+
 func (o *Options) GetComparer() comparer.Comparer {
-	if o == nil || o.Comparer == nil {
+	if o == nil {
+		return comparer.DefaultComparer
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.Comparer == nil {
 		return comparer.DefaultComparer
 	}
 	return o.Comparer
@@ -159,52 +197,76 @@ func (o *Options) HasFlag(flag OptionsFlag) bool {
 	if o == nil {
 		return false
 	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	return (o.Flag & flag) != 0
 }
 
 func (o *Options) GetWriteBuffer() int {
-	if o == nil || o.WriteBuffer <= 0 {
-		return 4 << 20
+	if o == nil {
+		return DefaultWriteBuffer
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.WriteBuffer <= 0 {
+		return DefaultWriteBuffer
 	}
 	return o.WriteBuffer
 }
 
 func (o *Options) GetMaxOpenFiles() int {
-	if o == nil || o.MaxOpenFiles <= 0 {
-		return 1000
+	if o == nil {
+		return DefaultMaxOpenFiles
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.MaxOpenFiles <= 0 {
+		return DefaultMaxOpenFiles
 	}
 	return o.MaxOpenFiles
 }
 
 func (o *Options) GetBlockCache() cache.Cache {
-	o.mu.Lock()
-	defer o.mu.Unlock()
 	if o == nil {
 		return nil
 	}
-	if o.BlockCache == nil {
-		o.BlockCache = cache.NewLRUCache(8 << 20)
-	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	return o.BlockCache
 }
 
 func (o *Options) GetBlockSize() int {
-	if o == nil || o.BlockSize <= 0 {
-		return 4096
+	if o == nil {
+		return DefaultBlockSize
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.BlockSize <= 0 {
+		return DefaultBlockSize
 	}
 	return o.BlockSize
 }
 
 func (o *Options) GetBlockRestartInterval() int {
-	if o == nil || o.BlockRestartInterval <= 0 {
-		return 16
+	if o == nil {
+		return DefaultBlockRestartInterval
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.BlockRestartInterval <= 0 {
+		return DefaultBlockRestartInterval
 	}
 	return o.BlockRestartInterval
 }
 
 func (o *Options) GetCompressionType() Compression {
-	if o == nil || o.CompressionType <= DefaultCompression || o.CompressionType >= nCompression {
-		return SnappyCompression
+	if o == nil {
+		return DefaultCompressionType
+	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.CompressionType <= DefaultCompression || o.CompressionType >= nCompression {
+		return DefaultCompressionType
 	}
 	return o.CompressionType
 }
@@ -213,7 +275,142 @@ func (o *Options) GetFilter() filter.Filter {
 	if o == nil {
 		return nil
 	}
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	return o.Filter
+}
+
+// Setter
+
+func (o *Options) SetComparer(cmp comparer.Comparer) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if cmp == nil {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.Comparer = cmp
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetFlag(flag OptionsFlag) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	o.mu.Lock()
+	o.Flag |= flag
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) ClearFlag(flag OptionsFlag) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	o.mu.Lock()
+	o.Flag &= ^flag
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetWriteBuffer(size int) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if size <= 0 {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.WriteBuffer = size
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetMaxOpenFiles(max int) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if max <= 0 {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.MaxOpenFiles = max
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetBlockCache(cache cache.Cache) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	o.mu.Lock()
+	o.BlockCache = cache
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetBlockCacheCapacity(capacity int) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	o.mu.Lock()
+	if o.BlockCache == nil {
+		return ErrNotSet
+	}
+	o.BlockCache.SetCapacity(capacity)
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetBlockSize(size int) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if size <= 0 {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.BlockSize = size
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetBlockRestartInterval(interval int) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if interval <= 0 {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.BlockRestartInterval = interval
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetCompressionType(compression Compression) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	if o.CompressionType >= nCompression {
+		return ErrInvalid
+	}
+	o.mu.Lock()
+	o.CompressionType = compression
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *Options) SetFilter(p filter.Filter) error {
+	if o == nil {
+		return ErrNotSet
+	}
+	o.mu.Lock()
+	o.Filter = p
+	o.mu.Unlock()
+	return nil
 }
 
 type ReadOptionsFlag uint
