@@ -38,20 +38,24 @@ type dbHarness struct {
 	stor *testingStorage
 	db   *DB
 	o    *opt.Options
+	oo   opt.OptionsSetter
 	ro   *opt.ReadOptions
 	wo   *opt.WriteOptions
 }
 
-func newDbHarnessWopt(t *testing.T, o *opt.Options) *dbHarness {
+func newDbHarnessWoptRaw(t *testing.T, o *opt.Options) *dbHarness {
 	h := new(dbHarness)
 	h.init(t, o)
 	return h
 }
 
+func newDbHarnessWopt(t *testing.T, o *opt.Options) *dbHarness {
+	o.Flag |= opt.OFCreateIfMissing
+	return newDbHarnessWoptRaw(t, o)
+}
+
 func newDbHarness(t *testing.T) *dbHarness {
-	return newDbHarnessWopt(t, &opt.Options{
-		Flag: opt.OFCreateIfMissing,
-	})
+	return newDbHarnessWopt(t, &opt.Options{})
 }
 
 func (h *dbHarness) init(t *testing.T, o *opt.Options) {
@@ -70,6 +74,7 @@ func (h *dbHarness) openDB() {
 	if err != nil {
 		h.t.Fatal("Open: got error: ", err)
 	}
+	h.oo = h.db.GetOptionsSetter()
 }
 
 func (h *dbHarness) closeDB() {
@@ -103,6 +108,7 @@ func (h *dbHarness) openAssert(want bool) {
 			h.t.Log("Open: assert: got error (expected): ", err)
 		}
 	} else {
+		h.oo = h.db.GetOptionsSetter()
 		if !want {
 			h.t.Error("Open: assert: expect error")
 		}
@@ -424,9 +430,9 @@ func runAllOpts(t *testing.T, f func(h *dbHarness)) {
 		switch i {
 		case 0:
 		case 1:
-			h.o.Filter = _bloom_filter
+			h.oo.SetFilter(_bloom_filter)
 		case 2:
-			h.o.CompressionType = opt.NoCompression
+			h.oo.SetCompressionType(opt.NoCompression)
 		case 3:
 			h.reopenDB()
 		}
@@ -487,8 +493,7 @@ func TestDb_EmptyBatch(t *testing.T) {
 }
 
 func TestDb_GetFromFrozen(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 100000
+	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
 
 	h.put("foo", "v1")
 	h.getVal("foo", "v1")
@@ -744,7 +749,7 @@ func TestDb_RecoverWithEmptyJournal(t *testing.T) {
 
 func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 	runAllOpts(t, func(h *dbHarness) {
-		h.o.WriteBuffer = 1000000
+		h.oo.SetWriteBuffer(1000000)
 
 		h.stor.DelaySync(storage.TypeTable)
 		h.put("foo", "v1")
@@ -762,8 +767,7 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 }
 
 func TestDb_MinorCompactionsHappen(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 10000
+	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 10000})
 
 	n := 500
 
@@ -812,9 +816,10 @@ func TestDb_RecoverWithLargeJournal(t *testing.T) {
 }
 
 func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 100000000
-	h.o.CompressionType = opt.NoCompression
+	h := newDbHarnessWopt(t, &opt.Options{
+		WriteBuffer:     100000000,
+		CompressionType: opt.NoCompression,
+	})
 
 	v := h.db.s.version()
 	if v.tLen(0) > 0 {
@@ -848,8 +853,7 @@ func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 }
 
 func TestDb_RepeatedWritesToSameKey(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 100000
+	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
 
 	maxTables := kNumLevels + kL0_StopWritesTrigger
 
@@ -866,8 +870,7 @@ func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 }
 
 func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 100000
+	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
 
 	h.reopenDB()
 
@@ -886,8 +889,7 @@ func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
 }
 
 func TestDb_SparseMerge(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.CompressionType = opt.NoCompression
+	h := newDbHarnessWopt(t, &opt.Options{CompressionType: opt.NoCompression})
 
 	h.putMulti(kNumLevels, "A", "Z")
 
@@ -922,9 +924,10 @@ func TestDb_SparseMerge(t *testing.T) {
 }
 
 func TestDb_ApproximateSizes(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.WriteBuffer = 100000000
-	h.o.CompressionType = opt.NoCompression
+	h := newDbHarnessWopt(t, &opt.Options{
+		CompressionType: opt.NoCompression,
+		WriteBuffer:     100000000,
+	})
 
 	h.sizeAssert("", "xyz", 0, 0)
 	h.reopenDB()
@@ -971,8 +974,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 }
 
 func TestDb_ApproximateSizes_MixOfSmallAndLarge(t *testing.T) {
-	h := newDbHarness(t)
-	h.o.CompressionType = opt.NoCompression
+	h := newDbHarnessWopt(t, &opt.Options{CompressionType: opt.NoCompression})
 
 	sizes := []uint64{
 		10000,
@@ -1353,7 +1355,6 @@ func (numberComparer) Successor(b []byte) []byte {
 
 func TestDb_CustomComparer(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		Flag:        opt.OFCreateIfMissing,
 		Comparer:    numberComparer{},
 		WriteBuffer: 1000,
 	})
@@ -1424,7 +1425,6 @@ func TestDb_ManualCompaction(t *testing.T) {
 
 func TestDb_BloomFilter(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		Flag:       opt.OFCreateIfMissing,
 		BlockCache: cache.EmptyCache{},
 		Filter:     filter.NewBloomFilter(10),
 	})
@@ -1533,7 +1533,10 @@ func TestDb_Concurrent(t *testing.T) {
 			}(i)
 		}
 
-		time.Sleep(time.Second * secs)
+		for i := 0; i < secs; i++ {
+			h.oo.SetBlockCache(cache.NewLRUCache(rand.Int() % (opt.DefaultBlockCacheSize * 2)))
+			time.Sleep(time.Second)
+		}
 		atomic.StoreUint32(&stop, 1)
 		wg.Wait()
 	})

@@ -8,6 +8,8 @@ package cache
 
 type EmptyCache struct{}
 
+func (EmptyCache) SetCapacity(capacity int) {}
+
 func (EmptyCache) GetNamespace(id uint64) Namespace {
 	return emptyCacheNs{}
 }

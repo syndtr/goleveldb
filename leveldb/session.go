@@ -18,11 +18,10 @@ import (
 
 // session represent a persistent database session.
 type session struct {
-	stor   storage.Storage
-	o      *iOptions
-	cmp    *iComparer
-	filter *iFilter
-	tops   *tOps
+	stor storage.Storage
+	o    *iOptions
+	cmp  *iComparer
+	tops *tOps
 
 	manifest *journalWriter
 
@@ -37,12 +36,8 @@ type session struct {
 func newSession(d storage.Storage, o *opt.Options) *session {
 	s := new(session)
 	s.stor = d
-	s.o = &iOptions{s, o}
 	s.cmp = &iComparer{o.GetComparer()}
-	filter := o.GetFilter()
-	if filter != nil {
-		s.filter = &iFilter{filter}
-	}
+	s.o = newIOptions(s, *o)
 	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
 	return s

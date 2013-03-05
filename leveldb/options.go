@@ -14,45 +14,59 @@ import (
 )
 
 type iOptions struct {
+	opt.Options
 	s *session
-	o opt.OptionsGetter
+}
+
+func newIOptions(s *session, o opt.Options) *iOptions {
+	p := &iOptions{Options: o, s: s}
+	p.sanitize()
+	return p
+}
+
+func (o *iOptions) sanitize() {
+	if p := o.GetBlockCache(); p == nil {
+		o.Options.SetBlockCache(cache.NewLRUCache(opt.DefaultBlockCacheSize))
+	}
+
+	if p := o.GetFilter(); p != nil {
+		o.Options.SetFilter(&iFilter{p})
+	}
 }
 
 func (o *iOptions) GetComparer() comparer.Comparer {
 	return o.s.cmp
 }
 
-func (o *iOptions) HasFlag(flag opt.OptionsFlag) bool {
-	return o.o.HasFlag(flag)
+func (o *iOptions) SetComparer(cmp comparer.Comparer) error {
+	return opt.ErrNotAllowed
 }
 
-func (o *iOptions) GetWriteBuffer() int {
-	return o.o.GetWriteBuffer()
-}
-
-func (o *iOptions) GetMaxOpenFiles() int {
-	return o.o.GetMaxOpenFiles()
-}
-
-func (o *iOptions) GetBlockCache() cache.Cache {
-	return o.o.GetBlockCache()
-}
-
-func (o *iOptions) GetBlockSize() int {
-	return o.o.GetBlockSize()
-}
-
-func (o *iOptions) GetBlockRestartInterval() int {
-	return o.o.GetBlockRestartInterval()
-}
-
-func (o *iOptions) GetCompressionType() opt.Compression {
-	return o.o.GetCompressionType()
-}
-
-func (o *iOptions) GetFilter() filter.Filter {
-	if o.s.filter == nil {
-		return nil
+func (o *iOptions) SetMaxOpenFiles(max int) error {
+	err := o.Options.SetMaxOpenFiles(max)
+	if err != nil {
+		return err
 	}
-	return o.s.filter
+	o.s.tops.cache.SetCapacity(max)
+	return nil
+}
+
+func (o *iOptions) SetBlockCache(cache cache.Cache) error {
+	oldcache := o.Options.GetBlockCache()
+	err := o.Options.SetBlockCache(cache)
+	if err != nil {
+		return err
+	}
+	if oldcache != nil {
+		oldcache.Purge(nil)
+	}
+	o.s.tops.cache.Purge(nil)
+	return nil
+}
+
+func (o *iOptions) SetFilter(p filter.Filter) error {
+	if p != nil {
+		p = &iFilter{p}
+	}
+	return o.Options.SetFilter(p)
 }
