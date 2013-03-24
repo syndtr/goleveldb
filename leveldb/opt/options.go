@@ -145,6 +145,21 @@ type Options struct {
 	// Many applications will benefit from passing the result of
 	// NewBloomFilter() here.
 	//
+	// As long as the same filter (name) was used as last time the
+	// database was opened, the previous filter is reused. That is,
+	// the filter does not need to be rebuilt. This is made possible
+	// since each filter is persisted to disk on a per sstable
+	// basis.
+	//
+	// As opposed to the comparer, a filter can be replaced after a
+	// database has been created. If this is done, the previous
+	// persisted filter will be ignored for every old sstable.
+	// Every new table will use the newly introduced filter. This
+	// means that all/some sstables will lack a filter during a
+	// transition period. Note that this might have an impact on
+	// performance. Rewriting every single key/value will force
+	// introduction of the new filter.
+	//
 	// Default: NULL
 	Filter filter.Filter
 
