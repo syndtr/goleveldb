@@ -12,7 +12,7 @@
 // In many cases, a filter can cut down the number of disk seeks from a
 // handful to a single disk seek per DB.Get() call.
 //
-// Most people will want to use the builtin bloom filter support.
+// Most people will want to use the built-in bloom filter support.
 package filter
 
 import "io"
