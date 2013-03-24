@@ -23,6 +23,12 @@ type BloomFilter struct {
 
 // NewBloomFilter create new initialized bloom filter for given
 // bitsPerKey.
+//
+// Since bitsPerKey is persisted individually for each bloom filter
+// serialization, bloom filters are backwards compatible with respect to
+// changing bitsPerKey. This means that no big performance penalty will
+// be experienced when changing the parameter. See documentation for
+// opt.Options.Filter for more information.
 func NewBloomFilter(bitsPerKey int) *BloomFilter {
 	// We intentionally round down to reduce probing cost a little bit
 	k := uint32(bitsPerKey) * 69 / 100 // 0.69 =~ ln(2)
@@ -35,6 +41,10 @@ func NewBloomFilter(bitsPerKey int) *BloomFilter {
 }
 
 // Name return the name of this filter. i.e. "leveldb.BuiltinBloomFilter".
+//
+// The bloom filter serializes its parameters and is backward compatible
+// with respect to them. Therefor, its parameters are not added to its
+// name.
 func (*BloomFilter) Name() string {
 	return "leveldb.BuiltinBloomFilter"
 }
