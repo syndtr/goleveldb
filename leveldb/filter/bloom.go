@@ -21,7 +21,7 @@ type BloomFilter struct {
 	bitsPerKey, k uint32
 }
 
-// NewBloomFilter create new initialized bloom filter for given
+// NewBloomFilter creates a new initialized bloom filter for given
 // bitsPerKey.
 func NewBloomFilter(bitsPerKey int) *BloomFilter {
 	// We intentionally round down to reduce probing cost a little bit
@@ -39,8 +39,8 @@ func (*BloomFilter) Name() string {
 	return "leveldb.BuiltinBloomFilter"
 }
 
-// CreateFilter generate filter for given set of keys and write it to
-// given buffer.
+// CreateFilter generates a filter for given set of keys and writes it
+// to the given buffer.
 func (p *BloomFilter) CreateFilter(keys [][]byte, buf io.Writer) {
 	// Compute bloom filter size (in both bits and bytes)
 	bits := uint32(len(keys)) * p.bitsPerKey
