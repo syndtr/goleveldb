@@ -73,11 +73,15 @@ const (
 // Options represent sets of LevelDB options.
 type Options struct {
 	// Comparer used to define the order of keys in the table.
-	// Default: a comparer that uses lexicographic byte-wise ordering
+	// Default: a comparer that uses lexicographic byte-wise
+	// ordering.
 	//
 	// REQUIRES: The client must ensure that the comparer supplied
 	// here has the same name and orders keys *exactly* the same as the
 	// comparer provided to previous open calls on the same DB.
+	// Additionally, the client must also make sure that the
+	// supplied comparer retains the same name. Otherwise, an error
+	// will be returned on reopening the database.
 	Comparer comparer.Comparer
 
 	// Specify the database flag.
