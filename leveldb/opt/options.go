@@ -73,11 +73,15 @@ const (
 // Options represent sets of LevelDB options.
 type Options struct {
 	// Comparer used to define the order of keys in the table.
-	// Default: a comparer that uses lexicographic byte-wise ordering
+	// Default: a comparer that uses lexicographic byte-wise
+	// ordering.
 	//
 	// REQUIRES: The client must ensure that the comparer supplied
 	// here has the same name and orders keys *exactly* the same as the
 	// comparer provided to previous open calls on the same DB.
+	// Additionally, the client must also make sure that the
+	// supplied comparer retains the same name. Otherwise, an error
+	// will be returned on reopening the database.
 	Comparer comparer.Comparer
 
 	// Specify the database flag.
@@ -144,6 +148,21 @@ type Options struct {
 	// If non-NULL, use the specified filter policy to reduce disk reads.
 	// Many applications will benefit from passing the result of
 	// NewBloomFilter() here.
+	//
+	// As long as the same filter (name) was used as last time the
+	// database was opened, the previous filter is reused. That is,
+	// the filter does not need to be rebuilt. This is made possible
+	// since each filter is persisted to disk on a per sstable
+	// basis.
+	//
+	// As opposed to the comparer, a filter can be replaced after a
+	// database has been created. If this is done, the previous
+	// persisted filter will be ignored for every old sstable.
+	// Every new table will use the newly introduced filter. This
+	// means that all/some sstables will lack a filter during a
+	// transition period. Note that this might have an impact on
+	// performance. Rewriting every single key/value will force
+	// introduction of the new filter.
 	//
 	// Default: NULL
 	Filter filter.Filter
