@@ -464,8 +464,10 @@ func (o *Options) SetFilter(p filter.Filter) error {
 	}
 	o.mu.Lock()
 	o.Filter = p
-	o.initFilters()
-	o.filters[p.Name()] = p
+	if p != nil {
+		o.initFilters()
+		o.filters[p.Name()] = p
+	}
 	o.mu.Unlock()
 	return nil
 }
