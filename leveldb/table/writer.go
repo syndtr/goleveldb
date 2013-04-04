@@ -13,6 +13,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -26,13 +27,14 @@ const (
 
 // Writer represent a table writer.
 type Writer struct {
-	w   storage.Writer
-	o   opt.OptionsGetter
-	cmp comparer.Comparer
+	w      storage.Writer
+	o      opt.OptionsGetter
+	cmp    comparer.Comparer
+	filter filter.Filter
 
-	data   *block.Writer
-	index  *block.Writer
-	filter *block.FilterWriter
+	dataBlock   *block.Writer
+	indexBlock  *block.Writer
+	filterBlock *block.FilterWriter
 
 	n, off int
 	lkey   []byte // last key
@@ -46,12 +48,12 @@ type Writer struct {
 func NewWriter(w storage.Writer, o opt.OptionsGetter) *Writer {
 	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
 	// Creating blocks
-	t.data = block.NewWriter(o.GetBlockRestartInterval())
-	t.index = block.NewWriter(1)
-	filter := o.GetFilter()
-	if filter != nil {
-		t.filter = block.NewFilterWriter(filter)
-		t.filter.Generate(0)
+	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
+	t.indexBlock = block.NewWriter(1)
+	t.filter = o.GetFilter()
+	if t.filter != nil {
+		t.filterBlock = block.NewFilterWriter(t.filter)
+		t.filterBlock.Generate(0)
 	}
 	t.lblock = new(bInfo)
 	return t
@@ -66,19 +68,19 @@ func (t *Writer) Add(key, value []byte) (err error) {
 	if t.pindex {
 		// write the pending index
 		sep := t.cmp.Separator(t.lkey, key)
-		t.index.Add(sep, t.lblock.encode())
+		t.indexBlock.Add(sep, t.lblock.encode())
 		t.pindex = false
 	}
 
-	if t.filter != nil {
-		t.filter.Add(key)
+	if t.filterBlock != nil {
+		t.filterBlock.Add(key)
 	}
 
 	t.lkey = key
 	t.n++
 
-	t.data.Add(key, value)
-	if t.data.Size() >= t.o.GetBlockSize() {
+	t.dataBlock.Add(key, value)
+	if t.dataBlock.Size() >= t.o.GetBlockSize() {
 		err = t.Flush()
 	}
 	return
@@ -94,16 +96,16 @@ func (t *Writer) Flush() (err error) {
 		return
 	}
 
-	err = t.write(t.data.Finish(), t.lblock, false)
+	err = t.write(t.dataBlock.Finish(), t.lblock, false)
 	if err != nil {
 		return
 	}
-	t.data.Reset()
+	t.dataBlock.Reset()
 
 	t.pindex = true
 
-	if t.filter != nil {
-		t.filter.Generate(t.off)
+	if t.filterBlock != nil {
+		t.filterBlock.Generate(t.off)
 	}
 	return
 }
@@ -124,8 +126,8 @@ func (t *Writer) Finish() (err error) {
 
 	// Write filter block
 	fi := new(bInfo)
-	if t.filter != nil {
-		err = t.write(t.filter.Finish(), fi, true)
+	if t.filterBlock != nil {
+		err = t.write(t.filterBlock.Finish(), fi, true)
 		if err != nil {
 			return
 		}
@@ -134,8 +136,7 @@ func (t *Writer) Finish() (err error) {
 	// Write meta block
 	meta := block.NewWriter(t.o.GetBlockRestartInterval())
 	if t.filter != nil {
-		filter := t.o.GetFilter()
-		key := []byte("filter." + filter.Name())
+		key := []byte("filter." + t.filter.Name())
 		meta.Add(key, fi.encode())
 	}
 	mb := new(bInfo)
@@ -147,11 +148,11 @@ func (t *Writer) Finish() (err error) {
 	// Write index block
 	if t.pindex {
 		suc := t.cmp.Successor(t.lkey)
-		t.index.Add(suc, t.lblock.encode())
+		t.indexBlock.Add(suc, t.lblock.encode())
 		t.pindex = false
 	}
 	ib := new(bInfo)
-	err = t.write(t.index.Finish(), ib, false)
+	err = t.write(t.indexBlock.Finish(), ib, false)
 	if err != nil {
 		return
 	}
@@ -179,7 +180,7 @@ func (t *Writer) Size() int {
 
 // CountBlock return the number of data block written so far.
 func (t *Writer) CountBlock() int {
-	n := t.index.Len()
+	n := t.indexBlock.Len()
 	if !t.closed {
 		n++
 	}

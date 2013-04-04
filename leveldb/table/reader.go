@@ -9,6 +9,7 @@ package table
 
 import (
 	"runtime"
+	"strings"
 
 	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/cache"
@@ -24,9 +25,8 @@ type Reader struct {
 	r storage.Reader
 	o opt.OptionsGetter
 
-	meta   *block.Reader
-	index  *block.Reader
-	filter *block.FilterReader
+	indexBlock  *block.Reader
+	filterBlock *block.FilterReader
 
 	dataEnd uint64
 	cache   cache.Namespace
@@ -46,62 +46,61 @@ func NewReader(r storage.Reader, size uint64, o opt.OptionsGetter, cache cache.N
 	if err != nil {
 		return
 	}
-	t.index, err = block.NewReader(buf, o.GetComparer())
+	t.indexBlock, err = block.NewReader(buf, o.GetComparer())
 	if err != nil {
 		return
 	}
 
+	// we will ignore any errors at meta/filter block
+	// since it is not essential for operation
+
+	// meta block
+	buf, err1 := mb.readAll(r, true)
+	if err1 != nil {
+		return
+	}
+	meta, err1 := block.NewReader(buf, comparer.BytesComparer{})
+	if err1 != nil {
+		return
+	}
+
 	// filter block
-	filter := o.GetFilter()
-	if filter != nil {
-		// we will ignore any errors at meta/filter block
-		// since it is not essential for operation
-
-		// meta block
-		buf, err = mb.readAll(r, true)
-		if err != nil {
-			goto out
+	iter := meta.NewIterator()
+	for iter.Next() {
+		key := string(iter.Key())
+		if !strings.HasPrefix(key, "filter.") {
+			continue
 		}
-		var meta *block.Reader
-		meta, err = block.NewReader(buf, comparer.BytesComparer{})
-		if err != nil {
-
-			goto out
-		}
-
-		// check for filter name
-		iter := meta.NewIterator()
-		key := "filter." + filter.Name()
-		if iter.Seek([]byte(key)) && string(iter.Key()) == key {
+		if filter := o.GetAltFilter(key[7:]); filter != nil {
 			fb := new(bInfo)
-			_, err = fb.decodeFrom(iter.Value())
-			if err != nil {
-				return
+			_, err1 = fb.decodeFrom(iter.Value())
+			if err1 != nil {
+				continue
 			}
 
-			// now the data end before filter block start offset
+			// now the data block end before filter block start offset
+			// instead of meta block start offset
 			t.dataEnd = fb.offset
 
-			// filter block
-			buf, err = fb.readAll(r, true)
-			if err != nil {
-				goto out
+			buf, err1 = fb.readAll(r, true)
+			if err1 != nil {
+				continue
 			}
-			t.filter, err = block.NewFilterReader(buf, filter)
-			if err != nil {
-				goto out
+			t.filterBlock, err1 = block.NewFilterReader(buf, filter)
+			if err1 != nil {
+				continue
 			}
+			break
 		}
 	}
 
-out:
 	return t, nil
 }
 
 // NewIterator create new iterator over the table.
 func (t *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 	index_iter := &indexIter{t: t, ro: ro}
-	t.index.InitIterator(&index_iter.Iterator)
+	t.indexBlock.InitIterator(&index_iter.Iterator)
 	return iterator.NewIndexedIterator(index_iter)
 }
 
@@ -109,7 +108,7 @@ func (t *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 // given key did not exist.
 func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte, err error) {
 	// create an iterator of index block
-	index_iter := t.index.NewIterator()
+	index_iter := t.indexBlock.NewIterator()
 	if !index_iter.Seek(key) {
 		err = index_iter.Error()
 		if err == nil {
@@ -126,7 +125,7 @@ func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte,
 	}
 
 	// get the data block
-	if t.filter == nil || t.filter.KeyMayMatch(uint(bi.offset), key) {
+	if t.filterBlock == nil || t.filterBlock.KeyMayMatch(uint(bi.offset), key) {
 		var it iterator.Iterator
 		var cache cache.Object
 		it, cache, err = t.getDataIter(bi, ro)
@@ -154,7 +153,7 @@ func (t *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (rkey, rvalue []byte,
 
 // ApproximateOffsetOf approximate the offset of given key in bytes.
 func (t *Reader) ApproximateOffsetOf(key []byte) uint64 {
-	index_iter := t.index.NewIterator()
+	index_iter := t.indexBlock.NewIterator()
 	if index_iter.Seek(key) {
 		bi := new(bInfo)
 		_, err := bi.decodeFrom(index_iter.Value())

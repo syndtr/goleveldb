@@ -29,8 +29,12 @@ func (o *iOptions) sanitize() {
 		o.Options.SetBlockCache(cache.NewLRUCache(opt.DefaultBlockCacheSize))
 	}
 
+	for _, p := range o.GetAltFilters() {
+		o.InsertAltFilter(p)
+	}
+
 	if p := o.GetFilter(); p != nil {
-		o.Options.SetFilter(&iFilter{p})
+		o.SetFilter(p)
 	}
 }
 
@@ -69,4 +73,11 @@ func (o *iOptions) SetFilter(p filter.Filter) error {
 		p = &iFilter{p}
 	}
 	return o.Options.SetFilter(p)
+}
+
+func (o *iOptions) InsertAltFilter(p filter.Filter) error {
+	if p != nil {
+		p = &iFilter{p}
+	}
+	return o.Options.InsertAltFilter(p)
 }
