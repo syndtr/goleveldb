@@ -474,6 +474,9 @@ func (o *Options) InsertAltFilter(p filter.Filter) error {
 	if o == nil {
 		return ErrNotSet
 	}
+	if p == nil {
+		return ErrInvalid
+	}
 	o.mu.Lock()
 	o.initFilters()
 	o.filters[p.Name()] = p
@@ -496,7 +499,9 @@ func (o *Options) initFilters() {
 	if o.filters == nil {
 		o.filters = make(map[string]filter.Filter)
 		for _, p := range o.AltFilters {
-			o.filters[p.Name()] = p
+			if p != nil {
+				o.filters[p.Name()] = p
+			}
 		}
 		if o.Filter != nil {
 			o.filters[o.Filter.Name()] = o.Filter

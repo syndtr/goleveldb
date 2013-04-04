@@ -76,8 +76,8 @@ func (o *iOptions) SetFilter(p filter.Filter) error {
 }
 
 func (o *iOptions) InsertAltFilter(p filter.Filter) error {
-	if p != nil {
-		p = &iFilter{p}
+	if p == nil {
+		return opt.ErrInvalid
 	}
-	return o.Options.InsertAltFilter(p)
+	return o.Options.InsertAltFilter(&iFilter{p})
 }
