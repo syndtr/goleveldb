@@ -7,6 +7,8 @@
 package leveldb
 
 import (
+	"sync"
+
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
@@ -15,7 +17,8 @@ import (
 
 type iOptions struct {
 	opt.Options
-	s *session
+	s  *session
+	mu sync.Mutex
 }
 
 func newIOptions(s *session, o opt.Options) *iOptions {
@@ -47,6 +50,8 @@ func (o *iOptions) SetComparer(cmp comparer.Comparer) error {
 }
 
 func (o *iOptions) SetMaxOpenFiles(max int) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	err := o.Options.SetMaxOpenFiles(max)
 	if err != nil {
 		return err
@@ -56,6 +61,8 @@ func (o *iOptions) SetMaxOpenFiles(max int) error {
 }
 
 func (o *iOptions) SetBlockCache(cache cache.Cache) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
 	oldcache := o.Options.GetBlockCache()
 	err := o.Options.SetBlockCache(cache)
 	if err != nil {
