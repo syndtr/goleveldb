@@ -91,10 +91,10 @@ type Storage interface {
 	// may OR'ed together.
 	GetFiles(t FileType) []File
 
-	// Get main manifest file.
-	// Should return os.ErrNotExist if there's no main manifest.
-	GetMainManifest() (f File, err error)
+	// Get manifest file.
+	// Should return os.ErrNotExist if there's no current manifest file.
+	GetManifest() (f File, err error)
 
-	// Set main manifest to given file.
-	SetMainManifest(f File) error
+	// Set manifest to given file.
+	SetManifest(f File) error
 }

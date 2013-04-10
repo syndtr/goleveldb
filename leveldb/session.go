@@ -55,7 +55,7 @@ func (s *session) create() (err error) {
 
 // Recover a database session; need external synchronization.
 func (s *session) recover() (err error) {
-	file, err := s.stor.GetMainManifest()
+	file, err := s.stor.GetManifest()
 	if err != nil {
 		return
 	}

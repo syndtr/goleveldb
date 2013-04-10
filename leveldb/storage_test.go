@@ -180,7 +180,7 @@ func (d *testingStorage) GetFiles(t storage.FileType) (r []storage.File) {
 	return
 }
 
-func (d *testingStorage) GetMainManifest() (f storage.File, err error) {
+func (d *testingStorage) GetManifest() (f storage.File, err error) {
 	d.Lock()
 	defer d.Unlock()
 	if d.manifest == nil {
@@ -189,7 +189,7 @@ func (d *testingStorage) GetMainManifest() (f storage.File, err error) {
 	return d.manifest, nil
 }
 
-func (d *testingStorage) SetMainManifest(f storage.File) error {
+func (d *testingStorage) SetManifest(f storage.File) error {
 	p, ok := f.(*testingFilePtr)
 	if !ok {
 		return storage.ErrInvalidFile

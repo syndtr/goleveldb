@@ -27,7 +27,7 @@ type FileStorage struct {
 	mu   sync.Mutex
 }
 
-// OpenFile create new initialized FileStorage for given path. This will also
+// OpenFile creates new initialized FileStorage for given path. This will also
 // hold file lock; thus any subsequent attempt to open same file path will
 // fail.
 func OpenFile(dbpath string) (d *FileStorage, err error) {
@@ -147,8 +147,8 @@ func (d *FileStorage) GetFiles(t FileType) (r []File) {
 	return
 }
 
-// GetMainManifest get main manifest file.
-func (d *FileStorage) GetMainManifest() (f File, err error) {
+// GetManifest get manifest file.
+func (d *FileStorage) GetManifest() (f File, err error) {
 	pth := path.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
@@ -169,8 +169,8 @@ func (d *FileStorage) GetMainManifest() (f File, err error) {
 	return p, nil
 }
 
-// SetMainManifest set main manifest to given file.
-func (d *FileStorage) SetMainManifest(f File) (err error) {
+// SetManifest set manifest to given file.
+func (d *FileStorage) SetManifest(f File) (err error) {
 	p, ok := f.(*file)
 	if !ok {
 		return ErrInvalidFile

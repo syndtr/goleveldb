@@ -48,8 +48,8 @@ func (m *MemStorage) GetFiles(t FileType) (r []File) {
 	return
 }
 
-// GetMainManifest get main manifest file.
-func (m *MemStorage) GetMainManifest() (f File, err error) {
+// GetManifest get manifest file.
+func (m *MemStorage) GetManifest() (f File, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.manifest == nil {
@@ -58,8 +58,8 @@ func (m *MemStorage) GetMainManifest() (f File, err error) {
 	return m.manifest, nil
 }
 
-// SetMainManifest set main manifest to given file.
-func (m *MemStorage) SetMainManifest(f File) error {
+// SetManifest set manifest to given file.
+func (m *MemStorage) SetManifest(f File) error {
 	p, ok := f.(*memFilePtr)
 	if !ok {
 		return ErrInvalidFile

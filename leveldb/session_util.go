@@ -199,7 +199,7 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 		return
 	}
 
-	return s.stor.SetMainManifest(w.file)
+	return s.stor.SetManifest(w.file)
 }
 
 // Flush record to disk.
