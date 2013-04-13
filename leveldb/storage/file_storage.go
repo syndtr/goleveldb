@@ -181,16 +181,18 @@ func (d *FileStorage) SetManifest(f File) (err error) {
 	if err != nil {
 		return
 	}
-	defer rw.Close()
 	_, err = fmt.Fprintln(rw, p.name())
 	if err != nil {
+		rw.Close()
 		return
 	}
+	rw.Close()
 	return os.Rename(pthTmp, pth)
 }
 
 // Close closes the storage and release the lock.
 func (d *FileStorage) Close() error {
+	d.log.Close()
 	if err := setFileLock(d.lock, false); err != nil {
 		return err
 	}
