@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -439,6 +440,23 @@ func runAllOpts(t *testing.T, f func(h *dbHarness)) {
 		f(h)
 		h.close()
 	}
+}
+
+func testAligned(t *testing.T, name string, offset uintptr) {
+	if offset%8 != 0 {
+		t.Errorf("field %s offset is not 64-bit aligned", name)
+	}
+}
+
+func Test_FieldsAligned(t *testing.T) {
+	p1 := new(DB)
+	testAligned(t, "DB.seq", unsafe.Offsetof(p1.seq))
+	testAligned(t, "DB.fseq", unsafe.Offsetof(p1.fseq))
+	p2 := new(session)
+	testAligned(t, "session.stFileNum", unsafe.Offsetof(p2.stFileNum))
+	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))
+	testAligned(t, "session.stPrevJournalNum", unsafe.Offsetof(p2.stPrevJournalNum))
+	testAligned(t, "session.stSeq", unsafe.Offsetof(p2.stSeq))
 }
 
 func TestDb_Empty(t *testing.T) {

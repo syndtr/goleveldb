@@ -50,8 +50,8 @@ type DB struct {
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int32
-	kvSize    int64
 	n         int32
+	kvSize    int64
 
 	prev [tMaxHeight]*mNode
 }

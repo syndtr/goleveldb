@@ -10,9 +10,21 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
+
+func testAligned(t *testing.T, name string, offset uintptr) {
+	if offset%8 != 0 {
+		t.Errorf("field %s offset is not 64-bit aligned", name)
+	}
+}
+
+func Test_FieldsAligned(t *testing.T) {
+	p1 := new(DB)
+	testAligned(t, "DB.kvSize", unsafe.Offsetof(p1.kvSize))
+}
 
 func TestPutRemove(t *testing.T) {
 	p := New(comparer.BytesComparer{})
