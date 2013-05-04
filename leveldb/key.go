@@ -86,7 +86,12 @@ func (p iKey) num() uint64 {
 }
 
 func (p iKey) parseNum() (seq uint64, t vType, ok bool) {
-	p.assert()
+	if p == nil {
+		panic("nil iKey")
+	}
+	if len(p) < 8 {
+		return
+	}
 	num := p.num()
 	seq, t = uint64(num>>8), vType(num&0xff)
 	if t > tVal {
