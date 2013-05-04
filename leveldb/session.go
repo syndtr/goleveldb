@@ -336,6 +336,9 @@ func (c *compaction) newIterator() iterator.Iterator {
 	ro := &opt.ReadOptions{
 		Flag: opt.RFDontFillCache,
 	}
+	if s.o.HasFlag(opt.OFParanoidCheck) {
+		ro.Flag |= opt.RFVerifyChecksums
+	}
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {
