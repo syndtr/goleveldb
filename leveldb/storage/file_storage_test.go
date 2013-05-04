@@ -9,7 +9,7 @@ package storage
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 )
 
@@ -86,7 +86,7 @@ func TestFileStorage_InvalidFileName(t *testing.T) {
 }
 
 func TestFileStorage_Flock(t *testing.T) {
-	pth := path.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
+	pth := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
 
 	_, err := os.Stat(pth)
 	if err == nil {

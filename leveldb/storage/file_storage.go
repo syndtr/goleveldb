@@ -10,7 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -36,7 +36,7 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 		return
 	}
 
-	lock, err := os.OpenFile(path.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
+	lock, err := os.OpenFile(filepath.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return
 	}
@@ -52,8 +52,8 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 		return
 	}
 
-	os.Rename(path.Join(dbpath, "LOG"), path.Join(dbpath, "LOG.old"))
-	log, err := os.OpenFile(path.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+	os.Rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
+	log, err := os.OpenFile(filepath.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		setFileLock(lock, false)
 		return
@@ -149,7 +149,7 @@ func (d *FileStorage) GetFiles(t FileType) (r []File) {
 
 // GetManifest get manifest file.
 func (d *FileStorage) GetManifest() (f File, err error) {
-	pth := path.Join(d.path, "CURRENT")
+	pth := filepath.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
 		err = err.(*os.PathError).Err
@@ -175,7 +175,7 @@ func (d *FileStorage) SetManifest(f File) (err error) {
 	if !ok {
 		return ErrInvalidFile
 	}
-	pth := path.Join(d.path, "CURRENT")
+	pth := filepath.Join(d.path, "CURRENT")
 	pthTmp := fmt.Sprintf("%s.%d", pth, p.num)
 	rw, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
@@ -260,7 +260,7 @@ func (p *file) name() string {
 }
 
 func (p *file) path() string {
-	return path.Join(p.stor.path, p.name())
+	return filepath.Join(p.stor.path, p.name())
 }
 
 func (p *file) parse(name string) bool {

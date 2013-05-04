@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -61,7 +61,7 @@ func (v *valueGen) get(n int) []byte {
 	return v.src[v.pos-n : v.pos]
 }
 
-var benchDB = path.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Getuid()))
+var benchDB = filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Getuid()))
 
 type dbBench struct {
 	b    *testing.B
