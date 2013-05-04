@@ -203,7 +203,9 @@ func (r *restartRange) key() []byte {
 }
 
 func (r *restartRange) value() []byte {
-	return r.kv.value
+	b := make([]byte, len(r.kv.value))
+	copy(b, r.kv.value)
+	return b
 }
 
 type Iterator struct {
