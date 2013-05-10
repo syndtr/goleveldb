@@ -74,13 +74,11 @@ func (v *version) purge() {
 			}
 		}
 	}
-
-	next.setfin()
 }
 
 func (v *version) setfin() {
-	runtime.SetFinalizer(v, func(x *version) {
-		go x.purge()
+	runtime.SetFinalizer(v, func(v *version) {
+		v.purge()
 	})
 }
 

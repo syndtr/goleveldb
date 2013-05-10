@@ -62,11 +62,10 @@ func (s *session) setVersion(v *version) {
 	for {
 		old := s.stVersion
 		if atomic.CompareAndSwapPointer(&s.stVersion, old, unsafe.Pointer(v)) {
-			if old == nil {
-				v.setfin()
-			} else {
+			if old != nil {
 				(*version)(old).next = v
 			}
+			v.setfin()
 			break
 		}
 	}
