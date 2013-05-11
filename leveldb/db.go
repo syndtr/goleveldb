@@ -78,6 +78,10 @@ func open(s *session) (db *DB, err error) {
 
 // Open open or create database from given storage.
 func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
+	if p == nil || o == nil {
+		return nil, os.ErrInvalid
+	}
+
 	s := newSession(p, o)
 
 	err = s.recover()
@@ -96,6 +100,10 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
 func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
+	if p == nil || o == nil {
+		return nil, os.ErrInvalid
+	}
+
 	s := newSession(p, o)
 
 	// get all files
