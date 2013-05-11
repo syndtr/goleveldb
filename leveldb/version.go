@@ -76,7 +76,8 @@ func (v *version) purge() {
 	}
 }
 
-func (v *version) setfin() {
+func (v *version) drop(nv *version) {
+	v.next = nv
 	runtime.SetFinalizer(v, func(v *version) {
 		v.purge()
 	})
