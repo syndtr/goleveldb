@@ -29,10 +29,29 @@ func (testingStoragePrint) Logf(format string, args ...interface{}) {
 	fmt.Printf(format, args...)
 }
 
-type testingStorage struct {
-	sync.Mutex
+type testingStorageLock struct {
+	stor *testingStorage
+}
 
-	log testingStorageLogging
+func (lock *testingStorageLock) Release() error {
+	stor := lock.stor
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
+	if stor.slock == nil {
+		return storage.ErrNotLocked
+	}
+	if stor.slock != lock {
+		return storage.ErrInvalidLock
+	}
+	stor.slock = nil
+	return nil
+}
+
+type testingStorage struct {
+	mu sync.Mutex
+
+	slock *testingStorageLock
+	log   testingStorageLogging
 
 	files    map[uint64]*testingFile
 	manifest *testingFilePtr
@@ -66,81 +85,81 @@ func (d *testingStorage) wake() {
 }
 
 func (d *testingStorage) DelaySync(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.emuDelaySync |= t
 	d.wake()
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) ReleaseSync(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.emuDelaySync &= ^t
 	d.wake()
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) SetWriteErr(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.emuWriteErr = t
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) SetSyncErr(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.emuSyncErr = t
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) ReadCounter() uint64 {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.readCnt
 }
 
 func (d *testingStorage) ResetReadCounter() {
-	d.Lock()
+	d.mu.Lock()
 	d.readCnt = 0
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) SetReadCounter(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.readCntEn = t
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) countRead(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	if d.readCntEn&t != 0 {
 		d.readCnt++
 	}
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) ReadAtCounter() uint64 {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	return d.readAtCnt
 }
 
 func (d *testingStorage) ResetReadAtCounter() {
-	d.Lock()
+	d.mu.Lock()
 	d.readAtCnt = 0
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) SetReadAtCounter(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	d.readAtCntEn = t
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) countReadAt(t storage.FileType) {
-	d.Lock()
+	d.mu.Lock()
 	if d.readAtCntEn&t != 0 {
 		d.readAtCnt++
 	}
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) doPrint(str string, t time.Time) {
@@ -153,15 +172,25 @@ func (d *testingStorage) doPrint(str string, t time.Time) {
 	d.log.Logf("<%02d:%02d:%02d.%06d> %s\n", hour, min, sec, msec, str)
 }
 
+func (d *testingStorage) Lock() (l storage.Locker, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.slock != nil {
+		return nil, storage.ErrLocked
+	}
+	d.slock = &testingStorageLock{stor: d}
+	return d.slock, nil
+}
+
 func (d *testingStorage) print(str string) {
 	d.doPrint(str, time.Now())
 }
 
 func (d *testingStorage) Print(str string) {
 	t := time.Now()
-	d.Lock()
+	d.mu.Lock()
 	d.doPrint(str, t)
-	d.Unlock()
+	d.mu.Unlock()
 }
 
 func (d *testingStorage) GetFile(num uint64, t storage.FileType) storage.File {
@@ -169,8 +198,8 @@ func (d *testingStorage) GetFile(num uint64, t storage.FileType) storage.File {
 }
 
 func (d *testingStorage) GetFiles(t storage.FileType) (r []storage.File) {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	for _, f := range d.files {
 		if f.t&t == 0 {
 			continue
@@ -181,8 +210,8 @@ func (d *testingStorage) GetFiles(t storage.FileType) (r []storage.File) {
 }
 
 func (d *testingStorage) GetManifest() (f storage.File, err error) {
-	d.Lock()
-	defer d.Unlock()
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.manifest == nil {
 		return nil, os.ErrNotExist
 	}
@@ -194,18 +223,18 @@ func (d *testingStorage) SetManifest(f storage.File) error {
 	if !ok {
 		return storage.ErrInvalidFile
 	}
-	d.Lock()
+	d.mu.Lock()
 	d.manifest = p
-	d.Unlock()
+	d.mu.Unlock()
 	return nil
 }
 
 func (d *testingStorage) Sizes() (n int) {
-	d.Lock()
+	d.mu.Lock()
 	for _, file := range d.files {
 		n += file.buf.Len()
 	}
-	d.Unlock()
+	d.mu.Unlock()
 	return
 }
 
@@ -218,8 +247,8 @@ type testingWriter struct {
 func (w *testingWriter) Write(b []byte) (n int, err error) {
 	p := w.p
 	stor := p.stor
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 	if stor.emuWriteErr&p.t != 0 {
 		return 0, errors.New("emulated write error")
 	}
@@ -229,12 +258,12 @@ func (w *testingWriter) Write(b []byte) (n int, err error) {
 func (w *testingWriter) Sync() error {
 	p := w.p
 	stor := p.stor
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 	for stor.emuDelaySync&p.t != 0 {
-		stor.Unlock()
+		stor.mu.Unlock()
 		stor.emuCh <- struct{}{}
-		stor.Lock()
+		stor.mu.Lock()
 	}
 	if stor.emuSyncErr&p.t != 0 {
 		return errors.New("emulated sync error")
@@ -246,10 +275,10 @@ func (w *testingWriter) Close() error {
 	p := w.p
 	stor := p.stor
 
-	stor.Lock()
+	stor.mu.Lock()
 	stor.print(fmt.Sprintf("testingStorage: closing writer, num=%d type=%s", p.num, p.t))
 	p.opened = false
-	stor.Unlock()
+	stor.mu.Unlock()
 
 	return nil
 }
@@ -277,10 +306,10 @@ func (r *testingReader) Close() error {
 	p := r.p
 	stor := p.stor
 
-	stor.Lock()
+	stor.mu.Lock()
 	p.stor.print(fmt.Sprintf("testingStorage: closing reader, num=%d type=%s", p.num, p.t))
 	p.opened = false
-	stor.Unlock()
+	stor.mu.Unlock()
 
 	return nil
 }
@@ -307,8 +336,8 @@ func (p *testingFilePtr) id() uint64 {
 func (p *testingFilePtr) Open() (r storage.Reader, err error) {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	stor.print(fmt.Sprintf("testingStorage: open file, num=%d type=%s", p.num, p.t))
 
@@ -329,8 +358,8 @@ func (p *testingFilePtr) Open() (r storage.Reader, err error) {
 func (p *testingFilePtr) Create() (w storage.Writer, err error) {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	stor.print(fmt.Sprintf("testingStorage: create file, num=%d type=%s", p.num, p.t))
 
@@ -352,8 +381,8 @@ func (p *testingFilePtr) Create() (w storage.Writer, err error) {
 func (p *testingFilePtr) Rename(num uint64, t storage.FileType) error {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	stor.print(fmt.Sprintf("testingStorage: rename file, from num=%d type=%s, to num=%d type=%d", p.num, p.t, num, t))
 
@@ -377,8 +406,8 @@ func (p *testingFilePtr) Rename(num uint64, t storage.FileType) error {
 func (p *testingFilePtr) Exist() bool {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	_, exist := stor.files[p.id()]
 	return exist
@@ -386,23 +415,23 @@ func (p *testingFilePtr) Exist() bool {
 
 func (p *testingFilePtr) Type() storage.FileType {
 	stor := p.stor
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 	return p.t
 }
 
 func (p *testingFilePtr) Num() uint64 {
 	stor := p.stor
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 	return p.num
 }
 
 func (p *testingFilePtr) Size() (size uint64, err error) {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	if f, exist := stor.files[p.id()]; exist {
 		return uint64(f.buf.Len()), nil
@@ -414,8 +443,8 @@ func (p *testingFilePtr) Size() (size uint64, err error) {
 func (p *testingFilePtr) Remove() error {
 	stor := p.stor
 
-	stor.Lock()
-	defer stor.Unlock()
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
 
 	stor.print(fmt.Sprintf("testingStorage: removing file, num=%d type=%s", p.num, p.t))
 

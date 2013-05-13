@@ -18,13 +18,36 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
+type fileLock interface {
+	release() error
+}
+
+type fileStorageLock struct {
+	stor *FileStorage
+}
+
+func (lock *fileStorageLock) Release() error {
+	stor := lock.stor
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
+	if stor.slock == nil {
+		return ErrNotLocked
+	}
+	if stor.slock != lock {
+		return ErrInvalidLock
+	}
+	stor.slock = nil
+	return nil
+}
+
 // FileStorage provide implementation of file-system backed storage.
 type FileStorage struct {
-	path string
-	lock *os.File
-	log  *os.File
-	buf  []byte
-	mu   sync.Mutex
+	path  string
+	flock fileLock
+	slock *fileStorageLock
+	log   *os.File
+	buf   []byte
+	mu    sync.Mutex
 }
 
 // OpenFile creates new initialized FileStorage for given path. This will also
@@ -36,33 +59,38 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 		return
 	}
 
-	lock, err := os.OpenFile(filepath.Join(dbpath, "LOCK"), os.O_RDWR|os.O_CREATE, 0644)
+	flock, err := newFileLock(filepath.Join(dbpath, "LOCK"))
 	if err != nil {
 		return
 	}
 
 	defer func() {
 		if err != nil {
-			lock.Close()
+			flock.release()
 		}
 	}()
-
-	err = setFileLock(lock, true)
-	if err != nil {
-		return
-	}
 
 	os.Rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
 	log, err := os.OpenFile(filepath.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		setFileLock(lock, false)
 		return
 	}
 
-	d = &FileStorage{path: dbpath, lock: lock, log: log}
+	d = &FileStorage{path: dbpath, flock: flock, log: log}
 	runtime.SetFinalizer(d, (*FileStorage).Close)
 
 	return
+}
+
+// Lock lock the storage.
+func (d *FileStorage) Lock() (l Locker, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.slock != nil {
+		return nil, ErrLocked
+	}
+	d.slock = &fileStorageLock{stor: d}
+	return d.slock, nil
 }
 
 // Cheap integer to fixed-width decimal ASCII.  Give a negative width to avoid zero-padding.
@@ -193,10 +221,7 @@ func (d *FileStorage) SetManifest(f File) (err error) {
 // Close closes the storage and release the lock.
 func (d *FileStorage) Close() error {
 	d.log.Close()
-	if err := setFileLock(d.lock, false); err != nil {
-		return err
-	}
-	return d.lock.Close()
+	return d.flock.release()
 }
 
 type file struct {

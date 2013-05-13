@@ -14,6 +14,25 @@ import (
 func TestMemStorage(t *testing.T) {
 	m := new(MemStorage)
 
+	l, err := m.Lock()
+	if err != nil {
+		t.Fatal("storage lock failed(1): ", err)
+	}
+	_, err = m.Lock()
+	if err == nil {
+		t.Fatal("expect error for second storage lock attempt")
+	} else {
+		t.Logf("storage lock got error: %s (expected)", err)
+	}
+	err = l.Release()
+	if err != nil {
+		t.Fatal("could not release storage lock: ", err)
+	}
+	_, err = m.Lock()
+	if err != nil {
+		t.Fatal("storage lock failed(2): ", err)
+	}
+
 	f := m.GetFile(1, TypeTable)
 	if f.Num() != 1 && f.Type() != TypeTable {
 		t.Fatal("invalid file number and type")

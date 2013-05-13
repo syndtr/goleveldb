@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"os"
 	"sync/atomic"
 	"unsafe"
 
@@ -18,10 +19,11 @@ import (
 
 // session represent a persistent database session.
 type session struct {
-	stor storage.Storage
-	o    *iOptions
-	cmp  *iComparer
-	tops *tOps
+	stor     storage.Storage
+	storLock storage.Locker
+	o        *iOptions
+	cmp      *iComparer
+	tops     *tOps
 
 	manifest *journalWriter
 
@@ -33,14 +35,35 @@ type session struct {
 	stVersion        unsafe.Pointer   // current version
 }
 
-func newSession(d storage.Storage, o *opt.Options) *session {
-	s := new(session)
-	s.stor = d
+func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
+	if stor == nil || o == nil {
+		return nil, os.ErrInvalid
+	}
+	storLock, err := stor.Lock()
+	if err != nil {
+		return
+	}
+	s = new(session)
+	s.stor = stor
+	s.storLock = storLock
 	s.cmp = &iComparer{o.GetComparer()}
 	s.o = newIOptions(s, *o)
 	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
-	return s
+	return
+}
+
+// Close session.
+func (s *session) close() {
+	s.tops.zapCache()
+	cache := s.o.GetBlockCache()
+	if cache != nil {
+		cache.Purge(nil)
+	}
+	if s.manifest != nil {
+		s.manifest.close()
+	}
+	s.storLock.Release()
 }
 
 // Create a new database session; need external synchronization.

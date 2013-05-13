@@ -6,9 +6,27 @@
 
 package storage
 
-import "os"
+import (
+	"syscall"
+)
 
-func setFileLock(f *os.File, lock bool) (err error) {
-	// not implemented yet
-	return
+type windowsFileLock struct {
+	fd syscall.Handle
+}
+
+func (fl *windowsFileLock) release() error {
+	return syscall.Close(fl.fd)
+}
+
+func newFileLock(path string) (fl fileLock, err error) {
+	pathp, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return
+	}
+	fd, err := syscall.CreateFile(pathp, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.CREATE_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
+	if err != nil {
+		return
+	}
+	wl := &windowsFileLock{fd: fd}
+	return wl, nil
 }

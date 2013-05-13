@@ -18,3 +18,6 @@ def listdir_node(node):
 def build(ctx):
 	for node in listdir_node(ctx.path):
 		ctx.gopackage(source=[node], target='pkg/'+PKG_PREFIX+node.path_from(ctx.path), defer=True)
+
+	# manual test
+	ctx.goprogram(source='manualtest/filelock', target='goleveldb_manualtest_filelock')

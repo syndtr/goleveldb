@@ -100,8 +100,7 @@ func (h *dbHarness) close() {
 }
 
 func (h *dbHarness) openAssert(want bool) {
-	var err error
-	h.db, err = Open(h.stor, h.o)
+	db, err := Open(h.stor, h.o)
 	if err != nil {
 		if want {
 			h.t.Error("Open: assert: got error: ", err)
@@ -109,11 +108,10 @@ func (h *dbHarness) openAssert(want bool) {
 			h.t.Log("Open: assert: got error (expected): ", err)
 		}
 	} else {
-		h.oo = h.db.GetOptionsSetter()
 		if !want {
 			h.t.Error("Open: assert: expect error")
 		}
-		h.close()
+		db.Close()
 	}
 }
 
@@ -457,6 +455,13 @@ func Test_FieldsAligned(t *testing.T) {
 	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))
 	testAligned(t, "session.stPrevJournalNum", unsafe.Offsetof(p2.stPrevJournalNum))
 	testAligned(t, "session.stSeq", unsafe.Offsetof(p2.stSeq))
+}
+
+func TestDb_Locking(t *testing.T) {
+	h := newDbHarness(t)
+	h.openAssert(false)
+	h.closeDB()
+	h.openAssert(true)
 }
 
 func TestDb_Empty(t *testing.T) {

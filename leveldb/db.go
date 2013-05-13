@@ -44,7 +44,7 @@ type DB struct {
 	err       unsafe.Pointer
 }
 
-func open(s *session) (db *DB, err error) {
+func openDB(s *session) (db *DB, err error) {
 	db = &DB{
 		s:      s,
 		cch:    make(chan cSignal),
@@ -78,11 +78,15 @@ func open(s *session) (db *DB, err error) {
 
 // Open open or create database from given storage.
 func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
-	if p == nil || o == nil {
-		return nil, os.ErrInvalid
+	s, err := openSession(p, o)
+	if err != nil {
+		return
 	}
-
-	s := newSession(p, o)
+	defer func() {
+		if err != nil {
+			s.close()
+		}
+	}()
 
 	err = s.recover()
 	if os.IsNotExist(err) && s.o.HasFlag(opt.OFCreateIfMissing) {
@@ -94,17 +98,21 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		return
 	}
 
-	return open(s)
+	return openDB(s)
 }
 
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
 func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
-	if p == nil || o == nil {
-		return nil, os.ErrInvalid
+	s, err := openSession(p, o)
+	if err != nil {
+		return
 	}
-
-	s := newSession(p, o)
+	defer func() {
+		if err != nil {
+			s.close()
+		}
+	}()
 
 	// get all files
 	ff := files(s.getFiles(storage.TypeAll))
@@ -185,7 +193,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		return
 	}
 
-	return open(s)
+	return openDB(s)
 }
 
 func (d *DB) recoverJournal() (err error) {
@@ -547,18 +555,13 @@ drain:
 	// wait for the WaitGroup
 	d.ewg.Wait()
 
-	d.s.tops.zapCache()
-	cache := d.s.o.GetBlockCache()
-	if cache != nil {
-		cache.Purge(nil)
-	}
-
+	// close journal
 	if d.journal != nil {
 		d.journal.close()
 	}
-	if d.s.manifest != nil {
-		d.s.manifest.close()
-	}
+
+	// close session
+	d.s.close()
 
 	return d.geterr()
 }

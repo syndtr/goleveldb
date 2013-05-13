@@ -12,9 +12,28 @@ import (
 	"sync"
 )
 
+type memStorageLock struct {
+	stor *MemStorage
+}
+
+func (lock *memStorageLock) Release() error {
+	stor := lock.stor
+	stor.mu.Lock()
+	defer stor.mu.Unlock()
+	if stor.slock == nil {
+		return ErrNotLocked
+	}
+	if stor.slock != lock {
+		return ErrInvalidLock
+	}
+	stor.slock = nil
+	return nil
+}
+
 // MemStorage provide implementation of memory backed storage.
 type MemStorage struct {
 	mu       sync.Mutex
+	slock    *memStorageLock
 	files    map[uint64]*memFile
 	manifest *memFilePtr
 }
@@ -23,6 +42,17 @@ func (m *MemStorage) init() {
 	if m.files == nil {
 		m.files = make(map[uint64]*memFile)
 	}
+}
+
+// Lock lock the storage.
+func (m *MemStorage) Lock() (l Locker, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.slock != nil {
+		return nil, ErrLocked
+	}
+	m.slock = &memStorageLock{stor: m}
+	return m.slock, nil
 }
 
 // Print will do nothing.

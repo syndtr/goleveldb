@@ -34,7 +34,12 @@ func (t FileType) String() string {
 	return "<unknown>"
 }
 
-var ErrInvalidFile = errors.New("invalid file for argument")
+var (
+	ErrInvalidFile = errors.New("invalid file for argument")
+	ErrLocked      = errors.New("already locked")
+	ErrNotLocked   = errors.New("not locked")
+	ErrInvalidLock = errors.New("invalid lock handle")
+)
 
 type Syncer interface {
 	Sync() error
@@ -51,6 +56,10 @@ type Writer interface {
 	io.Writer
 	io.Closer
 	Syncer
+}
+
+type Locker interface {
+	Release() error
 }
 
 type File interface {
@@ -81,6 +90,10 @@ type File interface {
 }
 
 type Storage interface {
+	// Lock the storage, so any subsequent attempt to lock the same storage
+	// will fail.
+	Lock() (l Locker, err error)
+
 	// Print a string, for logging.
 	Print(str string)
 
