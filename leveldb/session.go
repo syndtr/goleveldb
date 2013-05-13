@@ -19,6 +19,12 @@ import (
 
 // session represent a persistent database session.
 type session struct {
+	// Need 64-bit alignment.
+	stFileNum        uint64 // current unused file number
+	stJournalNum     uint64 // current journal file number; need external synchronization
+	stPrevJournalNum uint64 // prev journal file number; no longer used; for compatibility with older version of leveldb
+	stSeq            uint64 // last mem compacted seq; need external synchronization
+
 	stor     storage.Storage
 	storLock storage.Locker
 	o        *iOptions
@@ -27,12 +33,8 @@ type session struct {
 
 	manifest *journalWriter
 
-	stFileNum        uint64           // current unused file number
-	stJournalNum     uint64           // current journal file number; need external synchronization
-	stPrevJournalNum uint64           // prev journal file number; no longer used; for compatibility with older version of leveldb
-	stSeq            uint64           // last mem compacted seq; need external synchronization
-	stCPtrs          [kNumLevels]iKey // compact pointers; need external synchronization
-	stVersion        unsafe.Pointer   // current version
+	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
+	stVersion unsafe.Pointer   // current version
 }
 
 func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {

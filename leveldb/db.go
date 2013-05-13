@@ -23,6 +23,9 @@ import (
 
 // DB represent a database session.
 type DB struct {
+	// Need 64-bit alignment.
+	seq, fseq uint64
+
 	s *session
 
 	cch    chan cSignal       // compaction worker signal
@@ -35,13 +38,12 @@ type DB struct {
 	ewg    sync.WaitGroup     // exit WaitGroup
 	cstats [kNumLevels]cStats // Compaction stats
 
-	mem       unsafe.Pointer
-	journal   *journalWriter
-	fjournal  *journalWriter
-	seq, fseq uint64
-	snaps     *snaps
-	closed    uint32
-	err       unsafe.Pointer
+	mem      unsafe.Pointer
+	journal  *journalWriter
+	fjournal *journalWriter
+	snaps    *snaps
+	closed   uint32
+	err      unsafe.Pointer
 }
 
 func openDB(s *session) (db *DB, err error) {

@@ -46,12 +46,14 @@ func (p *mNode) setNext_NB(n int, x *mNode) {
 
 // DB represent an in-memory key/value database.
 type DB struct {
+	// Need 64-bit alignment.
+	kvSize int64
+
 	cmp       comparer.BasicComparer
 	rnd       *rand.Rand
 	head      *mNode
 	maxHeight int32
 	n         int32
-	kvSize    int64
 
 	prev [tMaxHeight]*mNode
 }
