@@ -93,7 +93,7 @@ func openDBBench(b *testing.B) *dbBench {
 	p.o = &opt.Options{
 		Flag: opt.OFCreateIfMissing,
 	}
-	p.ro = &opt.ReadOptions{}
+	p.ro = &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
 	p.wo = &opt.WriteOptions{}
 
 	p.db, err = Open(p.stor, p.o)
