@@ -78,9 +78,7 @@ func (v *version) purge() {
 
 func (v *version) drop(nv *version) {
 	v.next = nv
-	runtime.SetFinalizer(v, func(v *version) {
-		v.purge()
-	})
+	runtime.SetFinalizer(v, (*version).purge)
 }
 
 func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool, err error) {

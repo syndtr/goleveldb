@@ -399,9 +399,7 @@ func (d *DB) GetSnapshot() (snap *Snapshot, err error) {
 	}
 
 	snap = d.newSnapshot()
-	runtime.SetFinalizer(snap, func(x *Snapshot) {
-		x.Release()
-	})
+	runtime.SetFinalizer(snap, (*Snapshot).Release)
 	return
 }
 
