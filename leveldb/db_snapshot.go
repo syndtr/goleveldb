@@ -113,6 +113,9 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 
 // NewIterator return an iterator over the contents of this snapshot of
 // database.
+//
+// Please note that the iterator is not thread-safe, you may not use same
+// iterator instance concurrently without external synchronization.
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if atomic.LoadUint32(&p.released) != 0 {
 		return &iterator.EmptyIterator{errors.ErrSnapshotReleased}
@@ -125,10 +128,11 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	}
 
 	return &dbIter{
-		snap: p,
-		cmp:  d.s.cmp.cmp,
-		it:   d.newRawIterator(ro),
-		seq:  p.entry.seq,
+		snap:       p,
+		cmp:        d.s.cmp.cmp,
+		it:         d.newRawIterator(ro),
+		seq:        p.entry.seq,
+		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
 	}
 }
 

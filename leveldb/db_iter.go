@@ -36,10 +36,11 @@ func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
-	snap *Snapshot
-	cmp  comparer.BasicComparer
-	it   iterator.Iterator
-	seq  uint64
+	snap       *Snapshot
+	cmp        comparer.BasicComparer
+	it         iterator.Iterator
+	seq        uint64
+	copyBuffer bool
 
 	valid    bool
 	backward bool
@@ -242,20 +243,32 @@ func (i *dbIter) Key() []byte {
 	if !i.valid || !i.isOk() {
 		return nil
 	}
+	var ret []byte
 	if i.backward {
-		return i.skey
+		ret = i.skey
+	} else {
+		ret = iKey(i.it.Key()).ukey()
 	}
-	return iKey(i.it.Key()).ukey()
+	if i.copyBuffer {
+		return dupBytes(ret)
+	}
+	return ret
 }
 
 func (i *dbIter) Value() []byte {
 	if !i.valid || !i.isOk() {
 		return nil
 	}
+	var ret []byte
 	if i.backward {
-		return i.sval
+		ret = i.sval
+	} else {
+		ret = i.it.Value()
 	}
-	return i.it.Value()
+	if i.copyBuffer {
+		return dupBytes(ret)
+	}
+	return ret
 }
 
 func (i *dbIter) Error() error {

@@ -364,12 +364,19 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 		return
 	}
 
-	return d.get(key, d.getSeq(), ro)
+	value, err = d.get(key, d.getSeq(), ro)
+	if ro.HasFlag(opt.RFDontCopyBuffer) {
+		return
+	}
+	return dupBytes(value), err
 }
 
 // NewIterator return an iterator over the contents of the latest snapshot of
 // database. The result of NewIterator() is initially invalid (caller must
-// call Next or one of Seek method, ie First, Last or Seek).
+// call Next or one of Seek method, i.e. First, Last or Seek).
+//
+// Please note that the iterator is not thread-safe, you may not use same
+// iterator instance concurrently without external synchronization.
 func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.rok(); err != nil {
 		return &iterator.EmptyIterator{err}
