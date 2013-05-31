@@ -110,7 +110,8 @@ func (b *Batch) delete(key []byte, seq uint64) {
 func (b *Batch) append(p *Batch) {
 	if p.rLen > 0 {
 		b.grow(len(p.buf) - kBatchHdrLen)
-		b.buf = append(b.buf, p.buf...)
+		b.buf = append(b.buf, p.buf[kBatchHdrLen:]...)
+		b.rLen += p.rLen
 	}
 	if p.sync {
 		b.sync = true
