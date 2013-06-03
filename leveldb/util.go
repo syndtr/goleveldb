@@ -92,14 +92,19 @@ type journalReader struct {
 }
 
 func newJournalReader(file storage.File, checksum bool, dropf journal.DropFunc) (p *journalReader, err error) {
-	r := new(journalReader)
-	r.file = file
-	r.reader, err = file.Open()
+	r, err := file.Open()
 	if err != nil {
-		return
+		return nil, err
 	}
-	r.journal = journal.NewReader(r.reader, checksum, dropf)
-	return r, nil
+	jr, err := journal.NewReader(r, 0, checksum, dropf)
+	if err != nil {
+		return nil, err
+	}
+	return &journalReader{
+		file:    file,
+		reader:  r,
+		journal: jr,
+	}, nil
 }
 
 func (r *journalReader) closed() bool {

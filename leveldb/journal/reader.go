@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"os"
 
 	"github.com/syndtr/goleveldb/leveldb/hash"
 )
@@ -19,33 +20,41 @@ type DropFunc func(n int, reason string)
 
 // Reader represent a journal reader.
 type Reader struct {
-	r        io.ReaderAt
+	r        io.ReadSeeker
 	checksum bool
 	dropf    DropFunc
 
 	eof       bool
 	rbuf, buf []byte
-	off       int
 	record    []byte
 	err       error
 }
 
-// NewReader create new initialized journal reader.
-func NewReader(r io.ReaderAt, checksum bool, dropf DropFunc) *Reader {
-	return &Reader{
+// NewReader creates new initialized journal reader.
+func NewReader(r io.ReadSeeker, skip int64, checksum bool, dropf DropFunc) (*Reader, error) {
+	p := &Reader{
 		r:        r,
 		checksum: checksum,
 		dropf:    dropf,
 	}
+	if err := p.skip(skip); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
-// Skip allow skip given number bytes, rounded by single block.
-func (r *Reader) Skip(skip int) error {
-	if skip > 0 {
-		r.off = skip / BlockSize
-		if skip%BlockSize > 0 {
-			r.off++
+// skip allows skip given number bytes, aligned by single block.
+func (r *Reader) skip(skip int64) error {
+	if skip >= 0 {
+		n := skip % BlockSize
+		if n > 0 {
+			skip = skip - n + BlockSize
 		}
+		if _, err := r.r.Seek(skip, 0); err != nil {
+			return err
+		}
+	} else {
+		return os.ErrInvalid
 	}
 	return nil
 }
@@ -146,14 +155,12 @@ retry:
 
 		if r.rbuf == nil {
 			r.rbuf = make([]byte, BlockSize)
-		} else {
-			r.off++
 		}
 
 		var n int
-		n, err = r.r.ReadAt(r.rbuf, int64(r.off)*BlockSize)
+		n, err = io.ReadFull(r.r, r.rbuf)
 		if err != nil {
-			if err == io.EOF {
+			if err == io.ErrUnexpectedEOF || err == io.EOF {
 				err = nil
 			} else {
 				return

@@ -45,7 +45,10 @@ func (h *Harness) Test() {
 		}
 	}
 
-	r := NewReader(bytes.NewReader(buf.Bytes()), true, nil)
+	r, err := NewReader(bytes.NewReader(buf.Bytes()), 0, true, nil)
+	if err != nil {
+		h.t.Fatalf("cannot create reader: %s", err)
+	}
 	for i, v := range h.array {
 		if !r.Next() {
 			h.t.Errorf("early eof on record: '%d'", i)
