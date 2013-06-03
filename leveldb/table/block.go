@@ -45,27 +45,14 @@ func (p *bInfo) encodeTo(b []byte) int {
 	return n + m
 }
 
-func readFullAt(r io.ReaderAt, buf []byte, off int64) (n int, err error) {
-	for n < len(buf) && err == nil {
-		var nn int
-		nn, err = r.ReadAt(buf[n:], off+int64(n))
-		n += nn
-	}
-	if err == io.EOF {
-		if n >= len(buf) {
-			err = nil
-		} else if n > 0 {
-			err = io.ErrUnexpectedEOF
-		}
-	}
-	return
-}
-
 // readAll read entire referenced block.
 func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 	raw := make([]byte, p.size+5)
-	_, err = readFullAt(r, raw, int64(p.offset))
+	_, err = r.ReadAt(raw, int64(p.offset))
 	if err != nil {
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
 		return
 	}
 
