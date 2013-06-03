@@ -70,7 +70,7 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 		}
 	}()
 
-	os.Rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
+	rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
 	log, err := os.OpenFile(filepath.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return
@@ -215,7 +215,7 @@ func (d *FileStorage) SetManifest(f File) (err error) {
 		return
 	}
 	rw.Close()
-	return os.Rename(pthTmp, pth)
+	return rename(pthTmp, pth)
 }
 
 // Close closes the storage and release the lock.
@@ -242,7 +242,7 @@ func (p *file) Rename(num uint64, t FileType) error {
 	oldPth := p.path()
 	p.num = num
 	p.t = t
-	return os.Rename(oldPth, p.path())
+	return rename(oldPth, p.path())
 }
 
 func (p *file) Exist() bool {

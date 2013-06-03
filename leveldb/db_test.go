@@ -9,6 +9,8 @@ package leveldb
 import (
 	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -1591,4 +1593,32 @@ func TestDb_ModifyingBuffer(t *testing.T) {
 	}
 	modifyBuffer()
 	h.getKeyVal("(foo->hello)")
+}
+
+func TestDb_CreateReopenDbOnFile(t *testing.T) {
+	dbpath := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestCreateReopenDbOnFile-%d", os.Getuid()))
+	if err := os.RemoveAll(dbpath); err != nil {
+		t.Fatal("cannot remove old db: ", err)
+	}
+	defer os.RemoveAll(dbpath)
+
+	for i := 0; i < 3; i++ {
+		stor, err := storage.OpenFile(dbpath)
+		if err != nil {
+			t.Fatalf("(%d) cannot open storage: %s", i, err)
+		}
+		db, err := Open(stor, &opt.Options{Flag: opt.OFCreateIfMissing})
+		if err != nil {
+			t.Fatalf("(%d) cannot open db: %s", i, err)
+		}
+		if err := db.Put([]byte("foo"), []byte("bar"), &opt.WriteOptions{}); err != nil {
+			t.Fatalf("(%d) cannot write to db: %s", i, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("(%d) cannot close db: %s", i, err)
+		}
+		if err := stor.Close(); err != nil {
+			t.Fatalf("(%d) cannot close storage: %s", i, err)
+		}
+	}
 }

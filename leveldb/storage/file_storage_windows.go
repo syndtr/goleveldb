@@ -8,6 +8,17 @@ package storage
 
 import (
 	"syscall"
+	"unsafe"
+)
+
+var (
+	modkernel32 = syscall.NewLazyDLL("kernel32.dll")
+
+	procMoveFileExW = modkernel32.NewProc("MoveFileExW")
+)
+
+const (
+	_MOVEFILE_REPLACE_EXISTING = 1
 )
 
 type windowsFileLock struct {
@@ -29,4 +40,28 @@ func newFileLock(path string) (fl fileLock, err error) {
 	}
 	wl := &windowsFileLock{fd: fd}
 	return wl, nil
+}
+
+func moveFileEx(from *uint16, to *uint16, flags uint32) (err error) {
+	r1, _, e1 := syscall.Syscall(procMoveFileExW.Addr(), 3, uintptr(unsafe.Pointer(from)), uintptr(unsafe.Pointer(to)), uintptr(flags))
+	if r1 == 0 {
+		if e1 != 0 {
+			err = error(e1)
+		} else {
+			err = syscall.EINVAL
+		}
+	}
+	return
+}
+
+func rename(oldpath, newpath string) (err error) {
+	from, err := syscall.UTF16PtrFromString(oldpath)
+	if err != nil {
+		return err
+	}
+	to, err := syscall.UTF16PtrFromString(newpath)
+	if err != nil {
+		return err
+	}
+	return moveFileEx(from, to, _MOVEFILE_REPLACE_EXISTING)
 }

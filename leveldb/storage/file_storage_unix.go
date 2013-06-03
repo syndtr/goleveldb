@@ -45,3 +45,7 @@ func setFileLock(f *os.File, lock bool) (err error) {
 	}
 	return syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB)
 }
+
+func rename(oldpath, newpath string) (err error) {
+	return os.Rename(oldpath, newpath)
+}
