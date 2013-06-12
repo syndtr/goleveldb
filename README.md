@@ -10,16 +10,7 @@ Usage
 
 Create or open a database:
 
-	stor, err := storage.OpenFile("path/to/db")
-	...
-	db, err := leveldb.Open(stor, &opt.Options{Flag: opt.OFCreateIfMissing})
-	...
-
-Closing the database also involves closing its storage:
-
-	err = db.Close()
-	...
-	err = stor.Close()
+	db, err := leveldb.OpenFile("path/to/db", &opt.Options{Flag: opt.OFCreateIfMissing})
 	...
 
 Read or modify the database content:

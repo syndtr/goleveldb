@@ -28,15 +28,16 @@ type DB struct {
 
 	s *session
 
-	cch    chan cSignal       // compaction worker signal
-	creq   chan *cReq         // compaction request
-	wlock  chan struct{}      // writer mutex
-	wqueue chan *Batch        // writer queue
-	wack   chan error         // writer ack
-	jch    chan *Batch        // journal writer chan
-	jack   chan error         // journal writer ack
-	ewg    sync.WaitGroup     // exit WaitGroup
-	cstats [kNumLevels]cStats // Compaction stats
+	cch     chan cSignal       // compaction worker signal
+	creq    chan *cReq         // compaction request
+	wlock   chan struct{}      // writer mutex
+	wqueue  chan *Batch        // writer queue
+	wack    chan error         // writer ack
+	jch     chan *Batch        // journal writer chan
+	jack    chan error         // journal writer ack
+	ewg     sync.WaitGroup     // exit WaitGroup
+	cstats  [kNumLevels]cStats // Compaction stats
+	closeCb func() error
 
 	mem      unsafe.Pointer
 	journal  *journalWriter
@@ -101,6 +102,27 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	}
 
 	return openDB(s)
+}
+
+// OpenFile open or create database from given file.
+//
+// This is alias of:
+//	stor, err := storage.OpenFile("path/to/db")
+//	...
+//	db, err := leveldb.OpenFile("path/to/db", &opt.Options{})
+//	...
+func OpenFile(path string, o *opt.Options) (db *DB, err error) {
+	stor, err := storage.OpenFile(path)
+	if err != nil {
+		return
+	}
+	db, err = Open(stor, o)
+	if err == nil {
+		db.closeCb = func() error {
+			return stor.Close()
+		}
+	}
+	return
 }
 
 // Recover recover database with missing or corrupted manifest file. It will
@@ -569,6 +591,14 @@ drain:
 
 	// close session
 	d.s.close()
+
+	if d.closeCb != nil {
+		cerr := d.closeCb()
+		if err := d.geterr(); err != nil {
+			return err
+		}
+		return cerr
+	}
 
 	return d.geterr()
 }

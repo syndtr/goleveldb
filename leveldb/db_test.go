@@ -1622,3 +1622,24 @@ func TestDb_CreateReopenDbOnFile(t *testing.T) {
 		}
 	}
 }
+
+func TestDb_CreateReopenDbOnFile2(t *testing.T) {
+	dbpath := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestCreateReopenDbOnFile2-%d", os.Getuid()))
+	if err := os.RemoveAll(dbpath); err != nil {
+		t.Fatal("cannot remove old db: ", err)
+	}
+	defer os.RemoveAll(dbpath)
+
+	for i := 0; i < 3; i++ {
+		db, err := OpenFile(dbpath, &opt.Options{Flag: opt.OFCreateIfMissing})
+		if err != nil {
+			t.Fatalf("(%d) cannot open db: %s", i, err)
+		}
+		if err := db.Put([]byte("foo"), []byte("bar"), &opt.WriteOptions{}); err != nil {
+			t.Fatalf("(%d) cannot write to db: %s", i, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatalf("(%d) cannot close db: %s", i, err)
+		}
+	}
+}
