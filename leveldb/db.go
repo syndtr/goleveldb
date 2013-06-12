@@ -109,7 +109,7 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 // This is alias of:
 //	stor, err := storage.OpenFile("path/to/db")
 //	...
-//	db, err := leveldb.OpenFile("path/to/db", &opt.Options{})
+//	db, err := Open(stor, &opt.Options{})
 //	...
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path)
