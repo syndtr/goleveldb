@@ -344,13 +344,10 @@ func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 		return &iterator.EmptyIterator{err}
 	}
 	it := c.Value().(*table.Reader).NewIterator(ro)
-	if p, ok := it.(*iterator.IndexedIterator); ok {
-		runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
-			c.Release()
-		})
-	} else {
-		panic("not reached")
-	}
+	p := it.(*iterator.IndexedIterator)
+	runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
+		c.Release()
+	})
 	return it
 }
 
