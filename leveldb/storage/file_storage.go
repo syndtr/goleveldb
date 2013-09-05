@@ -54,14 +54,13 @@ type FileStorage struct {
 // hold file lock; thus any subsequent attempt to open same file path will
 // fail.
 func OpenFile(dbpath string) (d *FileStorage, err error) {
-	err = os.MkdirAll(dbpath, 0755)
-	if err != nil {
-		return
+	if err = os.MkdirAll(dbpath, 0755); err != nil {
+		return nil, err
 	}
 
 	flock, err := newFileLock(filepath.Join(dbpath, "LOCK"))
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	defer func() {
@@ -73,17 +72,17 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 	rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
 	log, err := os.OpenFile(filepath.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	d = &FileStorage{path: dbpath, flock: flock, log: log}
 	runtime.SetFinalizer(d, (*FileStorage).Close)
 
-	return
+	return d, nil
 }
 
 // Lock lock the storage.
-func (d *FileStorage) Lock() (l Locker, err error) {
+func (d *FileStorage) Lock() (Locker, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.slock != nil {
@@ -158,12 +157,12 @@ func (d *FileStorage) GetFile(number uint64, t FileType) File {
 func (d *FileStorage) GetFiles(t FileType) (r []File) {
 	dir, err := os.Open(d.path)
 	if err != nil {
-		return
+		return nil
 	}
 	names, err := dir.Readdirnames(0)
 	dir.Close()
 	if err != nil {
-		return
+		return nil
 	}
 	p := &file{stor: d}
 	for _, name := range names {
@@ -172,22 +171,20 @@ func (d *FileStorage) GetFiles(t FileType) (r []File) {
 			p = &file{stor: d}
 		}
 	}
-	return
+	return r
 }
 
 // GetManifest get manifest file.
-func (d *FileStorage) GetManifest() (f File, err error) {
+func (d *FileStorage) GetManifest() (File, error) {
 	pth := filepath.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
-		err = err.(*os.PathError).Err
-		return
+		return nil, err.(*os.PathError).Err
 	}
 	defer rw.Close()
 	buf := new(bytes.Buffer)
-	_, err = buf.ReadFrom(rw)
-	if err != nil {
-		return
+	if _, err = buf.ReadFrom(rw); err != nil {
+		return nil, err
 	}
 	b := buf.Bytes()
 	p := &file{stor: d}
@@ -198,7 +195,7 @@ func (d *FileStorage) GetManifest() (f File, err error) {
 }
 
 // SetManifest set manifest to given file.
-func (d *FileStorage) SetManifest(f File) (err error) {
+func (d *FileStorage) SetManifest(f File) error {
 	p, ok := f.(*file)
 	if !ok {
 		return ErrInvalidFile
@@ -207,12 +204,11 @@ func (d *FileStorage) SetManifest(f File) (err error) {
 	pthTmp := fmt.Sprintf("%s.%d", pth, p.num)
 	rw, err := os.OpenFile(pthTmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
-		return
+		return err
 	}
-	_, err = fmt.Fprintln(rw, p.name())
-	if err != nil {
+	if _, err = fmt.Fprintln(rw, p.name()); err != nil {
 		rw.Close()
-		return
+		return err
 	}
 	rw.Close()
 	return rename(pthTmp, pth)
@@ -230,11 +226,11 @@ type file struct {
 	t    FileType
 }
 
-func (p *file) Open() (r Reader, err error) {
+func (p *file) Open() (Reader, error) {
 	return os.OpenFile(p.path(), os.O_RDONLY, 0)
 }
 
-func (p *file) Create() (w Writer, err error) {
+func (p *file) Create() (Writer, error) {
 	return os.OpenFile(p.path(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 }
 
@@ -258,12 +254,12 @@ func (p *file) Num() uint64 {
 	return p.num
 }
 
-func (p *file) Size() (size uint64, err error) {
+func (p *file) Size() (uint64, error) {
 	fi, err := os.Stat(p.path())
-	if err == nil {
-		size = uint64(fi.Size())
+	if err != nil {
+		return 0, err
 	}
-	return
+	return uint64(fi.Size()), nil
 }
 
 func (p *file) Remove() error {
