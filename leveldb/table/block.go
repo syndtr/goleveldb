@@ -46,14 +46,13 @@ func (p *bInfo) encodeTo(b []byte) int {
 }
 
 // readAll read entire referenced block.
-func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
+func (p *bInfo) readAll(r io.ReaderAt, checksum bool) ([]byte, error) {
 	raw := make([]byte, p.size+5)
-	_, err = r.ReadAt(raw, int64(p.offset))
-	if err != nil {
+	if _, err := r.ReadAt(raw, int64(p.offset)); err != nil {
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
-		return
+		return nil, err
 	}
 
 	crcb := raw[len(raw)-4:]
@@ -65,21 +64,20 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) (b []byte, err error) {
 		crc := hash.NewCRC32C()
 		crc.Write(raw)
 		if crc.Sum32() != sum {
-			err = errors.ErrCorrupt("block checksum mismatch")
-			return
+			return nil, errors.ErrCorrupt("block checksum mismatch")
 		}
 	}
 
 	compression := raw[len(raw)-1]
-	b = raw[:len(raw)-1]
+	b := raw[:len(raw)-1]
 
 	switch compression {
 	case kNoCompression:
 	case kSnappyCompression:
 		return snappy.Decode(nil, b)
 	default:
-		err = errors.ErrCorrupt("bad block type")
+		return nil, errors.ErrCorrupt("bad block type")
 	}
 
-	return
+	return b, nil
 }

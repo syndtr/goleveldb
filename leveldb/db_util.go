@@ -35,7 +35,7 @@ func (p Sizes) Sum() (n uint64) {
 	for _, s := range p {
 		n += s
 	}
-	return
+	return n
 }
 
 // Remove unused files.

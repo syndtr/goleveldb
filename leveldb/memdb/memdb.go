@@ -123,7 +123,7 @@ func (p *DB) Contains(key []byte) bool {
 }
 
 // Get return value for the given key.
-func (p *DB) Get(key []byte) (value []byte, err error) {
+func (p *DB) Get(key []byte) ([]byte, error) {
 	if x, exact := p.findGE(key, false); exact {
 		return x.value, nil
 	}
@@ -276,7 +276,7 @@ func (i *Iterator) Last() bool {
 	return i.Valid()
 }
 
-func (i *Iterator) Seek(key []byte) (r bool) {
+func (i *Iterator) Seek(key []byte) bool {
 	i.node, _ = i.p.findGE(key, false)
 	return i.Valid()
 }

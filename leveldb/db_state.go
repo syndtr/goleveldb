@@ -29,14 +29,14 @@ type memSet struct {
 }
 
 // Create new memdb and froze the old one; need external synchronization.
-func (d *DB) newMem() (m *memdb.DB, err error) {
+func (d *DB) newMem() (*memdb.DB, error) {
 	s := d.s
 
 	num := s.allocFileNum()
 	w, err := newJournalWriter(s.getJournalFile(num))
 	if err != nil {
 		s.reuseFileNum(num)
-		return
+		return nil, err
 	}
 
 	old := d.journal
@@ -48,14 +48,14 @@ func (d *DB) newMem() (m *memdb.DB, err error) {
 
 	d.fseq = d.seq
 
-	m = memdb.New(s.cmp)
+	m := memdb.New(s.cmp)
 	mem := &memSet{cur: m}
 	if old := d.getMem_NB(); old != nil {
 		mem.froze = old.cur
 	}
 	atomic.StorePointer(&d.mem, unsafe.Pointer(mem))
 
-	return
+	return m, nil
 }
 
 // Get mem; no barrier.

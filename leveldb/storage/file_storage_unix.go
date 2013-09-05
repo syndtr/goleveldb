@@ -24,21 +24,19 @@ func (fl *unixFileLock) release() error {
 	return fl.f.Close()
 }
 
-func newFileLock(path string) (fl fileLock, err error) {
+func newFileLock(path string) (fileLock, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		return
+		return nil, err
 	}
-	err = setFileLock(f, true)
-	if err != nil {
+	if err := setFileLock(f, true); err != nil {
 		f.Close()
-		return
+		return nil, err
 	}
-	fl = &unixFileLock{f: f}
-	return
+	return &unixFileLock{f: f}, nil
 }
 
-func setFileLock(f *os.File, lock bool) (err error) {
+func setFileLock(f *os.File, lock bool) error {
 	how := syscall.LOCK_UN
 	if lock {
 		how = syscall.LOCK_EX

@@ -47,8 +47,8 @@ type DB struct {
 	err      unsafe.Pointer
 }
 
-func openDB(s *session) (db *DB, err error) {
-	db = &DB{
+func openDB(s *session) (*DB, error) {
+	db := &DB{
 		s:      s,
 		cch:    make(chan cSignal),
 		creq:   make(chan *cReq),
@@ -61,9 +61,8 @@ func openDB(s *session) (db *DB, err error) {
 		snaps:  newSnaps(),
 	}
 
-	err = db.recoverJournal()
-	if err != nil {
-		return
+	if err := db.recoverJournal(); err != nil {
+		return nil, err
 	}
 
 	// remove any obsolete files
@@ -76,14 +75,14 @@ func openDB(s *session) (db *DB, err error) {
 	db.cch <- cWait
 
 	runtime.SetFinalizer(db, (*DB).Close)
-	return
+	return db, nil
 }
 
 // Open open or create database from given storage.
-func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
+func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	s, err := openSession(p, o)
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -98,7 +97,7 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		err = os.ErrExist
 	}
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	return openDB(s)
@@ -111,26 +110,24 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 //	...
 //	db, err := Open(stor, &opt.Options{})
 //	...
-func OpenFile(path string, o *opt.Options) (db *DB, err error) {
+func OpenFile(path string, o *opt.Options) (*DB, error) {
 	stor, err := storage.OpenFile(path)
 	if err != nil {
-		return
+		return nil, err
 	}
-	db, err = Open(stor, o)
-	if err == nil {
-		db.closeCb = func() error {
-			return stor.Close()
-		}
+	db, err := Open(stor, o)
+	db.closeCb = func() error {
+		return stor.Close()
 	}
-	return
+	return db, err
 }
 
 // Recover recover database with missing or corrupted manifest file. It will
 // ignore any manifest files, valid or not.
-func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
+func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 	s, err := openSession(p, o)
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer func() {
 		if err != nil {
@@ -157,7 +154,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		var size uint64
 		size, err = f.Size()
 		if err != nil {
-			return
+			return nil, err
 		}
 
 		t := newTFile(f, size, nil, nil)
@@ -165,18 +162,16 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		// min ikey
 		if iter.First() {
 			t.min = iter.Key()
-		} else if iter.Error() != nil {
-			err = iter.Error()
-			return
+		} else if err := iter.Error(); err != nil {
+			return nil, err
 		} else {
 			continue
 		}
 		// max ikey
 		if iter.Last() {
 			t.max = iter.Key()
-		} else if iter.Error() != nil {
-			err = iter.Error()
-			return
+		} else if err := iter.Error(); err != nil {
+			return nil, err
 		} else {
 			continue
 		}
@@ -207,20 +202,18 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	s.stFileNum = ff[len(ff)-1].Num() + 1
 
 	// create brand new manifest
-	err = s.create()
-	if err != nil {
-		return
+	if err = s.create(); err != nil {
+		return nil, err
 	}
 	// commit record
-	err = s.commit(rec)
-	if err != nil {
-		return
+	if err = s.commit(rec); err != nil {
+		return nil, err
 	}
 
 	return openDB(s)
 }
 
-func (d *DB) recoverJournal() (err error) {
+func (d *DB) recoverJournal() error {
 	s := d.s
 	icmp := s.cmp
 
@@ -240,26 +233,24 @@ func (d *DB) recoverJournal() (err error) {
 		}
 	}
 
-	var r, fr *journalReader
+	var fr *journalReader
 	for _, journal := range rJournals {
 		s.printf("JournalRecovery: recovering, num=%d", journal.Num())
 
-		r, err = newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))
+		r, err := newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))
 		if err != nil {
-			return
+			return err
 		}
 
 		if mem != nil {
 			if mem.Len() > 0 {
-				err = cm.flush(mem, 0)
-				if err != nil {
-					return
+				if err = cm.flush(mem, 0); err != nil {
+					return err
 				}
 			}
 
-			err = cm.commit(r.file.Num(), d.seq)
-			if err != nil {
-				return
+			if err = cm.commit(r.file.Num(), d.seq); err != nil {
+				return err
 			}
 
 			cm.reset()
@@ -271,23 +262,20 @@ func (d *DB) recoverJournal() (err error) {
 		mem = memdb.New(icmp)
 
 		for r.journal.Next() {
-			err = batch.decode(r.journal.Record())
-			if err != nil {
-				return
+			if err = batch.decode(r.journal.Record()); err != nil {
+				return err
 			}
 
-			err = batch.memReplay(mem)
-			if err != nil {
-				return
+			if err = batch.memReplay(mem); err != nil {
+				return err
 			}
 
 			d.seq = batch.seq + uint64(batch.len())
 
 			if mem.Size() > s.o.GetWriteBuffer() {
 				// flush to table
-				err = cm.flush(mem, 0)
-				if err != nil {
-					return
+				if err = cm.flush(mem, 0); err != nil {
+					return err
 				}
 
 				// create new memdb
@@ -295,9 +283,8 @@ func (d *DB) recoverJournal() (err error) {
 			}
 		}
 
-		err = r.journal.Error()
-		if err != nil {
-			return
+		if err = r.journal.Error(); err != nil {
+			return err
 		}
 
 		r.close()
@@ -305,28 +292,25 @@ func (d *DB) recoverJournal() (err error) {
 	}
 
 	// create new journal
-	_, err = d.newMem()
-	if err != nil {
-		return
+	if _, err := d.newMem(); err != nil {
+		return err
 	}
 
 	if mem != nil && mem.Len() > 0 {
-		err = cm.flush(mem, 0)
-		if err != nil {
-			return
+		if err := cm.flush(mem, 0); err != nil {
+			return err
 		}
 	}
 
-	err = cm.commit(d.journal.file.Num(), d.seq)
-	if err != nil {
-		return
+	if err := cm.commit(d.journal.file.Num(), d.seq); err != nil {
+		return err
 	}
 
 	if fr != nil {
 		fr.remove()
 	}
 
-	return
+	return nil
 }
 
 // GetOptionsSetter return OptionsSetter for this database. OptionsSetter
@@ -363,7 +347,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 
 	mem := d.getMem()
 	if memGet(mem.cur) || (mem.froze != nil && memGet(mem.froze)) {
-		return
+		return value, err
 	}
 
 	value, cState, err := s.version().get(ikey, ro)
@@ -376,19 +360,18 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		}
 	}
 
-	return
+	return value, err
 }
 
 // Get get value for given key of the latest snapshot of database.
-func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
-	err = d.rok()
-	if err != nil {
-		return
+func (d *DB) Get(key []byte, ro *opt.ReadOptions) ([]byte, error) {
+	if err := d.rok(); err != nil {
+		return nil, err
 	}
 
-	value, err = d.get(key, d.getSeq(), ro)
+	value, err := d.get(key, d.getSeq(), ro)
 	if ro.HasFlag(opt.RFDontCopyBuffer) {
-		return
+		return value, err
 	}
 	return dupBytes(value), err
 }
@@ -421,15 +404,14 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 // Iterators created with this handle will all observe a stable snapshot
 // of the current DB state. The caller must call *Snapshot.Release() when the
 // snapshot is no longer needed.
-func (d *DB) GetSnapshot() (snap *Snapshot, err error) {
-	err = d.rok()
-	if err != nil {
-		return
+func (d *DB) GetSnapshot() (*Snapshot, error) {
+	if err := d.rok(); err != nil {
+		return nil, err
 	}
 
-	snap = d.newSnapshot()
+	snap := d.newSnapshot()
 	runtime.SetFinalizer(snap, (*Snapshot).Release)
-	return
+	return snap, nil
 }
 
 // GetProperty used to query exported database state.
@@ -443,9 +425,8 @@ func (d *DB) GetSnapshot() (snap *Snapshot, err error) {
 //  "leveldb.sstables" - returns a multi-line string that storribes all
 //     of the sstables that make up the db contents.
 func (d *DB) GetProperty(prop string) (value string, err error) {
-	err = d.rok()
-	if err != nil {
-		return
+	if err = d.rok(); err != nil {
+		return "", err
 	}
 
 	const prefix = "leveldb."
@@ -490,7 +471,7 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 		return "", errors.ErrInvalid("unknown property: " + prop)
 	}
 
-	return
+	return value, nil
 }
 
 // GetApproximateSizes calculate approximate sizes of given ranges.
@@ -500,14 +481,13 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 // sizes will be one-tenth the size of the corresponding user data size.
 //
 // The results may not include the sizes of recently written data.
-func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
-	err = d.rok()
-	if err != nil {
-		return
+func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
+	if err := d.rok(); err != nil {
+		return nil, err
 	}
 
 	v := d.s.version()
-	sizes = make(Sizes, 0, len(rr))
+	sizes := make(Sizes, 0, len(rr))
 	for _, r := range rr {
 		min := newIKey(r.Start, kMaxSeq, tSeek)
 		max := newIKey(r.Limit, kMaxSeq, tSeek)
@@ -526,7 +506,7 @@ func (d *DB) GetApproximateSizes(rr []Range) (sizes Sizes, err error) {
 		sizes = append(sizes, size)
 	}
 
-	return
+	return sizes, nil
 }
 
 // CompactRange compact the underlying storage for the key range.

@@ -37,22 +37,22 @@ type session struct {
 	stVersion unsafe.Pointer   // current version
 }
 
-func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
+func openSession(stor storage.Storage, o *opt.Options) (*session, error) {
 	if stor == nil || o == nil {
 		return nil, os.ErrInvalid
 	}
 	storLock, err := stor.Lock()
 	if err != nil {
-		return
+		return nil, err
 	}
-	s = new(session)
+	s := new(session)
 	s.stor = stor
 	s.storLock = storLock
 	s.cmp = &iComparer{o.GetComparer()}
 	s.o = newIOptions(s, *o)
 	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
-	return
+	return s, nil
 }
 
 // Close session.
@@ -69,25 +69,21 @@ func (s *session) close() {
 }
 
 // Create a new database session; need external synchronization.
-func (s *session) create() (err error) {
+func (s *session) create() error {
 	// create manifest
-	err = s.createManifest(s.allocFileNum(), nil, nil)
-	if err != nil {
-		return
-	}
-	return
+	return s.createManifest(s.allocFileNum(), nil, nil)
 }
 
 // Recover a database session; need external synchronization.
-func (s *session) recover() (err error) {
+func (s *session) recover() error {
 	file, err := s.stor.GetManifest()
 	if err != nil {
-		return
+		return err
 	}
 
 	r, err := newJournalReader(file, true, s.journalDropFunc("manifest", file.Num()))
 	if err != nil {
-		return
+		return err
 	}
 	defer r.close()
 
@@ -131,21 +127,17 @@ func (s *session) recover() (err error) {
 	}
 
 	// check for error in journal reader
-	err = r.journal.Error()
-	if err != nil {
-		return
+	if err := r.journal.Error(); err != nil {
+		return err
 	}
 
 	switch false {
 	case srec.hasNextNum:
-		err = errors.ErrCorrupt("manifest missing next file number")
+		return errors.ErrCorrupt("manifest missing next file number")
 	case srec.hasJournalNum:
-		err = errors.ErrCorrupt("manifest missing journal file number")
+		return errors.ErrCorrupt("manifest missing journal file number")
 	case srec.hasSeq:
-		err = errors.ErrCorrupt("manifest missing seq number")
-	}
-	if err != nil {
-		return
+		return errors.ErrCorrupt("manifest missing seq number")
 	}
 
 	s.manifest = &journalWriter{file: file}
@@ -153,7 +145,7 @@ func (s *session) recover() (err error) {
 	s.setFileNum(srec.nextNum)
 	s.recordCommited(srec)
 
-	return
+	return nil
 }
 
 // Commit session; need external synchronization.
@@ -173,11 +165,11 @@ func (s *session) commit(r *sessionRecord) (err error) {
 		s.setVersion(nv)
 	}
 
-	return
+	return err
 }
 
 // Pick a compaction based on current state; need external synchronization.
-func (s *session) pickCompaction() (c *compaction) {
+func (s *session) pickCompaction() *compaction {
 	icmp := s.cmp
 	ucmp := icmp.cmp
 
@@ -204,11 +196,11 @@ func (s *session) pickCompaction() (c *compaction) {
 			level = ts.level
 			t0 = append(t0, ts.table)
 		} else {
-			return
+			return nil
 		}
 	}
 
-	c = &compaction{s: s, version: v, level: level}
+	c := &compaction{s: s, version: v, level: level}
 	if level == 0 {
 		min, max := t0.getRange(icmp)
 		t0 = nil
@@ -217,11 +209,11 @@ func (s *session) pickCompaction() (c *compaction) {
 
 	c.tables[0] = t0
 	c.expand()
-	return
+	return c
 }
 
 // Create compaction from given level and range; need external synchronization.
-func (s *session) getCompactionRange(level int, min, max []byte) (c *compaction) {
+func (s *session) getCompactionRange(level int, min, max []byte) *compaction {
 	v := s.version_NB()
 
 	var t0 tFiles
@@ -230,10 +222,10 @@ func (s *session) getCompactionRange(level int, min, max []byte) (c *compaction)
 		return nil
 	}
 
-	c = &compaction{s: s, version: v, level: level}
+	c := &compaction{s: s, version: v, level: level}
 	c.tables[0] = t0
 	c.expand()
-	return
+	return c
 }
 
 // compaction represent a compaction state

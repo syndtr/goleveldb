@@ -51,16 +51,15 @@ func NewWriter(w io.Writer) *Writer {
 }
 
 // Append append record to the journal.
-func (w *Writer) Append(record []byte) (err error) {
+func (w *Writer) Append(record []byte) error {
 	begin := true
 	for {
 		leftover := BlockSize - w.boff
 		if leftover < kHeaderSize {
 			// Switch to a new block
 			if leftover > 0 {
-				_, err = w.w.Write(sixZero[:leftover])
-				if err != nil {
-					return
+				if _, err := w.w.Write(sixZero[:leftover]); err != nil {
+					return err
 				}
 			}
 			w.boff = 0
@@ -83,9 +82,8 @@ func (w *Writer) Append(record []byte) (err error) {
 			rtype = tLast
 		}
 
-		err = w.write(rtype, record[:fragLen])
-		if err != nil {
-			return
+		if err := w.write(rtype, record[:fragLen]); err != nil {
+			return err
 		}
 
 		record = record[fragLen:]
@@ -97,10 +95,10 @@ func (w *Writer) Append(record []byte) (err error) {
 			break
 		}
 	}
-	return
+	return nil
 }
 
-func (w *Writer) write(rtype uint, record []byte) (err error) {
+func (w *Writer) write(rtype uint, record []byte) error {
 	rlen := len(record)
 	buf := &w.buf
 	buf.Reset()
@@ -114,9 +112,10 @@ func (w *Writer) write(rtype uint, record []byte) (err error) {
 	buf.WriteByte(byte(rlen >> 8))
 	buf.WriteByte(byte(rtype))
 
-	_, err = buf.WriteTo(w.w)
-	if err == nil {
-		_, err = w.w.Write(record)
+	if _, err := buf.WriteTo(w.w); err != nil {
+		return err
 	}
+
+	_, err := w.w.Write(record)
 	return err
 }

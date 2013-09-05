@@ -77,7 +77,7 @@ func (p tFiles) size() (sum uint64) {
 	for _, f := range p {
 		sum += f.size
 	}
-	return
+	return sum
 }
 
 func (p tFiles) sort(s tFileSorter) {
@@ -156,7 +156,8 @@ func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 			max = t.max
 		}
 	}
-	return
+
+	return min, max
 }
 
 func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *opt.ReadOptions) *tFilesIter {
@@ -222,7 +223,7 @@ func (i *tFilesIter) Prev() bool {
 	return true
 }
 
-func (i *tFilesIter) Get() (it iterator.Iterator, err error) {
+func (i *tFilesIter) Get() (iterator.Iterator, error) {
 	if i.pos < 0 || i.pos >= len(i.tt) {
 		return &iterator.EmptyIterator{}, nil
 	}
@@ -296,11 +297,11 @@ func newTableOps(s *session, cacheCap int) *tOps {
 	return &tOps{s, c, ns}
 }
 
-func (t *tOps) create() (w *tWriter, err error) {
+func (t *tOps) create() (*tWriter, error) {
 	file := t.s.getTableFile(t.s.allocFileNum())
 	fw, err := file.Create()
 	if err != nil {
-		return
+		return nil, err
 	}
 	return &tWriter{
 		t:    t,
@@ -313,7 +314,7 @@ func (t *tOps) create() (w *tWriter, err error) {
 func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	w, err := t.create()
 	if err != nil {
-		return
+		return f, n, err
 	}
 
 	defer func() {
@@ -323,19 +324,17 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	}()
 
 	for src.Next() {
-		err = w.add(src.Key(), src.Value())
-		if err != nil {
-			return
+		if err = w.add(src.Key(), src.Value()); err != nil {
+			return f, n, err
 		}
 	}
-	err = src.Error()
-	if err != nil {
-		return
+	if err = src.Error(); err != nil {
+		return f, n, err
 	}
 
 	n = w.tw.Len()
 	f, err = w.finish()
-	return
+	return f, n, err
 }
 
 func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
@@ -344,33 +343,29 @@ func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 		return &iterator.EmptyIterator{err}
 	}
 	it := c.Value().(*table.Reader).NewIterator(ro)
-	if p, ok := it.(*iterator.IndexedIterator); ok {
-		runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
-			c.Release()
-		})
-	} else {
-		panic("not reached")
-	}
+	p := it.(*iterator.IndexedIterator)
+	runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
+		c.Release()
+	})
 	return it
 }
 
 func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
 	c, err := t.lookup(f)
 	if err != nil {
-		return
+		return nil, nil, err
 	}
 	defer c.Release()
 	return c.Value().(*table.Reader).Get(key, ro)
 }
 
-func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (n uint64, err error) {
+func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (uint64, error) {
 	c, err := t.lookup(f)
 	if err != nil {
-		return
+		return 0, err
 	}
 	defer c.Release()
-	n = c.Value().(*table.Reader).ApproximateOffsetOf(key)
-	return
+	return c.Value().(*table.Reader).ApproximateOffsetOf(key), nil
 }
 
 func (t *tOps) remove(f *tFile) {
@@ -401,7 +396,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		var r storage.Reader
 		r, err = f.file.Open()
 		if err != nil {
-			return
+			return ok, value, charge, fin
 		}
 
 		o := t.s.o
@@ -415,7 +410,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		var p *table.Reader
 		p, err = table.NewReader(r, f.size, t.s.o, ns)
 		if err != nil {
-			return
+			return ok, value, charge, fin
 		}
 
 		ok = true
@@ -425,10 +420,10 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 			r.Close()
 		}
 
-		return
+		return ok, value, charge, fin
 	})
 
-	return
+	return c, err
 }
 
 type tWriter struct {
@@ -453,21 +448,18 @@ func (w *tWriter) add(key, value []byte) error {
 	return w.tw.Add(key, value)
 }
 
-func (w *tWriter) finish() (t *tFile, err error) {
+func (w *tWriter) finish() (*tFile, error) {
 	defer func() {
 		w.w.Close()
 	}()
 
-	err = w.tw.Finish()
-	if err != nil {
-		return
+	if err := w.tw.Finish(); err != nil {
+		return nil, err
 	}
-	err = w.w.Sync()
-	if err != nil {
-		return
+	if err := w.w.Sync(); err != nil {
+		return nil, err
 	}
-	t = newTFile(w.file, uint64(w.tw.Size()), iKey(w.first), iKey(w.last))
-	return
+	return newTFile(w.file, uint64(w.tw.Size()), iKey(w.first), iKey(w.last)), nil
 }
 
 func (w *tWriter) drop() {

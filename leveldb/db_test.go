@@ -362,7 +362,7 @@ func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	db := h.db
 
 	s, err := db.GetApproximateSizes([]Range{
-		Range{[]byte(start), []byte(limit)},
+		{[]byte(start), []byte(limit)},
 	})
 	if err != nil {
 		t.Error("GetApproximateSizes: got error: ", err)

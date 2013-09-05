@@ -45,7 +45,7 @@ func (m *MemStorage) init() {
 }
 
 // Lock lock the storage.
-func (m *MemStorage) Lock() (l Locker, err error) {
+func (m *MemStorage) Lock() (Locker, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.slock != nil {
@@ -75,11 +75,11 @@ func (m *MemStorage) GetFiles(t FileType) (r []File) {
 		r = append(r, &memFilePtr{m: m, num: num, t: f.t})
 	}
 	m.mu.Unlock()
-	return
+	return r
 }
 
 // GetManifest get manifest file.
-func (m *MemStorage) GetManifest() (f File, err error) {
+func (m *MemStorage) GetManifest() (File, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.manifest == nil {
@@ -120,7 +120,7 @@ type memFilePtr struct {
 	t   FileType
 }
 
-func (p *memFilePtr) Open() (r Reader, err error) {
+func (p *memFilePtr) Open() (Reader, error) {
 	m := p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -132,7 +132,7 @@ func (p *memFilePtr) Open() (r Reader, err error) {
 	return &memReader{Reader: *bytes.NewReader(file.Bytes())}, nil
 }
 
-func (p *memFilePtr) Create() (w Writer, err error) {
+func (p *memFilePtr) Create() (Writer, error) {
 	m := p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -175,7 +175,7 @@ func (p *memFilePtr) Num() uint64 {
 	return p.num
 }
 
-func (p *memFilePtr) Size() (size uint64, err error) {
+func (p *memFilePtr) Size() (uint64, error) {
 	m := p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
