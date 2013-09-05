@@ -27,10 +27,9 @@ type Reader struct {
 }
 
 // NewReader create new initialized block reader.
-func NewReader(buf []byte, cmp comparer.BasicComparer) (b *Reader, err error) {
+func NewReader(buf []byte, cmp comparer.BasicComparer) (*Reader, error) {
 	if len(buf) < 8 {
-		err = errors.ErrCorrupt("block to short")
-		return
+		return nil, errors.ErrCorrupt("block to short")
 	}
 
 	// Decode restart len
@@ -39,18 +38,16 @@ func NewReader(buf []byte, cmp comparer.BasicComparer) (b *Reader, err error) {
 	// Calculate restart start offset
 	restartStart := len(buf) - int(restartLen)*4 - 4
 	if restartStart >= len(buf)-4 {
-		err = errors.ErrCorrupt("bad restart offset in block")
-		return
+		return nil, errors.ErrCorrupt("bad restart offset in block")
 	}
 
-	b = &Reader{
+	return &Reader{
 		cmp:          cmp,
 		buf:          buf,
 		rbuf:         buf[restartStart : len(buf)-4],
 		restartLen:   int(restartLen),
 		restartStart: restartStart,
-	}
-	return
+	}, nil
 }
 
 // NewIterator create new iterator over the block.
@@ -88,35 +85,32 @@ type restartRange struct {
 	cache  []keyVal
 }
 
-func (r *restartRange) next() (err error) {
+func (r *restartRange) next() error {
 	if r.cached && len(r.cache) > r.pos {
 		r.kv = r.cache[r.pos]
 		r.pos++
-		return
+		return nil
 	}
 
 	if r.buf.Len() == 0 {
 		return io.EOF
 	}
 
-	var nkey []byte
-
 	// Read header
-	var shared, nonShared, valueLen uint64
-	shared, err = binary.ReadUvarint(r.buf)
+	shared, err := binary.ReadUvarint(r.buf)
 	if err != nil || shared > uint64(len(r.kv.key)) {
-		goto corrupt
+		return errors.ErrCorrupt("bad entry in block")
 	}
-	nonShared, err = binary.ReadUvarint(r.buf)
+	nonShared, err := binary.ReadUvarint(r.buf)
 	if err != nil {
-		goto corrupt
+		return errors.ErrCorrupt("bad entry in block")
 	}
-	valueLen, err = binary.ReadUvarint(r.buf)
+	valueLen, err := binary.ReadUvarint(r.buf)
 	if err != nil {
-		goto corrupt
+		return errors.ErrCorrupt("bad entry in block")
 	}
 	if nonShared+valueLen > uint64(r.buf.Len()) {
-		goto corrupt
+		return errors.ErrCorrupt("bad entry in block")
 	}
 
 	if r.cached && r.pos > 0 {
@@ -124,7 +118,7 @@ func (r *restartRange) next() (err error) {
 	}
 
 	// Read content
-	nkey = r.buf.Next(int(nonShared))
+	nkey := r.buf.Next(int(nonShared))
 	if shared == 0 {
 		r.kv.key = nkey
 	} else {
@@ -136,13 +130,10 @@ func (r *restartRange) next() (err error) {
 	}
 	r.kv.value = r.buf.Next(int(valueLen))
 	r.pos++
-	return
-
-corrupt:
-	return errors.ErrCorrupt("bad entry in block")
+	return nil
 }
 
-func (r *restartRange) prev() (err error) {
+func (r *restartRange) prev() error {
 	if r.pos <= 1 {
 		r.pos = 0
 		return io.EOF
@@ -155,40 +146,38 @@ func (r *restartRange) prev() (err error) {
 			r.cache = append(r.cache, r.kv)
 		}
 		r.kv = r.cache[r.pos-1]
-		return
+		return nil
 	}
 	r.cached = true
 
 	pos := r.pos
 	r.reset()
 	for r.pos < pos {
-		err = r.next()
-		if err != nil {
+		if err := r.next(); err != nil {
 			if err == io.EOF {
 				panic("not reached")
 			}
-			return
+			return err
 		}
 	}
-	return
+	return nil
 }
 
-func (r *restartRange) last() (err error) {
+func (r *restartRange) last() error {
 	if !r.cached {
 		r.cached = true
 		r.reset()
 	}
 
 	for {
-		err = r.next()
-		if err != nil {
+		if err := r.next(); err != nil {
 			if err == io.EOF {
 				err = nil
 			}
-			break
+			return err
 		}
 	}
-	return
+	return nil
 }
 
 func (r *restartRange) reset() {
@@ -213,19 +202,18 @@ type Iterator struct {
 	rr  *restartRange // restart range
 }
 
-func (i *Iterator) getRestartOffset(idx int) (offset int, err error) {
+func (i *Iterator) getRestartOffset(idx int) (int, error) {
 	if idx >= i.b.restartLen {
 		panic("out of range")
 	}
 
-	offset = int(binary.LittleEndian.Uint32(i.b.rbuf[idx*4:]))
-	return
+	return int(binary.LittleEndian.Uint32(i.b.rbuf[idx*4:])), nil
 }
 
-func (i *Iterator) getRestartKey(idx int) (key []byte, err error) {
+func (i *Iterator) getRestartKey(idx int) ([]byte, error) {
 	offset, err := i.getRestartOffset(idx)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	buf := i.b.buf[offset:]
@@ -237,44 +225,42 @@ func (i *Iterator) getRestartKey(idx int) (key []byte, err error) {
 	buf = buf[n:]
 
 	if shared > 0 || nonShared+valueLen > uint64(len(buf)) {
-		err = errors.ErrCorrupt("bad entry in block")
-		return
+		return nil, errors.ErrCorrupt("bad entry in block")
 	}
 
-	key = buf[:nonShared]
-	return
+	return buf[:nonShared], nil
 }
 
-func (i *Iterator) getRestartRange(idx int) (r *restartRange, err error) {
-	var start, end int
-	start, err = i.getRestartOffset(idx)
+func (i *Iterator) getRestartRange(idx int) (*restartRange, error) {
+	start, err := i.getRestartOffset(idx)
 	if err != nil {
-		return
-	}
-	if start >= i.b.restartStart {
-		goto corrupt
+		return nil, err
 	}
 
+	if start >= i.b.restartStart {
+		return nil, errors.ErrCorrupt("bad restart range in block")
+	}
+
+	var end int
+
 	if idx+1 < i.b.restartLen {
-		end, err = i.getRestartOffset(idx + 1)
-		if err != nil {
-			return
+		if end, err = i.getRestartOffset(idx + 1); err != nil {
+			return nil, err
 		}
 		if end >= i.b.restartStart {
-			goto corrupt
+			return nil, errors.ErrCorrupt("bad restart range in block")
 		}
 	} else {
 		end = i.b.restartStart
 	}
 
 	if start < end {
-		r = &restartRange{raw: i.b.buf[start:end]}
+		r := &restartRange{raw: i.b.buf[start:end]}
 		r.buf = bytes.NewBuffer(r.raw)
-		return
+		return r, nil
 	}
 
-corrupt:
-	return nil, errors.ErrCorrupt("bad restart range in block")
+	panic("unreachable")
 }
 
 func (i *Iterator) setRestartRange() {
