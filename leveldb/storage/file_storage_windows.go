@@ -29,32 +29,32 @@ func (fl *windowsFileLock) release() error {
 	return syscall.Close(fl.fd)
 }
 
-func newFileLock(path string) (fl fileLock, err error) {
+func newFileLock(path string) (fileLock, error) {
 	pathp, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
-		return
+		return nil, err
 	}
 	fd, err := syscall.CreateFile(pathp, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.CREATE_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
-		return
+		return nil, err
 	}
 	wl := &windowsFileLock{fd: fd}
 	return wl, nil
 }
 
-func moveFileEx(from *uint16, to *uint16, flags uint32) (err error) {
+func moveFileEx(from *uint16, to *uint16, flags uint32) error {
 	r1, _, e1 := syscall.Syscall(procMoveFileExW.Addr(), 3, uintptr(unsafe.Pointer(from)), uintptr(unsafe.Pointer(to)), uintptr(flags))
 	if r1 == 0 {
 		if e1 != 0 {
-			err = error(e1)
+			return error(e1)
 		} else {
-			err = syscall.EINVAL
+			return syscall.EINVAL
 		}
 	}
-	return
+	return nil
 }
 
-func rename(oldpath, newpath string) (err error) {
+func rename(oldpath, newpath string) error {
 	from, err := syscall.UTF16PtrFromString(oldpath)
 	if err != nil {
 		return err

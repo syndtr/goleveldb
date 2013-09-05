@@ -149,8 +149,7 @@ retry:
 				r.rbuf = nil
 				r.buf = nil
 			}
-			rtype = tEof
-			return
+			return ret, tEof, err
 		}
 
 		if r.rbuf == nil {
@@ -163,7 +162,7 @@ retry:
 			if err == io.ErrUnexpectedEOF || err == io.EOF {
 				err = nil
 			} else {
-				return
+				return ret, rtype, err
 			}
 		}
 		r.buf = r.rbuf[:n]
@@ -204,5 +203,5 @@ retry:
 		r.buf = r.buf[kHeaderSize+recLen:]
 	}
 
-	return
+	return ret, rtype, err
 }

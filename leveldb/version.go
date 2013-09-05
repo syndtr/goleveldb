@@ -140,7 +140,7 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 			if err == errors.ErrNotFound {
 				continue
 			} else if err != nil {
-				return
+				return value, cstate, err
 			}
 
 			rkey := iKey(_rkey)
@@ -154,17 +154,16 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 					default:
 						panic("not reached")
 					}
-					return
+					return value, cstate, err
 				}
 			} else {
 				err = errors.ErrCorrupt("internal key corrupted")
-				return
+				return value, cstate, err
 			}
 		}
 	}
 
-	err = errors.ErrNotFound
-	return
+	return value, cstate, errors.ErrNotFound
 }
 
 func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
@@ -186,7 +185,7 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 		its = append(its, it)
 	}
 
-	return
+	return its
 }
 
 func (v *version) newStaging() *versionStaging {
@@ -242,7 +241,7 @@ func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
 		}
 	}
 
-	return
+	return n, err
 }
 
 func (v *version) pickLevel(min, max []byte) (level int) {
@@ -262,7 +261,7 @@ func (v *version) pickLevel(min, max []byte) (level int) {
 		}
 	}
 
-	return
+	return level
 }
 
 func (v *version) computeCompaction() {

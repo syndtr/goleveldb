@@ -123,129 +123,107 @@ func (p *sessionRecord) deleteTable(level int, num uint64) {
 	p.deletedTables = append(p.deletedTables, dtRecord{level, num})
 }
 
-func (p *sessionRecord) encodeTo(w io.Writer) (err error) {
+func (p *sessionRecord) encodeTo(w io.Writer) error {
 	tmp := make([]byte, binary.MaxVarintLen64)
 
-	putUvarint := func(p uint64) (err error) {
+	putUvarint := func(p uint64) error {
 		n := binary.PutUvarint(tmp, p)
-		_, err = w.Write(tmp[:n])
-		return
+		_, err := w.Write(tmp[:n])
+		return err
 	}
 
-	putBytes := func(p []byte) (err error) {
-		err = putUvarint(uint64(len(p)))
-		if err != nil {
-			return
+	putBytes := func(p []byte) error {
+		if err := putUvarint(uint64(len(p))); err != nil {
+			return err
 		}
-		_, err = w.Write(p)
-		if err != nil {
-			return
+		if _, err := w.Write(p); err != nil {
+			return err
 		}
-		return
+		return nil
 	}
 
 	if p.hasComparer {
-		_, err = w.Write(tagBytesCache[tagComparer])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagComparer]); err != nil {
+			return err
 		}
-		err = putBytes([]byte(p.comparer))
-		if err != nil {
-			return
+		if err := putBytes([]byte(p.comparer)); err != nil {
+			return err
 		}
 	}
 
 	if p.hasJournalNum {
-		_, err = w.Write(tagBytesCache[tagJournalNum])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagJournalNum]); err != nil {
+			return err
 		}
-		err = putUvarint(p.journalNum)
-		if err != nil {
-			return
+		if err := putUvarint(p.journalNum); err != nil {
+			return err
 		}
 	}
 
 	if p.hasNextNum {
-		_, err = w.Write(tagBytesCache[tagNextNum])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagNextNum]); err != nil {
+			return err
 		}
-		err = putUvarint(p.nextNum)
-		if err != nil {
-			return
+		if err := putUvarint(p.nextNum); err != nil {
+			return err
 		}
 	}
 
 	if p.hasSeq {
-		_, err = w.Write(tagBytesCache[tagSeq])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagSeq]); err != nil {
+			return err
 		}
-		err = putUvarint(uint64(p.seq))
-		if err != nil {
-			return
+		if err := putUvarint(uint64(p.seq)); err != nil {
+			return err
 		}
 	}
 
 	for _, p := range p.compactPointers {
-		_, err = w.Write(tagBytesCache[tagCompactPointer])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagCompactPointer]); err != nil {
+			return err
 		}
-		err = putUvarint(uint64(p.level))
-		if err != nil {
-			return
+		if err := putUvarint(uint64(p.level)); err != nil {
+			return err
 		}
-		err = putBytes(p.key)
-		if err != nil {
-			return
+		if err := putBytes(p.key); err != nil {
+			return err
 		}
 	}
 
 	for _, p := range p.deletedTables {
-		_, err = w.Write(tagBytesCache[tagDeletedTable])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagDeletedTable]); err != nil {
+			return err
 		}
-		err = putUvarint(uint64(p.level))
-		if err != nil {
-			return
+		if err := putUvarint(uint64(p.level)); err != nil {
+			return err
 		}
-		err = putUvarint(p.num)
-		if err != nil {
-			return
+		if err := putUvarint(p.num); err != nil {
+			return err
 		}
 	}
 
 	for _, p := range p.newTables {
-		_, err = w.Write(tagBytesCache[tagNewTable])
-		if err != nil {
-			return
+		if _, err := w.Write(tagBytesCache[tagNewTable]); err != nil {
+			return err
 		}
-		err = putUvarint(uint64(p.level))
-		if err != nil {
-			return
+		if err := putUvarint(uint64(p.level)); err != nil {
+			return err
 		}
-		err = putUvarint(p.num)
-		if err != nil {
-			return
+		if err := putUvarint(p.num); err != nil {
+			return err
 		}
-		err = putUvarint(p.size)
-		if err != nil {
-			return
+		if err := putUvarint(p.size); err != nil {
+			return err
 		}
-		err = putBytes(p.min)
-		if err != nil {
-			return
+		if err := putBytes(p.min); err != nil {
+			return err
 		}
-		err = putBytes(p.max)
-		if err != nil {
-			return
+		if err := putBytes(p.max); err != nil {
+			return err
 		}
 	}
 
-	return
+	return nil
 }
 
 func (p *sessionRecord) encode() []byte {
@@ -262,7 +240,7 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 			if err == io.EOF {
 				err = nil
 			}
-			return
+			return err
 		}
 
 		switch tag {
@@ -347,7 +325,7 @@ func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
 		}
 	}
 
-	return
+	return err
 }
 
 func (p *sessionRecord) decode(buf []byte) error {
