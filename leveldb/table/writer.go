@@ -60,7 +60,7 @@ func NewWriter(w storage.Writer, o opt.OptionsGetter) *Writer {
 }
 
 // Add append key/value to the table.
-func (t *Writer) Add(key, value []byte) (err error) {
+func (t *Writer) Add(key, value []byte) error {
 	if t.closed {
 		panic("operation on closed table writer")
 	}
@@ -81,24 +81,23 @@ func (t *Writer) Add(key, value []byte) (err error) {
 
 	t.dataBlock.Add(key, value)
 	if t.dataBlock.Size() >= t.o.GetBlockSize() {
-		err = t.Flush()
+		return t.Flush()
 	}
-	return
+	return nil
 }
 
 // Flush finalize and write the data block.
-func (t *Writer) Flush() (err error) {
+func (t *Writer) Flush() error {
 	if t.closed {
 		panic("operation on closed table writer")
 	}
 
 	if t.pindex {
-		return
+		return nil
 	}
 
-	err = t.write(t.dataBlock.Finish(), t.lblock, false)
-	if err != nil {
-		return
+	if err := t.write(t.dataBlock.Finish(), t.lblock, false); err != nil {
+		return err
 	}
 	t.dataBlock.Reset()
 
@@ -107,19 +106,18 @@ func (t *Writer) Flush() (err error) {
 	if t.filterBlock != nil {
 		t.filterBlock.Generate(t.off)
 	}
-	return
+	return nil
 }
 
 // Finish finalize the table. No Add(), Flush() or Finish() is possible
 // beyond this, doing so will raise panic.
-func (t *Writer) Finish() (err error) {
+func (t *Writer) Finish() error {
 	if t.closed {
 		panic("operation on closed table writer")
 	}
 
-	err = t.Flush()
-	if err != nil {
-		return
+	if err := t.Flush(); err != nil {
+		return err
 	}
 
 	t.closed = true
@@ -127,9 +125,8 @@ func (t *Writer) Finish() (err error) {
 	// Write filter block
 	fi := new(bInfo)
 	if t.filterBlock != nil {
-		err = t.write(t.filterBlock.Finish(), fi, true)
-		if err != nil {
-			return
+		if err := t.write(t.filterBlock.Finish(), fi, true); err != nil {
+			return err
 		}
 	}
 
@@ -140,9 +137,8 @@ func (t *Writer) Finish() (err error) {
 		meta.Add(key, fi.encode())
 	}
 	mb := new(bInfo)
-	err = t.write(meta.Finish(), mb, false)
-	if err != nil {
-		return
+	if err := t.write(meta.Finish(), mb, false); err != nil {
+		return err
 	}
 
 	// Write index block
@@ -152,20 +148,18 @@ func (t *Writer) Finish() (err error) {
 		t.pindex = false
 	}
 	ib := new(bInfo)
-	err = t.write(t.indexBlock.Finish(), ib, false)
-	if err != nil {
-		return
+	if err := t.write(t.indexBlock.Finish(), ib, false); err != nil {
+		return err
 	}
 
 	// Write footer
-	var n int
-	n, err = writeFooter(t.w, mb, ib)
+	n, err := writeFooter(t.w, mb, ib)
 	if err != nil {
-		return
+		return err
 	}
 	t.off += n
 
-	return
+	return nil
 }
 
 // Len return the number of records added so far.
@@ -195,7 +189,7 @@ func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
 			compression = kSnappyCompression
 			buf, err = snappy.Encode(nil, buf)
 			if err != nil {
-				return
+				return err
 			}
 		}
 	}
@@ -205,25 +199,22 @@ func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
 		bi.size = uint64(len(buf))
 	}
 
-	_, err = t.w.Write(buf)
-	if err != nil {
-		return
+	if _, err = t.w.Write(buf); err != nil {
+		return err
 	}
 
 	compbit := []byte{byte(compression)}
-	_, err = t.w.Write(compbit)
-	if err != nil {
-		return
+	if _, err = t.w.Write(compbit); err != nil {
+		return err
 	}
 
 	crc := hash.NewCRC32C()
 	crc.Write(buf)
 	crc.Write(compbit)
-	err = binary.Write(t.w, binary.LittleEndian, hash.MaskCRC32(crc.Sum32()))
-	if err != nil {
-		return
+	if err = binary.Write(t.w, binary.LittleEndian, hash.MaskCRC32(crc.Sum32())); err != nil {
+		return err
 	}
 
 	t.off += len(buf) + 5
-	return
+	return nil
 }
