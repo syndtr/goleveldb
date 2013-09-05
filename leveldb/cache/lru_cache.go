@@ -108,19 +108,19 @@ type lruNs struct {
 	zapped bool
 }
 
-func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
+func (p *lruNs) Get(key uint64, setf SetFunc) (Object, bool) {
 	lru := p.lru
 	lru.Lock()
 
 	if p.zapped {
 		lru.Unlock()
 		if setf == nil {
-			return
+			return nil, false
 		}
 		if ok, value, _, fin := setf(); ok {
 			return &emptyCacheObj{value, fin}, true
 		}
-		return
+		return nil, false
 	}
 
 	n, ok := p.table[key]
@@ -134,7 +134,7 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (obj Object, ok bool) {
 	} else {
 		if setf == nil {
 			lru.Unlock()
-			return
+			return nil, false
 		}
 
 		ok, value, charge, fin := setf()
