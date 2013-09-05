@@ -162,7 +162,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
 	w, err := newJournalWriter(s.stor.GetFile(num, storage.TypeManifest))
 	if err != nil {
-		return
+		return err
 	}
 
 	if v == nil {
@@ -187,30 +187,27 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 		}
 	}()
 
-	err = w.journal.Append(r.encode())
-	if err != nil {
-		return
+	if err = w.journal.Append(r.encode()); err != nil {
+		return err
 	}
 
-	err = w.writer.Sync()
-	if err != nil {
-		return
+	if err = w.writer.Sync(); err != nil {
+		return err
 	}
 
 	return s.stor.SetManifest(w.file)
 }
 
 // Flush record to disk.
-func (s *session) flushManifest(r *sessionRecord) (err error) {
+func (s *session) flushManifest(r *sessionRecord) error {
 	s.fillRecord(r, false)
-	err = s.manifest.journal.Append(r.encode())
-	if err != nil {
-		return
+	if err := s.manifest.journal.Append(r.encode()); err != nil {
+		return err
 	}
-	err = s.manifest.writer.Sync()
-	if err != nil {
-		return
+	if err := s.manifest.writer.Sync(); err != nil {
+		return err
 	}
 	s.recordCommited(r)
-	return
+
+	return nil
 }
