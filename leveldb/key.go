@@ -90,15 +90,14 @@ func (p iKey) parseNum() (seq uint64, t vType, ok bool) {
 		panic("nil iKey")
 	}
 	if len(p) < 8 {
-		return
+		return seq, t, false
 	}
 	num := p.num()
 	seq, t = uint64(num>>8), vType(num&0xff)
 	if t > tVal {
 		return 0, 0, false
 	}
-	ok = true
-	return
+	return seq, t, true
 }
 
 func (p iKey) String() string {
