@@ -38,26 +38,21 @@ func sliceBytesTest(b []byte) (valid bool, v, rest []byte) {
 	z, n := binary.Uvarint(b)
 	m := n + int(z)
 	if n <= 0 || m > len(b) {
-		return
+		return false, nil, nil
 	}
-	valid = true
-	v = b[n:m]
-	rest = b[m:]
-	return
+	return true, b[n:m], b[m:]
 }
 
-func readBytes(r readByteReader) (b []byte, err error) {
-	var n uint64
-	n, err = binary.ReadUvarint(r)
+func readBytes(r readByteReader) ([]byte, error) {
+	n, err := binary.ReadUvarint(r)
 	if err != nil || n <= 0 {
-		return
+		return nil, err
 	}
-	b = make([]byte, n)
-	_, err = io.ReadFull(r, b)
-	if err != nil {
-		b = nil
+	b := make([]byte, n)
+	if _, err = io.ReadFull(r, b); err != nil {
+		return nil, err
 	}
-	return
+	return b, nil
 }
 
 func shorten(str string) string {
@@ -91,7 +86,7 @@ type journalReader struct {
 	journal *journal.Reader
 }
 
-func newJournalReader(file storage.File, checksum bool, dropf journal.DropFunc) (p *journalReader, err error) {
+func newJournalReader(file storage.File, checksum bool, dropf journal.DropFunc) (*journalReader, error) {
 	r, err := file.Open()
 	if err != nil {
 		return nil, err
@@ -131,12 +126,12 @@ type journalWriter struct {
 	journal *journal.Writer
 }
 
-func newJournalWriter(file storage.File) (p *journalWriter, err error) {
-	w := new(journalWriter)
+func newJournalWriter(file storage.File) (w *journalWriter, err error) {
+	w = new(journalWriter)
 	w.file = file
 	w.writer, err = file.Create()
 	if err != nil {
-		return
+		return nil, err
 	}
 	w.journal = journal.NewWriter(w.writer)
 	return w, nil
