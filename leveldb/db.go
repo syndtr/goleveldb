@@ -9,7 +9,6 @@ package leveldb
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"unsafe"
@@ -74,11 +73,18 @@ func openDB(s *session) (*DB, error) {
 	// wait for compaction goroutine
 	db.cch <- cWait
 
-	runtime.SetFinalizer(db, (*DB).Close)
 	return db, nil
 }
 
-// Open open or create database from given storage.
+// Open opens or creates database from a given storage.  You must close it when
+// you're finished.
+//
+//	db, err := leveldb.Open(stor, opt)
+//	if err != nil {
+//		log.Println("could not open database:", err)
+//		return
+//	}
+//	defer db.Close()
 func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	s, err := openSession(p, o)
 	if err != nil {
@@ -103,9 +109,17 @@ func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	return openDB(s)
 }
 
-// OpenFile open or create database from given file.
+// OpenFile opens or creates a database from a given file.  You must close it
+// when you're finished.
 //
-// This is alias of:
+//	db, err := leveldb.OpenFile(path, opt)
+//	if err != nil {
+//		log.Println("could not open database:", err)
+//		return
+//	}
+//	defer db.Close()
+//
+// This is alias of the following:
 //	stor, err := storage.OpenFile("path/to/db")
 //	...
 //	db, err := Open(stor, &opt.Options{})
@@ -388,30 +402,27 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	}
 
 	p := d.newSnapshot()
-	i := p.NewIterator(ro)
-	x, ok := i.(*dbIter)
-	if ok {
-		runtime.SetFinalizer(x, func(x *dbIter) {
-			p.Release()
-		})
-	} else {
-		p.Release()
-	}
-	return i
+
+	return p.NewIterator(ro)
 }
 
 // GetSnapshot return a handle to the current DB state.
 // Iterators created with this handle will all observe a stable snapshot
 // of the current DB state. The caller must call *Snapshot.Release() when the
 // snapshot is no longer needed.
+//
+//	snap, err := db.GetSnapshot()
+//	if err != nil {
+//		log.Println("could acquire snapshot:", err)
+//		return
+//	}
+//	defer snap.Release()
 func (d *DB) GetSnapshot() (*Snapshot, error) {
 	if err := d.rok(); err != nil {
 		return nil, err
 	}
 
-	snap := d.newSnapshot()
-	runtime.SetFinalizer(snap, (*Snapshot).Release)
-	return snap, nil
+	return d.newSnapshot(), nil
 }
 
 // GetProperty used to query exported database state.

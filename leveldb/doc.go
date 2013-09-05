@@ -9,6 +9,11 @@
 // Create or open a database:
 //
 //	db, err := leveldb.OpenFile("path/to/db", &opt.Options{Flag: opt.OFCreateIfMissing})
+//	if err != nil {
+//		log.Println("could not open database:", err)
+//		return
+//	}
+//	defer db.Close()
 //	...
 //
 // Read or modify the database content:
