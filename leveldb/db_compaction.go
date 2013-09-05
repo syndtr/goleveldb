@@ -406,7 +406,8 @@ func (d *DB) compaction() {
 		d.ewg.Done()
 	}()
 
-	for s := d.s; true; {
+	s := d.s
+	for {
 		var creq *cReq
 		select {
 		case signal := <-d.cch:
@@ -451,17 +452,13 @@ func (d *DB) compaction() {
 			s.print("CompactRange: done")
 		}
 
-		for a, b := true, true; a || b; {
-			a, b = false, false
+		for {
 			if mem := d.getFrozenMem(); mem != nil {
 				d.memCompaction(mem)
-				a = true
-				continue
-			}
-
-			if s.version().needCompaction() {
+			} else if s.version().needCompaction() {
 				d.doCompaction(s.pickCompaction(), false)
-				b = true
+			} else {
+				break
 			}
 		}
 	}
