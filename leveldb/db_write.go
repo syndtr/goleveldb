@@ -70,7 +70,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 		// create new memdb and journal
 		m, err = d.newMem()
 		if err != nil {
-			return
+			return nil, err
 		}
 
 		// schedule compaction
@@ -80,7 +80,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 		}
 	}
 
-	return
+	return m, nil
 }
 
 // Write apply the specified batch to the database.
