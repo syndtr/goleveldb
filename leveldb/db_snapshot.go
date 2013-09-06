@@ -8,6 +8,7 @@ package leveldb
 
 import (
 	"container/list"
+	"runtime"
 	"sync"
 	"sync/atomic"
 
@@ -78,7 +79,9 @@ type Snapshot struct {
 
 // Create new snapshot object.
 func (d *DB) newSnapshot() *Snapshot {
-	return &Snapshot{d: d, entry: d.snaps.acquire(d.getSeq())}
+	p := &Snapshot{d: d, entry: d.snaps.acquire(d.getSeq())}
+	runtime.SetFinalizer(p, (*Snapshot).Release)
+	return p
 }
 
 func (p *Snapshot) isOk() bool {
@@ -139,6 +142,9 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 // after this call.
 func (p *Snapshot) Release() {
 	if atomic.CompareAndSwapUint32(&p.released, 0, 1) {
+		// not needed anymore
+		runtime.SetFinalizer(p, nil)
+
 		p.d.snaps.release(p.entry)
 		p.d = nil
 		p.entry = nil

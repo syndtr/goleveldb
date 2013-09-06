@@ -216,6 +216,8 @@ func (d *FileStorage) SetManifest(f File) error {
 
 // Close closes the storage and release the lock.
 func (d *FileStorage) Close() error {
+	// not needed anymore
+	runtime.SetFinalizer(d, nil)
 	d.log.Close()
 	return d.flock.release()
 }

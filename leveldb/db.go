@@ -389,12 +389,7 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 
 	p := d.newSnapshot()
 	i := p.NewIterator(ro)
-	x, ok := i.(*dbIter)
-	if ok {
-		runtime.SetFinalizer(x, func(x *dbIter) {
-			p.Release()
-		})
-	} else {
+	if _, ok := i.(*dbIter); !ok {
 		p.Release()
 	}
 	return i
@@ -409,9 +404,7 @@ func (d *DB) GetSnapshot() (*Snapshot, error) {
 		return nil, err
 	}
 
-	snap := d.newSnapshot()
-	runtime.SetFinalizer(snap, (*Snapshot).Release)
-	return snap, nil
+	return d.newSnapshot(), nil
 }
 
 // GetProperty used to query exported database state.
@@ -542,6 +535,9 @@ func (d *DB) Close() error {
 	if !d.setClosed() {
 		return errors.ErrClosed
 	}
+
+	// not needed anymore
+	runtime.SetFinalizer(d, nil)
 
 	d.wlock <- struct{}{}
 drain:
