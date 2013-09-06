@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"time"
 
@@ -50,9 +49,16 @@ type FileStorage struct {
 	mu    sync.Mutex
 }
 
-// OpenFile creates new initialized FileStorage for given path. This will also
+// OpenFile creates new initialized FileStorage for a given path. This will also
 // hold file lock; thus any subsequent attempt to open same file path will
-// fail.
+// fail.  You must close it when you're finished.
+//
+//	f, err := storage.OpenFile(path, opt)
+//	if err != nil {
+//		log.Println("could not open file:", err)
+//		return
+//	}
+//	defer f.Close()
 func OpenFile(dbpath string) (d *FileStorage, err error) {
 	if err = os.MkdirAll(dbpath, 0755); err != nil {
 		return nil, err
@@ -75,10 +81,7 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 		return nil, err
 	}
 
-	d = &FileStorage{path: dbpath, flock: flock, log: log}
-	runtime.SetFinalizer(d, (*FileStorage).Close)
-
-	return d, nil
+	return &FileStorage{path: dbpath, flock: flock, log: log}, nil
 }
 
 // Lock lock the storage.
