@@ -42,7 +42,7 @@ func (p Sizes) Sum() (n uint64) {
 func (d *DB) cleanFiles() {
 	s := d.s
 
-	v := s.version()
+	v := s.version_NB()
 	tables := make(map[uint64]struct{})
 	for _, tt := range v.tables {
 		for _, t := range tt {

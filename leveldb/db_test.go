@@ -155,6 +155,7 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 			}
 		}
 	}
+	v.release()
 
 	if res > want {
 		t.Errorf("next level overlapping bytes is more than %d, got=%d", want, res)
@@ -393,6 +394,7 @@ func (h *dbHarness) tablesPerLevel(want string) {
 			nz = len(res)
 		}
 	}
+	v.release()
 	res = res[:nz]
 	if res != want {
 		h.t.Errorf("invalid tables len, want=%s, got=%s", want, res)
@@ -404,6 +406,7 @@ func (h *dbHarness) totalTables() (n int) {
 	for _, tt := range v.tables {
 		n += len(tt)
 	}
+	v.release()
 	return
 }
 
@@ -589,7 +592,9 @@ func TestDb_GetLevel0Ordering(t *testing.T) {
 		h.getVal("foo", "v3")
 		h.getVal("bar", "b3")
 
-		t0len := h.db.s.version().tLen(0)
+		v := h.db.s.version()
+		t0len := v.tLen(0)
+		v.release()
 		if t0len < 2 {
 			t.Errorf("level-0 tables is less than 2, got %d", t0len)
 		}
@@ -653,8 +658,10 @@ func TestDb_GetEncountersEmptyLevel(t *testing.T) {
 			}
 			v := h.db.s.version()
 			if v.tLen(0) > 0 && v.tLen(2) > 0 {
+				v.release()
 				break
 			}
+			v.release()
 			h.put("a", "begin")
 			h.put("z", "end")
 			h.compactMem()
@@ -682,6 +689,7 @@ func TestDb_GetEncountersEmptyLevel(t *testing.T) {
 		if v.tLen(0) > 0 {
 			t.Errorf("level-0 tables more than 0, got %d", v.tLen(0))
 		}
+		v.release()
 
 		h.getVal("a", "begin")
 		h.getVal("z", "end")
@@ -833,9 +841,11 @@ func TestDb_RecoverWithLargeJournal(t *testing.T) {
 	h.getVal("big2", strings.Repeat("2", 200000))
 	h.getVal("small3", strings.Repeat("3", 10))
 	h.getVal("small4", strings.Repeat("4", 10))
-	if h.db.s.version().tLen(0) <= 1 {
+	v := h.db.s.version()
+	if v.tLen(0) <= 1 {
 		t.Errorf("tables-0 less than one")
 	}
+	v.release()
 
 	h.close()
 }
@@ -850,6 +860,7 @@ func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	if v.tLen(0) > 0 {
 		t.Errorf("level-0 tables more than 0, got %d", v.tLen(0))
 	}
+	v.release()
 
 	n := 80
 
@@ -869,6 +880,7 @@ func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	if v.tLen(1) <= 1 {
 		t.Errorf("level-1 tables less than 1, got %d", v.tLen(1))
 	}
+	v.release()
 
 	for i := 0; i < n; i++ {
 		h.getVal(numKey(i), strings.Repeat(fmt.Sprintf("v%09d", i), 100000/10))
@@ -993,6 +1005,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 		if v.tLen(1) == 0 {
 			t.Error("level-1 tables was zero")
 		}
+		v.release()
 	}
 
 	h.close()
@@ -1073,7 +1086,9 @@ func TestDb_HiddenValuesAreRemoved(t *testing.T) {
 		h.put("foo", "v1")
 		h.compactMem()
 		m := kMaxMemCompactLevel
-		num := s.version().tLen(m)
+		v := s.version()
+		num := v.tLen(m)
+		v.release()
 		if num != 1 {
 			t.Errorf("invalid level-%d len, want=1 got=%d", m, num)
 		}
@@ -1082,13 +1097,14 @@ func TestDb_HiddenValuesAreRemoved(t *testing.T) {
 		h.put("a", "begin")
 		h.put("z", "end")
 		h.compactMem()
-		v := s.version()
+		v = s.version()
 		if v.tLen(m) != 1 {
 			t.Errorf("invalid level-%d len, want=1 got=%d", m, v.tLen(m))
 		}
 		if v.tLen(m-1) != 1 {
 			t.Errorf("invalid level-%d len, want=1 got=%d", m-1, v.tLen(m-1))
 		}
+		v.release()
 
 		h.delete("foo")
 		h.put("foo", "v2")
@@ -1113,7 +1129,9 @@ func TestDb_DeletionMarkers2(t *testing.T) {
 	h.put("foo", "v1")
 	h.compactMem()
 	m := kMaxMemCompactLevel
-	num := s.version().tLen(m)
+	v := s.version()
+	num := v.tLen(m)
+	v.release()
 	if num != 1 {
 		t.Errorf("invalid level-%d len, want=1 got=%d", m, num)
 	}
@@ -1122,13 +1140,14 @@ func TestDb_DeletionMarkers2(t *testing.T) {
 	h.put("a", "begin")
 	h.put("z", "end")
 	h.compactMem()
-	v := s.version()
+	v = s.version()
 	if v.tLen(m) != 1 {
 		t.Errorf("invalid level-%d len, want=1 got=%d", m, v.tLen(m))
 	}
 	if v.tLen(m-1) != 1 {
 		t.Errorf("invalid level-%d len, want=1 got=%d", m-1, v.tLen(m-1))
 	}
+	v.release()
 
 	h.delete("foo")
 	h.allEntriesFor("foo", "[ DEL, v1 ]")
@@ -1249,9 +1268,11 @@ func TestDb_ManifestWriteError(t *testing.T) {
 		// Mem compaction (will succeed)
 		h.compactMem()
 		h.getVal("foo", "bar")
-		if n := h.db.s.version().tLen(kMaxMemCompactLevel); n != 1 {
+		v := h.db.s.version()
+		if n := v.tLen(kMaxMemCompactLevel); n != 1 {
 			t.Errorf("invalid total tables, want=1 got=%d", n)
 		}
+		v.release()
 
 		if i == 0 {
 			h.stor.SetWriteErr(storage.TypeManifest)

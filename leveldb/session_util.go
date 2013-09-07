@@ -9,7 +9,6 @@ package leveldb
 import (
 	"fmt"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -49,25 +48,28 @@ func (s *session) getFiles(t storage.FileType) []storage.File {
 
 // Get current version.
 func (s *session) version() *version {
-	return (*version)(atomic.LoadPointer(&s.stVersion))
+	s.vmu.Lock()
+	defer s.vmu.Unlock()
+	s.stVersion.ref++
+	return s.stVersion
 }
 
 // Get current version; no barrier.
 func (s *session) version_NB() *version {
-	return (*version)(s.stVersion)
+	return s.stVersion
 }
 
 // Set current version to v.
 func (s *session) setVersion(v *version) {
-	for {
-		old := s.stVersion
-		if atomic.CompareAndSwapPointer(&s.stVersion, old, unsafe.Pointer(v)) {
-			if old != nil {
-				(*version)(old).drop(v)
-			}
-			break
-		}
+	s.vmu.Lock()
+	v.ref = 1
+	if old := s.stVersion; old != nil {
+		v.ref++
+		old.next = v
+		old.release_NB()
 	}
+	s.stVersion = v
+	s.vmu.Unlock()
 }
 
 // Get current unused file number.

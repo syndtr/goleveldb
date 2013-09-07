@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"runtime"
 	"sync/atomic"
 	"unsafe"
 
@@ -47,21 +46,23 @@ type version struct {
 
 	cSeek unsafe.Pointer
 
+	ref  int
 	next *version
 }
 
-func (v *version) purge() {
-	if v.next == nil {
+func (v *version) release_NB() {
+	v.ref--
+	if v.ref > 0 {
 		return
+	}
+	if v.ref < 0 {
+		panic("negative version ref")
 	}
 
 	s := v.s
 
-	next := v.next
-	v.next = nil
-
 	tables := make(map[uint64]struct{})
-	for _, tt := range next.tables {
+	for _, tt := range v.next.tables {
 		for _, t := range tt {
 			tables[t.file.Num()] = struct{}{}
 		}
@@ -74,11 +75,15 @@ func (v *version) purge() {
 			}
 		}
 	}
+
+	v.next.release_NB()
+	v.next = nil
 }
 
-func (v *version) drop(nv *version) {
-	v.next = nv
-	runtime.SetFinalizer(v, (*version).purge)
+func (v *version) release() {
+	v.s.vmu.Lock()
+	v.release_NB()
+	v.s.vmu.Unlock()
 }
 
 func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool, err error) {

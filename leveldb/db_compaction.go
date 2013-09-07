@@ -90,7 +90,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	}
 
 	if level < 0 {
-		level = s.version().pickLevel(t.min.ukey(), t.max.ukey())
+		level = s.version_NB().pickLevel(t.min.ukey(), t.max.ukey())
 	}
 	c.rec.addTableFile(level, t)
 
@@ -435,7 +435,7 @@ func (d *DB) compaction() {
 					d.doCompaction(c, true)
 				}
 			} else {
-				v := s.version()
+				v := s.version_NB()
 				maxLevel := 1
 				for i, tt := range v.tables[1:] {
 					if tt.isOverlaps(creq.min, creq.max, true, s.cmp) {
@@ -455,7 +455,7 @@ func (d *DB) compaction() {
 		for {
 			if mem := d.getFrozenMem(); mem != nil {
 				d.memCompaction(mem)
-			} else if s.version().needCompaction() {
+			} else if s.version_NB().needCompaction() {
 				d.doCompaction(s.pickCompaction(), false)
 			} else {
 				break

@@ -8,8 +8,8 @@ package leveldb
 
 import (
 	"os"
+	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -34,7 +34,8 @@ type session struct {
 	manifest *journalWriter
 
 	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
-	stVersion unsafe.Pointer   // current version
+	stVersion *version         // current version
+	vmu       sync.Mutex
 }
 
 func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {

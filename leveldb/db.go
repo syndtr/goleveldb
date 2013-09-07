@@ -350,7 +350,9 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		return
 	}
 
-	value, cState, err := s.version().get(ikey, ro)
+	v := s.version()
+	value, cState, err := v.get(ikey, ro)
+	v.release()
 	if cState && !d.isClosed() {
 		// schedule compaction
 		select {
@@ -430,7 +432,11 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 
 	p := prop[len(prefix):]
 
-	switch s := d.s; true {
+	s := d.s
+	v := s.version()
+	defer v.release()
+
+	switch {
 	case strings.HasPrefix(p, "num-files-at-level"):
 		var level uint
 		var rest string
@@ -438,10 +444,9 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 		if n != 1 || level >= kNumLevels {
 			err = errors.ErrInvalid("invalid property: " + prop)
 		} else {
-			value = fmt.Sprint(s.version().tLen(int(level)))
+			value = fmt.Sprint(v.tLen(int(level)))
 		}
 	case p == "stats":
-		v := s.version()
 		value = "Compactions\n" +
 			" Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)\n" +
 			"-------+------------+---------------+---------------+---------------+---------------\n"
@@ -455,7 +460,6 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
 	case p == "sstables":
-		v := s.version()
 		for level, tt := range v.tables {
 			value += fmt.Sprintf("--- level %d ---\n", level)
 			for _, t := range tt {
@@ -482,6 +486,8 @@ func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
 	}
 
 	v := d.s.version()
+	defer v.release()
+
 	sizes := make(Sizes, 0, len(rr))
 	for _, r := range rr {
 		min := newIKey(r.Start, kMaxSeq, tSeek)

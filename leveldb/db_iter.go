@@ -22,6 +22,7 @@ func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 
 	mem := d.getMem()
 	v := s.version()
+	defer v.release()
 
 	ti := v.getIterators(ro)
 	ii := make([]iterator.Iterator, 0, len(ti)+2)

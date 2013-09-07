@@ -47,7 +47,6 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
-			continue
 		case mem.cur.Size() <= s.o.GetWriteBuffer():
 			// still room
 			return mem.cur, nil
@@ -62,23 +61,22 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 				cwait = true
 				d.cch <- cWait
 			}
-			continue
 		case v.tLen(0) >= kL0_StopWritesTrigger:
 			d.cch <- cSched
-			continue
-		}
-
-		// create new memdb and journal
-		m, err = d.newMem()
-		if err != nil {
-			return
-		}
-
-		// schedule compaction
-		select {
-		case d.cch <- cSched:
 		default:
+			// create new memdb and journal
+			m, err = d.newMem()
+			if err != nil {
+				return
+			}
+
+			// schedule compaction
+			select {
+			case d.cch <- cSched:
+			default:
+			}
 		}
+		v.release()
 	}
 
 	return
