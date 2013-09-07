@@ -109,7 +109,10 @@ func (i *MergedIterator) Next() bool {
 		i.backward = false
 	}
 
-	i.iter.Next()
+	if !i.iter.Next() && i.iter.Error() != nil {
+		i.err = i.iter.Error()
+		return false
+	}
 	i.smallest()
 	i.last = i.iter == nil
 	return !i.last
@@ -146,7 +149,10 @@ func (i *MergedIterator) Prev() bool {
 		i.backward = true
 	}
 
-	i.iter.Prev()
+	if !i.iter.Prev() && i.iter.Error() != nil {
+		i.err = i.iter.Error()
+		return false
+	}
 	i.largest()
 	return i.iter != nil
 }
