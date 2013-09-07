@@ -162,7 +162,7 @@ func (s *session) recordCommited(r *sessionRecord) {
 func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
 	w, err := newJournalWriter(s.stor.GetFile(num, storage.TypeManifest))
 	if err != nil {
-		return err
+		return
 	}
 
 	if v == nil {
@@ -187,12 +187,14 @@ func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err 
 		}
 	}()
 
-	if err = w.journal.Append(r.encode()); err != nil {
-		return err
+	err = w.journal.Append(r.encode())
+	if err != nil {
+		return
 	}
 
-	if err = w.writer.Sync(); err != nil {
-		return err
+	err = w.writer.Sync()
+	if err != nil {
+		return
 	}
 
 	return s.stor.SetManifest(w.file)

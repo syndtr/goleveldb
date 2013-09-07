@@ -108,19 +108,23 @@ type lruNs struct {
 	zapped bool
 }
 
-func (p *lruNs) Get(key uint64, setf SetFunc) (Object, bool) {
+func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 	lru := p.lru
 	lru.Lock()
 
 	if p.zapped {
 		lru.Unlock()
 		if setf == nil {
-			return nil, false
+			return
 		}
-		if ok, value, _, fin := setf(); ok {
-			return &emptyCacheObj{value, fin}, true
+
+		var value interface{}
+		var fin func()
+		ok, value, _, fin = setf()
+		if ok {
+			o = &emptyCacheObj{value, fin}
 		}
-		return nil, false
+		return
 	}
 
 	n, ok := p.table[key]
@@ -134,13 +138,16 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (Object, bool) {
 	} else {
 		if setf == nil {
 			lru.Unlock()
-			return nil, false
+			return
 		}
 
-		ok, value, charge, fin := setf()
+		var value interface{}
+		var charge int
+		var fin func()
+		ok, value, charge, fin = setf()
 		if !ok {
 			lru.Unlock()
-			return nil, false
+			return
 		}
 
 		n = &lruNode{
@@ -159,8 +166,8 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (Object, bool) {
 	}
 
 	lru.Unlock()
-
-	return &lruObject{node: n}, true
+	o = &lruObject{node: n}
+	return
 }
 
 func (p *lruNs) Delete(key uint64, fin func()) bool {

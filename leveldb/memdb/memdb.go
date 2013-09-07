@@ -123,19 +123,24 @@ func (p *DB) Contains(key []byte) bool {
 }
 
 // Get return value for the given key.
-func (p *DB) Get(key []byte) ([]byte, error) {
+func (p *DB) Get(key []byte) (value []byte, err error) {
 	if x, exact := p.findGE(key, false); exact {
-		return x.value, nil
+		value = x.value
+	} else {
+		err = errors.ErrNotFound
 	}
-	return nil, errors.ErrNotFound
+	return
 }
 
 // Find return key/value equal or greater than given key.
 func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
 	if x, _ := p.findGE(key, false); x != nil {
-		return x.key, x.value, nil
+		rkey = x.key
+		value = x.value
+	} else {
+		err = errors.ErrNotFound
 	}
-	return nil, nil, errors.ErrNotFound
+	return
 }
 
 // NewIterator create a new iterator over the database content.

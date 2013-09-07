@@ -347,11 +347,10 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 
 	mem := d.getMem()
 	if memGet(mem.cur) || (mem.froze != nil && memGet(mem.froze)) {
-		return value, err
+		return
 	}
 
 	value, cState, err := s.version().get(ikey, ro)
-
 	if cState && !d.isClosed() {
 		// schedule compaction
 		select {
@@ -360,20 +359,21 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		}
 	}
 
-	return value, err
+	return
 }
 
 // Get get value for given key of the latest snapshot of database.
-func (d *DB) Get(key []byte, ro *opt.ReadOptions) ([]byte, error) {
-	if err := d.rok(); err != nil {
-		return nil, err
+func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
+	err = d.rok()
+	if err != nil {
+		return
 	}
 
-	value, err := d.get(key, d.getSeq(), ro)
-	if ro.HasFlag(opt.RFDontCopyBuffer) {
-		return value, err
+	value, err = d.get(key, d.getSeq(), ro)
+	if !ro.HasFlag(opt.RFDontCopyBuffer) {
+		value = dupBytes(value)
 	}
-	return dupBytes(value), err
+	return
 }
 
 // NewIterator return an iterator over the contents of the latest snapshot of
@@ -418,8 +418,9 @@ func (d *DB) GetSnapshot() (*Snapshot, error) {
 //  "leveldb.sstables" - returns a multi-line string that storribes all
 //     of the sstables that make up the db contents.
 func (d *DB) GetProperty(prop string) (value string, err error) {
-	if err = d.rok(); err != nil {
-		return "", err
+	err = d.rok()
+	if err != nil {
+		return
 	}
 
 	const prefix = "leveldb."
@@ -435,9 +436,10 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 		var rest string
 		n, _ := fmt.Scanf("%d%s", &level, &rest)
 		if n != 1 || level >= kNumLevels {
-			return "", errors.ErrInvalid("invalid property: " + prop)
+			err = errors.ErrInvalid("invalid property: " + prop)
+		} else {
+			value = fmt.Sprint(s.version().tLen(int(level)))
 		}
-		value = fmt.Sprint(s.version().tLen(int(level)))
 	case p == "stats":
 		v := s.version()
 		value = "Compactions\n" +
@@ -461,10 +463,10 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 			}
 		}
 	default:
-		return "", errors.ErrInvalid("unknown property: " + prop)
+		err = errors.ErrInvalid("unknown property: " + prop)
 	}
 
-	return value, nil
+	return
 }
 
 // GetApproximateSizes calculate approximate sizes of given ranges.

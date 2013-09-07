@@ -60,7 +60,7 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 
 	flock, err := newFileLock(filepath.Join(dbpath, "LOCK"))
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	defer func() {
@@ -72,13 +72,12 @@ func OpenFile(dbpath string) (d *FileStorage, err error) {
 	rename(filepath.Join(dbpath, "LOG"), filepath.Join(dbpath, "LOG.old"))
 	log, err := os.OpenFile(filepath.Join(dbpath, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	d = &FileStorage{path: dbpath, flock: flock, log: log}
 	runtime.SetFinalizer(d, (*FileStorage).Close)
-
-	return d, nil
+	return
 }
 
 // Lock lock the storage.
@@ -175,16 +174,18 @@ func (d *FileStorage) GetFiles(t FileType) (r []File) {
 }
 
 // GetManifest get manifest file.
-func (d *FileStorage) GetManifest() (File, error) {
+func (d *FileStorage) GetManifest() (f File, err error) {
 	pth := filepath.Join(d.path, "CURRENT")
 	rw, err := os.OpenFile(pth, os.O_RDONLY, 0)
 	if err != nil {
-		return nil, err.(*os.PathError).Err
+		err = err.(*os.PathError).Err
+		return
 	}
 	defer rw.Close()
 	buf := new(bytes.Buffer)
-	if _, err = buf.ReadFrom(rw); err != nil {
-		return nil, err
+	_, err = buf.ReadFrom(rw)
+	if err != nil {
+		return
 	}
 	b := buf.Bytes()
 	p := &file{stor: d}
@@ -256,12 +257,13 @@ func (p *file) Num() uint64 {
 	return p.num
 }
 
-func (p *file) Size() (uint64, error) {
+func (p *file) Size() (size uint64, err error) {
 	fi, err := os.Stat(p.path())
 	if err != nil {
-		return 0, err
+		return
 	}
-	return uint64(fi.Size()), nil
+	size = uint64(fi.Size())
+	return
 }
 
 func (p *file) Remove() error {

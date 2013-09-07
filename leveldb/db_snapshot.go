@@ -47,7 +47,7 @@ func (p *snaps) acquire(seq uint64) (e *snapEntry) {
 	}
 	e.ref++
 	p.Unlock()
-	return e
+	return
 }
 
 // Release given entry; remove it when ref reach zero.
@@ -99,15 +99,15 @@ func (p *Snapshot) ok() error {
 }
 
 // Get get value for given key of this snapshot of database.
-func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) ([]byte, error) {
+func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	if atomic.LoadUint32(&p.released) != 0 {
 		return nil, errors.ErrSnapshotReleased
 	}
 
 	d := p.d
-
-	if err := d.rok(); err != nil {
-		return nil, err
+	err = d.rok()
+	if err != nil {
+		return
 	}
 
 	return d.get(key, p.entry.seq, ro)

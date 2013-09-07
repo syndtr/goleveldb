@@ -29,17 +29,17 @@ func (fl *windowsFileLock) release() error {
 	return syscall.Close(fl.fd)
 }
 
-func newFileLock(path string) (fileLock, error) {
+func newFileLock(path string) (fl fileLock, err error) {
 	pathp, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
-		return nil, err
+		return
 	}
 	fd, err := syscall.CreateFile(pathp, syscall.GENERIC_READ|syscall.GENERIC_WRITE, 0, nil, syscall.CREATE_ALWAYS, syscall.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
-		return nil, err
+		return
 	}
-	wl := &windowsFileLock{fd: fd}
-	return wl, nil
+	fl = &windowsFileLock{fd: fd}
+	return
 }
 
 func moveFileEx(from *uint16, to *uint16, flags uint32) error {

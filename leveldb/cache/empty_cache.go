@@ -24,14 +24,15 @@ func (EmptyCache) Zap() {}
 
 type emptyCacheNs struct{}
 
-func (emptyCacheNs) Get(key uint64, setf SetFunc) (Object, bool) {
+func (emptyCacheNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 	if setf == nil {
-		return nil, false
+		return
 	}
-	if ok, value, _, fin := setf(); ok {
-		return &emptyCacheObj{value, fin}, ok
+	ok, value, _, fin := setf()
+	if ok {
+		o = &emptyCacheObj{value, fin}
 	}
-	return nil, false
+	return
 }
 
 func (emptyCacheNs) Delete(key uint64, fin func()) bool {

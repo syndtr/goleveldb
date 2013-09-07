@@ -175,15 +175,17 @@ func (p *memFilePtr) Num() uint64 {
 	return p.num
 }
 
-func (p *memFilePtr) Size() (uint64, error) {
+func (p *memFilePtr) Size() (size uint64, err error) {
 	m := p.m
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.init()
 	if file, exist := m.files[p.num]; exist {
-		return uint64(file.Len()), nil
+		size = uint64(file.Len())
+	} else {
+		err = os.ErrNotExist
 	}
-	return 0, os.ErrNotExist
+	return
 }
 
 func (p *memFilePtr) Remove() error {

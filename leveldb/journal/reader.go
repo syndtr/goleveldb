@@ -31,16 +31,18 @@ type Reader struct {
 }
 
 // NewReader creates new initialized journal reader.
-func NewReader(r io.ReadSeeker, skip int64, checksum bool, dropf DropFunc) (*Reader, error) {
-	p := &Reader{
+func NewReader(r io.ReadSeeker, skip int64, checksum bool, dropf DropFunc) (p *Reader, err error) {
+	p = &Reader{
 		r:        r,
 		checksum: checksum,
 		dropf:    dropf,
 	}
-	if err := p.skip(skip); err != nil {
-		return nil, err
+	err = p.skip(skip)
+	if err != nil {
+		p = nil
+		return
 	}
-	return p, nil
+	return
 }
 
 // skip allows skip given number bytes, aligned by single block.

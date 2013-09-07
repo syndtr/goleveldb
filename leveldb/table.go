@@ -157,7 +157,7 @@ func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 		}
 	}
 
-	return min, max
+	return
 }
 
 func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *opt.ReadOptions) *tFilesIter {
@@ -324,17 +324,19 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	}()
 
 	for src.Next() {
-		if err = w.add(src.Key(), src.Value()); err != nil {
-			return f, n, err
+		err = w.add(src.Key(), src.Value())
+		if err != nil {
+			return
 		}
 	}
-	if err = src.Error(); err != nil {
-		return f, n, err
+	err = src.Error()
+	if err != nil {
+		return
 	}
 
 	n = w.tw.Len()
 	f, err = w.finish()
-	return f, n, err
+	return
 }
 
 func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
@@ -359,13 +361,14 @@ func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []by
 	return c.Value().(*table.Reader).Get(key, ro)
 }
 
-func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (uint64, error) {
+func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (offset uint64, err error) {
 	c, err := t.lookup(f)
 	if err != nil {
-		return 0, err
+		return
 	}
-	defer c.Release()
-	return c.Value().(*table.Reader).ApproximateOffsetOf(key), nil
+	offset = c.Value().(*table.Reader).ApproximateOffsetOf(key)
+	c.Release()
+	return
 }
 
 func (t *tOps) remove(f *tFile) {
@@ -396,7 +399,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		var r storage.Reader
 		r, err = f.file.Open()
 		if err != nil {
-			return ok, value, charge, fin
+			return
 		}
 
 		o := t.s.o
@@ -410,7 +413,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		var p *table.Reader
 		p, err = table.NewReader(r, f.size, t.s.o, ns)
 		if err != nil {
-			return ok, value, charge, fin
+			return
 		}
 
 		ok = true
@@ -420,10 +423,10 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 			r.Close()
 		}
 
-		return ok, value, charge, fin
+		return
 	})
 
-	return c, err
+	return
 }
 
 type tWriter struct {
@@ -448,18 +451,18 @@ func (w *tWriter) add(key, value []byte) error {
 	return w.tw.Add(key, value)
 }
 
-func (w *tWriter) finish() (*tFile, error) {
-	defer func() {
-		w.w.Close()
-	}()
-
-	if err := w.tw.Finish(); err != nil {
-		return nil, err
+func (w *tWriter) finish() (f *tFile, err error) {
+	err = w.tw.Finish()
+	if err != nil {
+		return
 	}
-	if err := w.w.Sync(); err != nil {
-		return nil, err
+	err = w.w.Sync()
+	if err != nil {
+		return
 	}
-	return newTFile(w.file, uint64(w.tw.Size()), iKey(w.first), iKey(w.last)), nil
+	w.w.Close()
+	f = newTFile(w.file, uint64(w.tw.Size()), iKey(w.first), iKey(w.last))
+	return
 }
 
 func (w *tWriter) drop() {

@@ -95,25 +95,28 @@ type FilterReader struct {
 }
 
 // NewFilterReader create new initialized filter block reader.
-func NewFilterReader(buf []byte, filter filter.Filter) (*FilterReader, error) {
+func NewFilterReader(buf []byte, filter filter.Filter) (f *FilterReader, err error) {
 	// 4 bytes for offset start and 1 byte for baseLg
 	if len(buf) < 5 {
-		return nil, errors.ErrCorrupt("filter block to short")
+		err = errors.ErrCorrupt("filter block to short")
+		return
 	}
 
 	offsetsStart := binary.LittleEndian.Uint32(buf[len(buf)-5:])
 	if offsetsStart > uint32(len(buf))-5 {
-		return nil, errors.ErrCorrupt("bad restart offset in filter block")
+		err = errors.ErrCorrupt("bad restart offset in filter block")
+		return
 	}
 
-	return &FilterReader{
+	f = &FilterReader{
 		filter:       filter,
 		buf:          buf,
 		baseLg:       uint(buf[len(buf)-1]),
 		offsetsStart: offsetsStart,
 		length:       (uint(len(buf)) - 5 - uint(offsetsStart)) / 4,
 		ob:           buf[offsetsStart : len(buf)-1],
-	}, nil
+	}
+	return
 }
 
 // KeyMayMatch test whether given key at given offset may match.

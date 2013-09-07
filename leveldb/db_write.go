@@ -53,7 +53,8 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 			return mem.cur, nil
 		case mem.froze != nil:
 			if cwait {
-				if err = d.geterr(); err != nil {
+				err = d.geterr()
+				if err != nil {
 					return
 				}
 				d.cch <- cSched
@@ -70,7 +71,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 		// create new memdb and journal
 		m, err = d.newMem()
 		if err != nil {
-			return nil, err
+			return
 		}
 
 		// schedule compaction
@@ -80,7 +81,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 		}
 	}
 
-	return m, nil
+	return
 }
 
 // Write apply the specified batch to the database.

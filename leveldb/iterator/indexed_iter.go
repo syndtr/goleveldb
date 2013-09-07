@@ -123,15 +123,15 @@ func (i *IndexedIterator) Value() []byte {
 	}
 	return i.data.Value()
 }
-func (i *IndexedIterator) Error() error {
+func (i *IndexedIterator) Error() (err error) {
 	if i.err != nil {
-		return i.err
+		err = i.err
 	} else if i.index.Error() != nil {
-		return i.index.Error()
+		err = i.index.Error()
 	} else if i.data != nil && i.data.Error() != nil {
-		return i.data.Error()
+		err = i.data.Error()
 	}
-	return nil
+	return
 }
 
 func (i *IndexedIterator) setData() bool {

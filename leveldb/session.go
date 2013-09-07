@@ -37,22 +37,22 @@ type session struct {
 	stVersion unsafe.Pointer   // current version
 }
 
-func openSession(stor storage.Storage, o *opt.Options) (*session, error) {
+func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 	if stor == nil || o == nil {
 		return nil, os.ErrInvalid
 	}
 	storLock, err := stor.Lock()
 	if err != nil {
-		return nil, err
+		return
 	}
-	s := new(session)
+	s = new(session)
 	s.stor = stor
 	s.storLock = storLock
 	s.cmp = &iComparer{o.GetComparer()}
 	s.o = newIOptions(s, *o)
 	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
-	return s, nil
+	return
 }
 
 // Close session.

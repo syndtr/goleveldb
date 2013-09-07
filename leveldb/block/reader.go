@@ -27,9 +27,10 @@ type Reader struct {
 }
 
 // NewReader create new initialized block reader.
-func NewReader(buf []byte, cmp comparer.BasicComparer) (*Reader, error) {
+func NewReader(buf []byte, cmp comparer.BasicComparer) (r *Reader, err error) {
 	if len(buf) < 8 {
-		return nil, errors.ErrCorrupt("block to short")
+		err = errors.ErrCorrupt("block to short")
+		return
 	}
 
 	// Decode restart len
@@ -38,16 +39,18 @@ func NewReader(buf []byte, cmp comparer.BasicComparer) (*Reader, error) {
 	// Calculate restart start offset
 	restartStart := len(buf) - int(restartLen)*4 - 4
 	if restartStart >= len(buf)-4 {
-		return nil, errors.ErrCorrupt("bad restart offset in block")
+		err = errors.ErrCorrupt("bad restart offset in block")
+		return
 	}
 
-	return &Reader{
+	r = &Reader{
 		cmp:          cmp,
 		buf:          buf,
 		rbuf:         buf[restartStart : len(buf)-4],
 		restartLen:   int(restartLen),
 		restartStart: restartStart,
-	}, nil
+	}
+	return
 }
 
 // NewIterator create new iterator over the block.
