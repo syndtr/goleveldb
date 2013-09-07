@@ -409,4 +409,5 @@ func (i *Iterator) Value() []byte {
 	return i.rr.value()
 }
 
+func (i *Iterator) Release()     {}
 func (i *Iterator) Error() error { return i.err }

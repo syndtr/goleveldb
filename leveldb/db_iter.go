@@ -272,6 +272,8 @@ func (i *dbIter) Value() []byte {
 	return ret
 }
 
+func (i *dbIter) Release() {}
+
 func (i *dbIter) Error() error {
 	if err := i.snap.ok(); err != nil {
 		return err

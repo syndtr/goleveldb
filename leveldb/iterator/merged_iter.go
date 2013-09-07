@@ -171,6 +171,13 @@ func (i *MergedIterator) Value() []byte {
 	return i.iter.Value()
 }
 
+func (i *MergedIterator) Release() {
+	i.iter = nil
+	for _, p := range i.iters {
+		p.Release()
+	}
+}
+
 func (i *MergedIterator) Error() error {
 	return i.err
 }

@@ -117,12 +117,22 @@ func (i *IndexedIterator) Key() []byte {
 	}
 	return i.data.Key()
 }
+
 func (i *IndexedIterator) Value() []byte {
 	if i.data == nil {
 		return nil
 	}
 	return i.data.Value()
 }
+
+func (i *IndexedIterator) Release() {
+	if i.data != nil {
+		i.data.Release()
+		i.data = nil
+	}
+	i.index.Release()
+}
+
 func (i *IndexedIterator) Error() (err error) {
 	if i.err != nil {
 		err = i.err

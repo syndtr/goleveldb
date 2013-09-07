@@ -36,6 +36,11 @@ type IteratorSeeker interface {
 	// REQUIRES: Valid()
 	Prev() bool
 
+	// Release any resources associated with the iterator. It is valid to
+	// call Release multiple times. Other method should not be called after
+	// the iterator has been released.
+	Release()
+
 	// If an error has occurred, return it.  Else return nil.
 	Error() error
 }
@@ -68,4 +73,5 @@ func (*EmptyIterator) Next() bool           { return false }
 func (*EmptyIterator) Prev() bool           { return false }
 func (*EmptyIterator) Key() []byte          { return nil }
 func (*EmptyIterator) Value() []byte        { return nil }
+func (*EmptyIterator) Release()             {}
 func (i *EmptyIterator) Error() error       { return i.Err }

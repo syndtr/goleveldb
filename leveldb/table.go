@@ -230,6 +230,8 @@ func (i *tFilesIter) Get() (iterator.Iterator, error) {
 	return i.tops.newIterator(i.tt[i.pos], i.ro), nil
 }
 
+func (i *tFilesIter) Release() {}
+
 func (i *tFilesIter) Error() error {
 	return nil
 }

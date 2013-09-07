@@ -323,4 +323,5 @@ func (i *Iterator) Value() []byte {
 	return i.node.value
 }
 
+func (i *Iterator) Release()     {}
 func (i *Iterator) Error() error { return nil }
