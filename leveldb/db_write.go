@@ -49,6 +49,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 			time.Sleep(time.Millisecond)
 		case mem.cur.Size() <= s.o.GetWriteBuffer():
 			// still room
+			v.release()
 			return mem.cur, nil
 		case mem.froze != nil:
 			if cwait {
