@@ -39,14 +39,14 @@ func TestApproximateOffsetOfPlain(t *testing.T) {
 		CompressionType: opt.NoCompression,
 	}
 	tw := NewWriter(w, o)
-	tw.Add([]byte("k01"), []byte("hello"))
-	tw.Add([]byte("k02"), []byte("hello2"))
-	tw.Add([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
-	tw.Add([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
-	tw.Add([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
-	tw.Add([]byte("k06"), []byte("hello3"))
-	tw.Add([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
-	if err := tw.Finish(); err != nil {
+	tw.Append([]byte("k01"), []byte("hello"))
+	tw.Append([]byte("k02"), []byte("hello2"))
+	tw.Append([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
+	tw.Append([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
+	tw.Append([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
+	tw.Append([]byte("k06"), []byte("hello3"))
+	tw.Append([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
+	if err := tw.Close(); err != nil {
 		t.Fatal("error when finalizing table:", err.Error())
 	}
 	size := w.Len()

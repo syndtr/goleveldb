@@ -7,7 +7,6 @@
 package block
 
 import (
-	"bytes"
 	"encoding/binary"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -19,68 +18,6 @@ var (
 	filterBaseLg byte = 11
 	filterBase   int  = 1 << filterBaseLg
 )
-
-// FilterWriter represent filter block writer.
-type FilterWriter struct {
-	filter filter.Filter
-
-	buf     *bytes.Buffer
-	keys    [][]byte
-	offsets []uint32
-}
-
-// NewFilterWriter create new initialized filter block writer.
-func NewFilterWriter(filter filter.Filter) *FilterWriter {
-	return &FilterWriter{
-		filter: filter,
-		buf:    new(bytes.Buffer),
-	}
-}
-
-// Generate generate filter up to given offset.
-func (b *FilterWriter) Generate(offset int) {
-	idx := offset / filterBase
-	for idx > len(b.offsets) {
-		b.generateFilter()
-	}
-}
-
-// Add add key to the filter block.
-func (b *FilterWriter) Add(key []byte) {
-	b.keys = append(b.keys, key)
-}
-
-// Finish finalize the filter block.
-func (b *FilterWriter) Finish() []byte {
-	if len(b.keys) > 0 {
-		b.generateFilter()
-	}
-
-	// Append array of per-filter offsets
-	offsetsOffset := uint32(b.buf.Len())
-	for _, offset := range b.offsets {
-		binary.Write(b.buf, binary.LittleEndian, offset)
-	}
-
-	binary.Write(b.buf, binary.LittleEndian, offsetsOffset)
-	b.buf.WriteByte(filterBaseLg)
-
-	return b.buf.Bytes()
-}
-
-func (b *FilterWriter) generateFilter() {
-	b.offsets = append(b.offsets, uint32(b.buf.Len()))
-
-	// fast path if there are no keys for this filter
-	if len(b.keys) == 0 {
-		return
-	}
-
-	// generate filter for current set of keys and append to buffer
-	b.filter.CreateFilter(b.keys, b.buf)
-
-	b.keys = nil
-}
 
 // FilterReader represent a filter block reader.
 type FilterReader struct {
@@ -128,7 +65,7 @@ func (b *FilterReader) KeyMayMatch(offset uint, key []byte) bool {
 		end := binary.LittleEndian.Uint32(ob[4:])
 		if start <= end && end <= b.offsetsStart {
 			filter := b.buf[start:end]
-			return b.filter.KeyMayMatch(key, filter)
+			return b.filter.Contains(filter, key)
 		} else if start == end {
 			// Empty filters do not match any keys
 			return false

@@ -103,10 +103,7 @@ func (w *Writer) write(rtype uint, record []byte) error {
 	buf := &w.buf
 	buf.Reset()
 
-	crc := hash.NewCRC32C()
-	crc.Write([]byte{byte(rtype)})
-	crc.Write(record)
-	binary.Write(buf, binary.LittleEndian, hash.MaskCRC32(crc.Sum32()))
+	binary.Write(buf, binary.LittleEndian, hash.NewCRC([]byte{byte(rtype)}).Update(record).Value())
 
 	buf.WriteByte(byte(rlen & 0xff))
 	buf.WriteByte(byte(rlen >> 8))

@@ -184,10 +184,8 @@ retry:
 		r.drop(len(r.buf), "header corrupted")
 	} else if r.checksum {
 		// decode the checksum
-		recCrc := hash.UnmaskCRC32(binary.LittleEndian.Uint32(r.buf))
-		crc := hash.NewCRC32C()
-		crc.Write(r.buf[6 : kHeaderSize+recLen])
-		if crc.Sum32() != recCrc {
+		recCrc := binary.LittleEndian.Uint32(r.buf)
+		if hash.NewCRC(r.buf[6:kHeaderSize+recLen]).Value() != recCrc {
 			// Drop the rest of the buffer since "length" itself may have
 			// been corrupted and if we trust it, we could find some
 			// fragment of a real journal record that just happens to look

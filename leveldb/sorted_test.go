@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"strings"
 	"testing"
 
-	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -30,45 +30,6 @@ type stConstructor interface {
 	newIterator() iterator.Iterator
 	customTest(h *stHarness)
 }
-
-type stConstructor_Block struct {
-	t *testing.T
-
-	bw *block.Writer
-	br *block.Reader
-}
-
-func (p *stConstructor_Block) init(t *testing.T, ho *stHarnessOpt) error {
-	p.t = t
-	p.bw = block.NewWriter(3)
-	return nil
-}
-
-func (p *stConstructor_Block) add(key, value string) error {
-	p.bw.Add([]byte(key), []byte(value))
-	return nil
-}
-
-func (p *stConstructor_Block) finish() (size int, err error) {
-	csize := p.bw.Size()
-	buf := p.bw.Finish()
-
-	p.t.Logf("block: contains %d entries and %d restarts", p.bw.Len(), p.bw.CountRestart())
-
-	size = len(buf)
-	if csize != size {
-		p.t.Errorf("block: calculated size doesn't equal with actual size, %d != %d", csize, size)
-	}
-
-	p.br, err = block.NewReader(buf, comparer.BytesComparer{})
-	return
-}
-
-func (p *stConstructor_Block) newIterator() iterator.Iterator {
-	return p.br.NewIterator()
-}
-
-func (p *stConstructor_Block) customTest(h *stHarness) {}
 
 type stConstructor_Table struct {
 	t *testing.T
@@ -95,20 +56,20 @@ func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 }
 
 func (p *stConstructor_Table) add(key, value string) error {
-	p.tw.Add([]byte(key), []byte(value))
+	p.tw.Append([]byte(key), []byte(value))
 	return nil
 }
 
 func (p *stConstructor_Table) finish() (size int, err error) {
-	p.t.Logf("table: contains %d entries and %d blocks", p.tw.Len(), p.tw.CountBlock())
-
-	err = p.tw.Finish()
+	err = p.tw.Close()
 	if err != nil {
 		return
 	}
 	p.w.Close()
 
-	tsize := uint64(p.tw.Size())
+	p.t.Logf("table: contains %d entries and %d blocks", p.tw.EntriesLen(), p.tw.BlocksLen())
+
+	tsize := uint64(p.tw.BytesLen())
 
 	fsize, _ := p.file.Size()
 	if fsize != tsize {
@@ -275,7 +236,6 @@ func (h *stHarness) add(key, value string) {
 }
 
 func (h *stHarness) testAll() {
-	h.test("block", &stConstructor_Block{})
 	h.test("table", &stConstructor_Table{})
 	h.test("memdb", &stConstructor_MemDB{})
 	h.test("merged", &stConstructor_MergedMemDB{})
@@ -312,7 +272,7 @@ func (h *stHarness) test(name string, c stConstructor) {
 	for i := range keys {
 		err = c.add(keys[i], values[i])
 		if err != nil {
-			h.t.Error("error when adding key/value:", err.Error())
+			h.t.Error("error when adding key/value:", err)
 			return
 		}
 	}
@@ -320,7 +280,7 @@ func (h *stHarness) test(name string, c stConstructor) {
 	var size int
 	size, err = c.finish()
 	if err != nil {
-		h.t.Error("error when finishing constructor:", err.Error())
+		h.t.Error("error when finishing constructor:", err)
 		return
 	}
 
@@ -492,6 +452,12 @@ func TestSorted_EmptyValue(t *testing.T) {
 func TestSorted_Single(t *testing.T) {
 	h := newStHarness(t)
 	h.add("abc", "v")
+	h.testAll()
+}
+
+func TestSorted_SingleBig(t *testing.T) {
+	h := newStHarness(t)
+	h.add("big1", strings.Repeat("1", 200000))
 	h.testAll()
 }
 

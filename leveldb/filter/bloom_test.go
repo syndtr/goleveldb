@@ -7,42 +7,46 @@
 package filter
 
 import (
-	"bytes"
 	"encoding/binary"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"testing"
 )
 
 type harness struct {
 	t *testing.T
 
-	bloom  *BloomFilter
-	filter []byte
-	keys   [][]byte
+	bloom     Filter
+	generator FilterGenerator
+	filter    []byte
 }
 
 func newHarness(t *testing.T) *harness {
-	return &harness{t: t, bloom: NewBloomFilter(10)}
+	bloom := NewBloomFilter(10)
+	return &harness{
+		t:         t,
+		bloom:     bloom,
+		generator: bloom.NewGenerator(),
+	}
 }
 
 func (h *harness) add(key []byte) {
-	h.keys = append(h.keys, key)
+	h.generator.Add(key)
 }
 
 func (h *harness) addNum(key uint32) {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, key)
-	h.add(buf)
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], key)
+	h.add(b[:])
 }
 
 func (h *harness) build() {
-	buf := new(bytes.Buffer)
-	h.bloom.CreateFilter(h.keys, buf)
-	h.filter = buf.Bytes()
+	b := &util.Buffer{}
+	h.generator.Generate(b)
+	h.filter = b.Bytes()
 }
 
 func (h *harness) reset() {
 	h.filter = nil
-	h.keys = nil
 }
 
 func (h *harness) filterLen() int {
@@ -50,7 +54,7 @@ func (h *harness) filterLen() int {
 }
 
 func (h *harness) assert(key []byte, want, silent bool) bool {
-	got := h.bloom.KeyMayMatch(key, h.filter)
+	got := h.bloom.Contains(h.filter, key)
 	if !silent && got != want {
 		h.t.Errorf("assert on '%v' failed got '%v', want '%v'", key, got, want)
 	}
@@ -58,9 +62,9 @@ func (h *harness) assert(key []byte, want, silent bool) bool {
 }
 
 func (h *harness) assertNum(key uint32, want, silent bool) bool {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, key)
-	return h.assert(buf.Bytes(), want, silent)
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], key)
+	return h.assert(b[:], want, silent)
 }
 
 func TestBloomFilter_Empty(t *testing.T) {

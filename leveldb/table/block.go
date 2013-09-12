@@ -60,10 +60,7 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) ([]byte, error) {
 
 	if checksum {
 		sum := binary.LittleEndian.Uint32(crcb)
-		sum = hash.UnmaskCRC32(sum)
-		crc := hash.NewCRC32C()
-		crc.Write(raw)
-		if crc.Sum32() != sum {
+		if hash.NewCRC(raw).Value() != sum {
 			return nil, errors.ErrCorrupt("block checksum mismatch")
 		}
 	}
@@ -72,8 +69,8 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) ([]byte, error) {
 	b := raw[:len(raw)-1]
 
 	switch compression {
-	case kNoCompression:
-	case kSnappyCompression:
+	case blockTypeNoCompression:
+	case blockTypeSnappyCompression:
 		return snappy.Decode(nil, b)
 	default:
 		return nil, errors.ErrCorrupt("bad block type")

@@ -13,7 +13,6 @@ func TestIter_Empty(t *testing.T) {
 		name string
 		c    stConstructor
 	}{
-		{"block", &stConstructor_Block{}},
 		{"table", &stConstructor_Table{}},
 		{"memdb", &stConstructor_MemDB{}},
 		{"merged", &stConstructor_MergedMemDB{}},

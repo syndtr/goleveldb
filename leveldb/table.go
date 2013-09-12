@@ -336,7 +336,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 		return
 	}
 
-	n = w.tw.Len()
+	n = w.tw.EntriesLen()
 	f, err = w.finish()
 	return
 }
@@ -450,11 +450,11 @@ func (w *tWriter) add(key, value []byte) error {
 		w.last = key
 		w.notFirst = true
 	}
-	return w.tw.Add(key, value)
+	return w.tw.Append(key, value)
 }
 
 func (w *tWriter) finish() (f *tFile, err error) {
-	err = w.tw.Finish()
+	err = w.tw.Close()
 	if err != nil {
 		return
 	}
@@ -463,7 +463,7 @@ func (w *tWriter) finish() (f *tFile, err error) {
 		return
 	}
 	w.w.Close()
-	f = newTFile(w.file, uint64(w.tw.Size()), iKey(w.first), iKey(w.last))
+	f = newTFile(w.file, uint64(w.tw.BytesLen()), iKey(w.first), iKey(w.last))
 	return
 }
 

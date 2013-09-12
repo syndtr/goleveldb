@@ -1,5 +1,4 @@
-// Copyright (c) 2012, Suryandaru Triandana <syndtr@gmail.com>
-// All rights reserved.
+// Copyright 2011 The LevelDB-Go Authors. All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -7,32 +6,25 @@
 package hash
 
 import (
-	"hash"
 	"hash/crc32"
 )
 
-var crc32tab = crc32.MakeTable(crc32.Castagnoli)
+var table = crc32.MakeTable(crc32.Castagnoli)
 
-// New creates a new hash.Hash32 computing the CRC-32 checksum using
-// Castagnoli's polynomial.
-func NewCRC32C() hash.Hash32 {
-	return crc32.New(crc32tab)
+// CRC is a CRC-32 checksum computed using Castagnoli's polynomial.
+type CRC uint32
+
+// NewCRC creates a new crc based on the given bytes.
+func NewCRC(b []byte) CRC {
+	return CRC(0).Update(b)
 }
 
-var crcMaskDelta uint32 = 0xa282ead8
-
-// MaskCRC32 return a masked representation of crc.
-//
-// Motivation: it is problematic to compute the CRC of a string that
-// contains embedded CRCs.  Therefore we recommend that CRCs stored
-// somewhere (e.g., in files) should be masked before being stored.
-func MaskCRC32(crc uint32) uint32 {
-	// Rotate right by 15 bits and add a constant.
-	return ((crc >> 15) | (crc << 17)) + crcMaskDelta
+// Update updates the crc with the given bytes.
+func (c CRC) Update(b []byte) CRC {
+	return CRC(crc32.Update(uint32(c), table, b))
 }
 
-// UnmaskCRC32 return the crc whose masked representation is masked_crc.
-func UnmaskCRC32(masked_crc uint32) uint32 {
-	rot := masked_crc - crcMaskDelta
-	return ((rot >> 17) | (rot << 15))
+// Value returns a masked crc.
+func (c CRC) Value() uint32 {
+	return uint32(c>>15|c<<17) + 0xa282ead8
 }

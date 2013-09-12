@@ -7,27 +7,25 @@
 package leveldb
 
 import (
-	"io"
-
 	"github.com/syndtr/goleveldb/leveldb/filter"
 )
 
 type iFilter struct {
-	filter filter.Filter
+	filter.Filter
 }
 
-func (p *iFilter) Name() string {
-	return p.filter.Name()
+func (f iFilter) Contains(filter, key []byte) bool {
+	return f.Filter.Contains(filter, iKey(key).ukey())
 }
 
-func (p *iFilter) CreateFilter(keys [][]byte, buf io.Writer) {
-	nkeys := make([][]byte, len(keys))
-	for i := range keys {
-		nkeys[i] = iKey(keys[i]).ukey()
-	}
-	p.filter.CreateFilter(nkeys, buf)
+func (f iFilter) NewGenerator() filter.FilterGenerator {
+	return iFilterGenerator{f.Filter.NewGenerator()}
 }
 
-func (p *iFilter) KeyMayMatch(key, filter []byte) bool {
-	return p.filter.KeyMayMatch(iKey(key).ukey(), filter)
+type iFilterGenerator struct {
+	filter.FilterGenerator
+}
+
+func (g iFilterGenerator) Add(key []byte) {
+	g.FilterGenerator.Add(iKey(key).ukey())
 }

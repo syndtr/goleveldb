@@ -8,213 +8,357 @@ package table
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 
 	"code.google.com/p/snappy-go/snappy"
 
-	"github.com/syndtr/goleveldb/leveldb/block"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-const (
-	// Written to disk; don't modify.
-	kNoCompression     = 0
-	kSnappyCompression = 1
-)
+func sharedPrefixLen(a, b []byte) int {
+	i, n := 0, len(a)
+	if n > len(b) {
+		n = len(b)
+	}
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	return i
+}
 
-// Writer represent a table writer.
+type blockWriter struct {
+	restartInterval int
+	buf             util.Buffer
+	nEntries        int
+	prevKey         []byte
+	restarts        []uint32
+	scratch         []byte
+}
+
+func (w *blockWriter) append(key, value []byte) {
+	nShared := 0
+	if w.nEntries%w.restartInterval == 0 {
+		w.restarts = append(w.restarts, uint32(w.buf.Len()))
+	} else {
+		nShared = sharedPrefixLen(w.prevKey, key)
+	}
+	n := binary.PutUvarint(w.scratch[0:], uint64(nShared))
+	n += binary.PutUvarint(w.scratch[n:], uint64(len(key)-nShared))
+	n += binary.PutUvarint(w.scratch[n:], uint64(len(value)))
+	w.buf.Write(w.scratch[:n])
+	w.buf.Write(key[nShared:])
+	w.buf.Write(value)
+	w.prevKey = append(w.prevKey[:0], key...)
+	w.nEntries++
+}
+
+func (w *blockWriter) finish() {
+	// Write restarts entry.
+	if w.nEntries == 0 {
+		// Must have at least one restart entry.
+		w.restarts = append(w.restarts, 0)
+	}
+	w.restarts = append(w.restarts, uint32(len(w.restarts)))
+	for _, x := range w.restarts {
+		buf4 := w.buf.Alloc(4)
+		binary.LittleEndian.PutUint32(buf4, x)
+	}
+}
+
+func (w *blockWriter) reset() {
+	w.buf.Reset()
+	w.nEntries = 0
+	w.restarts = w.restarts[:0]
+}
+
+func (w *blockWriter) bytesLen() int {
+	restartsLen := len(w.restarts)
+	if restartsLen == 0 {
+		restartsLen = 1
+	}
+	return w.buf.Len() + 4*restartsLen + 4
+}
+
+type filterWriter struct {
+	generator filter.FilterGenerator
+	buf       util.Buffer
+	nKeys     int
+	offsets   []uint32
+}
+
+func (w *filterWriter) add(key []byte) {
+	if w.generator == nil {
+		return
+	}
+	w.generator.Add(key)
+	w.nKeys++
+}
+
+func (w *filterWriter) flush(offset uint64) {
+	if w.generator == nil {
+		return
+	}
+	for x := int(offset / filterBase); x > len(w.offsets); {
+		w.generate()
+	}
+}
+
+func (w *filterWriter) finish() {
+	if w.generator == nil {
+		return
+	}
+	// Generate last keys.
+
+	if w.nKeys > 0 {
+		w.generate()
+	}
+	w.offsets = append(w.offsets, uint32(w.buf.Len()))
+	for _, x := range w.offsets {
+		buf4 := w.buf.Alloc(4)
+		binary.LittleEndian.PutUint32(buf4, x)
+	}
+	w.buf.WriteByte(filterBaseLg)
+}
+
+func (w *filterWriter) generate() {
+	// Record offset.
+	w.offsets = append(w.offsets, uint32(w.buf.Len()))
+	// Generate filters.
+	if w.nKeys > 0 {
+		w.generator.Generate(&w.buf)
+		w.nKeys = 0
+	}
+}
+
+// Writer is a table writer.
 type Writer struct {
-	w      storage.Writer
-	o      opt.OptionsGetter
-	cmp    comparer.Comparer
-	filter filter.Filter
+	writer io.Writer
+	err    error
+	// Options
+	cmp         comparer.Comparer
+	filter      filter.Filter
+	compression opt.Compression
+	blockSize   int
 
-	dataBlock   *block.Writer
-	indexBlock  *block.Writer
-	filterBlock *block.FilterWriter
-
-	n, off int
-	lkey   []byte // last key
-	lblock *bInfo // last block
-	pindex bool   // pending index
-
-	closed bool
+	dataBlock   blockWriter
+	indexBlock  blockWriter
+	filterBlock filterWriter
+	pendingBH   blockHandle
+	offset      uint64
+	nEntries    int
+	// Scratch allocated enough for 5 uvarint. Block writer should not use
+	// first 20-bytes since it will be used to encode block handle, which
+	// then passed to the block writer itself.
+	scratch            [50]byte
+	compressionScratch []byte
 }
 
-// NewWriter create new initialized table writer.
-func NewWriter(w storage.Writer, o opt.OptionsGetter) *Writer {
-	t := &Writer{w: w, o: o, cmp: o.GetComparer()}
-	// Creating blocks
-	t.dataBlock = block.NewWriter(o.GetBlockRestartInterval())
-	t.indexBlock = block.NewWriter(1)
-	t.filter = o.GetFilter()
-	if t.filter != nil {
-		t.filterBlock = block.NewFilterWriter(t.filter)
-		t.filterBlock.Generate(0)
-	}
-	t.lblock = new(bInfo)
-	return t
-}
-
-// Add append key/value to the table.
-func (t *Writer) Add(key, value []byte) error {
-	if t.closed {
-		panic("operation on closed table writer")
-	}
-
-	if t.pindex {
-		// write the pending index
-		sep := t.cmp.Separator(t.lkey, key)
-		t.indexBlock.Add(sep, t.lblock.encode())
-		t.pindex = false
-	}
-
-	if t.filterBlock != nil {
-		t.filterBlock.Add(key)
-	}
-
-	t.lkey = key
-	t.n++
-
-	t.dataBlock.Add(key, value)
-	if t.dataBlock.Size() >= t.o.GetBlockSize() {
-		return t.Flush()
-	}
-	return nil
-}
-
-// Flush finalize and write the data block.
-func (t *Writer) Flush() error {
-	if t.closed {
-		panic("operation on closed table writer")
-	}
-
-	if t.pindex {
-		return nil
-	}
-
-	if err := t.write(t.dataBlock.Finish(), t.lblock, false); err != nil {
-		return err
-	}
-	t.dataBlock.Reset()
-
-	t.pindex = true
-
-	if t.filterBlock != nil {
-		t.filterBlock.Generate(t.off)
-	}
-	return nil
-}
-
-// Finish finalize the table. No Add(), Flush() or Finish() is possible
-// beyond this, doing so will raise panic.
-func (t *Writer) Finish() error {
-	if t.closed {
-		panic("operation on closed table writer")
-	}
-
-	if err := t.Flush(); err != nil {
-		return err
-	}
-
-	t.closed = true
-
-	// Write filter block
-	fi := new(bInfo)
-	if t.filterBlock != nil {
-		if err := t.write(t.filterBlock.Finish(), fi, true); err != nil {
-			return err
+func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh blockHandle, err error) {
+	// Compress the buffer if necessary.
+	var b []byte
+	if compression == opt.SnappyCompression {
+		// Allocate scratch enough for compression and block trailer.
+		if n := snappy.MaxEncodedLen(buf.Len()) + blockTrailerLen; len(w.compressionScratch) < n {
+			w.compressionScratch = make([]byte, n)
 		}
+		var compressed []byte
+		compressed, err = snappy.Encode(w.compressionScratch, buf.Bytes())
+		if err != nil {
+			return
+		}
+		n := len(compressed)
+		b = compressed[:n+blockTrailerLen]
+		b[n] = blockTypeSnappyCompression
+	} else {
+		tmp := buf.Alloc(blockTrailerLen)
+		tmp[0] = blockTypeNoCompression
+		b = buf.Bytes()
 	}
 
-	// Write meta block
-	meta := block.NewWriter(t.o.GetBlockRestartInterval())
-	if t.filter != nil {
-		key := []byte("filter." + t.filter.Name())
-		meta.Add(key, fi.encode())
-	}
-	mb := new(bInfo)
-	if err := t.write(meta.Finish(), mb, false); err != nil {
-		return err
-	}
+	// Calculate the checksum.
+	n := len(b) - 4
+	checksum := hash.NewCRC(b[:n]).Value()
+	binary.LittleEndian.PutUint32(b[n:], checksum)
 
-	// Write index block
-	if t.pindex {
-		suc := t.cmp.Successor(t.lkey)
-		t.indexBlock.Add(suc, t.lblock.encode())
-		t.pindex = false
+	// Write the buffer to the file.
+	_, err = w.writer.Write(b)
+	if err != nil {
+		return
 	}
-	ib := new(bInfo)
-	if err := t.write(t.indexBlock.Finish(), ib, false); err != nil {
-		return err
-	}
+	bh = blockHandle{w.offset, uint64(len(b) - blockTrailerLen)}
+	w.offset += uint64(len(b))
+	return
+}
 
-	// Write footer
-	n, err := writeFooter(t.w, mb, ib)
+func (w *Writer) flushPendingBH(key []byte) {
+	if w.pendingBH.length == 0 {
+		return
+	}
+	var separator []byte
+	if len(key) == 0 {
+		separator = w.cmp.Successor(w.dataBlock.prevKey)
+	} else {
+		separator = w.cmp.Separator(w.dataBlock.prevKey, key)
+	}
+	n := encodeBlockHandle(w.scratch[:], w.pendingBH)
+	// Append the block handle to the index block.
+	w.indexBlock.append(separator, w.scratch[:n])
+	w.pendingBH = blockHandle{}
+}
+
+func (w *Writer) finishBlock() error {
+	w.dataBlock.finish()
+	bh, err := w.writeBlock(&w.dataBlock.buf, w.compression)
 	if err != nil {
 		return err
 	}
-	t.off += n
-
+	w.dataBlock.reset()
+	w.pendingBH = bh
+	// Flush the filter block.
+	w.filterBlock.flush(w.offset)
 	return nil
 }
 
-// Len return the number of records added so far.
-func (t *Writer) Len() int {
-	return t.n
+// Append appends key/value to the table. The keys passed must
+// be in increasing order.
+func (w *Writer) Append(key, value []byte) error {
+	if w.err != nil {
+		return w.err
+	}
+	if w.nEntries > 0 && w.cmp.Compare(w.dataBlock.prevKey, key) >= 0 {
+		w.err = fmt.Errorf("leveldb/table: Writer: keys are not in increasing order: %q, %q", w.dataBlock.prevKey, key)
+		return w.err
+	}
+
+	w.flushPendingBH(key)
+	// Append key/value pair to the data block.
+	w.dataBlock.append(key, value)
+	// Add key to the filter block.
+	w.filterBlock.add(key)
+
+	// Finish the data block if block size target reached.
+	if w.dataBlock.bytesLen() >= w.blockSize {
+		if err := w.finishBlock(); err != nil {
+			w.err = err
+			return w.err
+		}
+	}
+	w.nEntries++
+	return nil
 }
 
-// Size return the number of bytes written so far.
-func (t *Writer) Size() int {
-	return t.off
-}
-
-// CountBlock return the number of data block written so far.
-func (t *Writer) CountBlock() int {
-	n := t.indexBlock.Len()
-	if !t.closed {
+// BlocksLen returns number of blocks written so far.
+func (w *Writer) BlocksLen() int {
+	n := w.indexBlock.nEntries
+	if w.pendingBH.length > 0 {
+		// Includes the pending block.
 		n++
 	}
 	return n
 }
 
-func (t *Writer) write(buf []byte, bi *bInfo, raw bool) (err error) {
-	compression := kNoCompression
-	if !raw {
-		switch t.o.GetCompressionType() {
-		case opt.DefaultCompression, opt.SnappyCompression:
-			compression = kSnappyCompression
-			buf, err = snappy.Encode(nil, buf)
-			if err != nil {
-				return err
-			}
+// EntriesLen returns number of entries added so far.
+func (w *Writer) EntriesLen() int {
+	return w.nEntries
+}
+
+// BytesLen returns number of bytes written so far.
+func (w *Writer) BytesLen() int {
+	return int(w.offset)
+}
+
+// Close will finalize the table.
+func (w *Writer) Close() error {
+	if w.err != nil {
+		return w.err
+	}
+
+	// Write the last data block. Or empty data block if there
+	// aren't any data blocks at all.
+	if w.dataBlock.nEntries > 0 || w.nEntries == 0 {
+		if err := w.finishBlock(); err != nil {
+			w.err = err
+			return w.err
+		}
+	}
+	w.flushPendingBH(nil)
+
+	// Write the filter block.
+	var filterBH blockHandle
+	w.filterBlock.finish()
+	if buf := &w.filterBlock.buf; buf.Len() > 0 {
+		filterBH, w.err = w.writeBlock(buf, opt.NoCompression)
+		if w.err != nil {
+			return w.err
 		}
 	}
 
-	if bi != nil {
-		bi.offset = uint64(t.off)
-		bi.size = uint64(len(buf))
+	// Write the metaindex block.
+	w.dataBlock.prevKey = w.dataBlock.prevKey[:0]
+	if filterBH.length > 0 {
+		key := []byte("filter." + w.filter.Name())
+		n := encodeBlockHandle(w.scratch[:], filterBH)
+		w.dataBlock.append(key, w.scratch[:n])
+	}
+	w.dataBlock.finish()
+	metaindexBH, err := w.writeBlock(&w.dataBlock.buf, w.compression)
+	if err != nil {
+		w.err = err
+		return w.err
 	}
 
-	if _, err = t.w.Write(buf); err != nil {
-		return err
+	// Write the index block.
+	w.indexBlock.finish()
+	indexBH, err := w.writeBlock(&w.indexBlock.buf, w.compression)
+	if err != nil {
+		w.err = err
+		return w.err
 	}
 
-	compbit := []byte{byte(compression)}
-	if _, err = t.w.Write(compbit); err != nil {
-		return err
+	// Write the table footer.
+	footer := w.scratch[:footerLen]
+	for i := range footer {
+		footer[i] = 0
 	}
-
-	crc := hash.NewCRC32C()
-	crc.Write(buf)
-	crc.Write(compbit)
-	if err = binary.Write(t.w, binary.LittleEndian, hash.MaskCRC32(crc.Sum32())); err != nil {
-		return err
+	n := encodeBlockHandle(footer, metaindexBH)
+	encodeBlockHandle(footer[n:], indexBH)
+	copy(footer[footerLen-len(magic):], magic)
+	if _, err := w.writer.Write(footer); err != nil {
+		w.err = err
+		return w.err
 	}
+	w.offset += footerLen
 
-	t.off += len(buf) + 5
+	w.err = errors.New("leveldb/table: writer is closed")
 	return nil
+}
+
+// NewWriter creates a new initialized table writer.
+func NewWriter(f io.Writer, o opt.OptionsGetter) *Writer {
+	w := &Writer{
+		writer:      f,
+		cmp:         o.GetComparer(),
+		filter:      o.GetFilter(),
+		compression: o.GetCompressionType(),
+		blockSize:   o.GetBlockSize(),
+	}
+	// data block
+	w.dataBlock.restartInterval = o.GetBlockRestartInterval()
+	// The first 20-bytes are used for encoding block handle.
+	w.dataBlock.scratch = w.scratch[20:]
+	// index block
+	w.indexBlock.restartInterval = 1
+	w.indexBlock.scratch = w.scratch[20:]
+	// filter block
+	if w.filter != nil {
+		w.filterBlock.generator = w.filter.NewGenerator()
+		w.filterBlock.flush(0)
+	}
+	return w
 }

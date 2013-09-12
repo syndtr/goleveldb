@@ -17,7 +17,7 @@ import (
 // The magic was picked by running
 //    echo http://code.google.com/p/leveldb/ | sha1sum
 // and taking the leading 64 bits.
-const magic uint64 = 0xdb4775248b80fb57
+const xmagic uint64 = 0xdb4775248b80fb57
 
 var magicBytes []byte
 
@@ -29,8 +29,8 @@ const (
 
 func init() {
 	magicBytes = make([]byte, magicSize)
-	binary.LittleEndian.PutUint32(magicBytes, uint32(magic&0xffffffff))
-	binary.LittleEndian.PutUint32(magicBytes[4:], uint32(magic>>32))
+	binary.LittleEndian.PutUint32(magicBytes, uint32(xmagic&0xffffffff))
+	binary.LittleEndian.PutUint32(magicBytes[4:], uint32(xmagic>>32))
 }
 
 func writeFooter(w io.Writer, mi, ii *bInfo) (int, error) {

@@ -223,7 +223,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		rec.addTableFile(c.level+1, t)
 		stats.write += t.size
 		s.printf("Compaction: table created, source=file level=%d num=%d size=%d entries=%d min=%q max=%q",
-			c.level+1, t.file.Num(), t.size, tw.tw.Len(), t.min, t.max)
+			c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
 		return nil
 	}
 
@@ -346,7 +346,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			}
 
 			// Finish table if it is big enough
-			if tw.tw.Size() >= kMaxTableSize {
+			if tw.tw.BytesLen() >= kMaxTableSize {
 				err = finish()
 				if err != nil {
 					return

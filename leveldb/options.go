@@ -75,16 +75,16 @@ func (o *iOptions) SetBlockCache(cache cache.Cache) error {
 	return nil
 }
 
-func (o *iOptions) SetFilter(p filter.Filter) error {
-	if p != nil {
-		p = &iFilter{p}
+func (o *iOptions) SetFilter(f filter.Filter) error {
+	if f != nil {
+		f = iFilter{f}
 	}
-	return o.Options.SetFilter(p)
+	return o.Options.SetFilter(f)
 }
 
-func (o *iOptions) InsertAltFilter(p filter.Filter) error {
-	if p == nil {
+func (o *iOptions) InsertAltFilter(f filter.Filter) error {
+	if f == nil {
 		return opt.ErrInvalid
 	}
-	return o.Options.InsertAltFilter(&iFilter{p})
+	return o.Options.InsertAltFilter(iFilter{f})
 }
