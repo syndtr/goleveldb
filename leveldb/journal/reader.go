@@ -13,7 +13,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/syndtr/goleveldb/leveldb/hash"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type DropFunc func(n int, reason string)
@@ -185,7 +185,7 @@ retry:
 	} else if r.checksum {
 		// decode the checksum
 		recCrc := binary.LittleEndian.Uint32(r.buf)
-		if hash.NewCRC(r.buf[6:kHeaderSize+recLen]).Value() != recCrc {
+		if util.NewCRC(r.buf[6:kHeaderSize+recLen]).Value() != recCrc {
 			// Drop the rest of the buffer since "length" itself may have
 			// been corrupted and if we trust it, we could find some
 			// fragment of a real journal record that just happens to look

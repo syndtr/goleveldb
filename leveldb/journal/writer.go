@@ -11,7 +11,7 @@ import (
 	"encoding/binary"
 	"io"
 
-	"github.com/syndtr/goleveldb/leveldb/hash"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const (
@@ -103,7 +103,7 @@ func (w *Writer) write(rtype uint, record []byte) error {
 	buf := &w.buf
 	buf.Reset()
 
-	binary.Write(buf, binary.LittleEndian, hash.NewCRC([]byte{byte(rtype)}).Update(record).Value())
+	binary.Write(buf, binary.LittleEndian, util.NewCRC([]byte{byte(rtype)}).Update(record).Value())
 
 	buf.WriteByte(byte(rlen & 0xff))
 	buf.WriteByte(byte(rlen >> 8))

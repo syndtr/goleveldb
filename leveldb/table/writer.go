@@ -16,7 +16,6 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/hash"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -183,7 +182,7 @@ func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh b
 
 	// Calculate the checksum.
 	n := len(b) - 4
-	checksum := hash.NewCRC(b[:n]).Value()
+	checksum := util.NewCRC(b[:n]).Value()
 	binary.LittleEndian.PutUint32(b[n:], checksum)
 
 	// Write the buffer to the file.

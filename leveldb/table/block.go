@@ -13,7 +13,7 @@ import (
 	"code.google.com/p/snappy-go/snappy"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/hash"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // bInfo holds information about where and how long a block is
@@ -60,7 +60,7 @@ func (p *bInfo) readAll(r io.ReaderAt, checksum bool) ([]byte, error) {
 
 	if checksum {
 		sum := binary.LittleEndian.Uint32(crcb)
-		if hash.NewCRC(raw).Value() != sum {
+		if util.NewCRC(raw).Value() != sum {
 			return nil, errors.ErrCorrupt("block checksum mismatch")
 		}
 	}

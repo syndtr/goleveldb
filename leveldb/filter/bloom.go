@@ -7,11 +7,11 @@
 package filter
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/hash"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 func bloomHash(key []byte) uint32 {
-	return hash.Hash(key, 0xbc9f1d34)
+	return util.Hash(key, 0xbc9f1d34)
 }
 
 type bloomFilter int
