@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -1583,6 +1584,79 @@ func TestDb_Concurrent(t *testing.T) {
 			h.oo.SetBlockCache(cache.NewLRUCache(rand.Int() % (opt.DefaultBlockCacheSize * 2)))
 			time.Sleep(time.Second)
 		}
+		atomic.StoreUint32(&stop, 1)
+		wg.Wait()
+	})
+
+	runtime.GOMAXPROCS(1)
+}
+
+func TestDb_Concurrent2(t *testing.T) {
+	const n, n2 = 4, 4000
+
+	runtime.GOMAXPROCS(n*2 + 2)
+	runAllOpts(t, func(h *dbHarness) {
+		var wg sync.WaitGroup
+		var stop uint32
+
+		h.oo.SetWriteBuffer(30)
+
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				for k := 0; atomic.LoadUint32(&stop) == 0; k++ {
+					h.put(fmt.Sprintf("k%d", k), fmt.Sprintf("%d.%d.", k, i)+strings.Repeat("x", 10))
+				}
+				wg.Done()
+			}(i)
+		}
+
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				for k := 1000000; k < 0 || atomic.LoadUint32(&stop) == 0; k-- {
+					h.put(fmt.Sprintf("k%d", k), fmt.Sprintf("%d.%d.", k, i)+strings.Repeat("x", 10))
+				}
+				wg.Done()
+			}(i)
+		}
+
+		cmp := comparer.BytesComparer{}
+		ro := &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
+		for i := 0; i < n2; i++ {
+			wg.Add(1)
+			go func(i int) {
+				it := h.db.NewIterator(ro)
+				var pk []byte
+				for it.Next() {
+					kk := it.Key()
+					if cmp.Compare(kk, pk) <= 0 {
+						t.Errorf("iter %d: %q is successor of %q", i, pk, kk)
+					}
+					pk = append(pk[:0], kk...)
+					var k, vk, vi int
+					if n, err := fmt.Sscanf(string(it.Key()), "k%d", &k); err != nil {
+						t.Errorf("iter %d: Scanf error on key %q: %v", i, it.Key(), err)
+					} else if n < 1 {
+						t.Errorf("iter %d: Cannot parse key %q", i, it.Key())
+					}
+					if n, err := fmt.Sscanf(string(it.Value()), "%d.%d", &vk, &vi); err != nil {
+						t.Errorf("iter %d: Scanf error on value %q: %v", i, it.Value(), err)
+					} else if n < 2 {
+						t.Errorf("iter %d: Cannot parse value %q", i, it.Value())
+					}
+
+					if vk != k {
+						t.Errorf("iter %d: invalid value i=%d, want=%d got=%d", i, vi, k, vk)
+					}
+				}
+				if err := it.Error(); err != nil {
+					t.Errorf("iter %d: Got error: %v", i, err)
+				}
+				wg.Done()
+			}(i)
+		}
+
 		atomic.StoreUint32(&stop, 1)
 		wg.Wait()
 	})
