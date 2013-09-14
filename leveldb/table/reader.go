@@ -59,7 +59,7 @@ func NewReader(r storage.Reader, size uint64, o opt.OptionsGetter, cache cache.N
 	if err1 != nil {
 		return nil, err
 	}
-	meta, err1 := block.NewReader(buf, comparer.BytesComparer{})
+	meta, err1 := block.NewReader(buf, comparer.DefaultComparer)
 	if err1 != nil {
 		return nil, err
 	}

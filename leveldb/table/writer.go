@@ -155,6 +155,7 @@ type Writer struct {
 	// first 20-bytes since it will be used to encode block handle, which
 	// then passed to the block writer itself.
 	scratch            [50]byte
+	comparerScratch    []byte
 	compressionScratch []byte
 }
 
@@ -201,9 +202,14 @@ func (w *Writer) flushPendingBH(key []byte) {
 	}
 	var separator []byte
 	if len(key) == 0 {
-		separator = w.cmp.Successor(w.dataBlock.prevKey)
+		separator = w.cmp.Successor(w.comparerScratch[:0], w.dataBlock.prevKey)
 	} else {
-		separator = w.cmp.Separator(w.dataBlock.prevKey, key)
+		separator = w.cmp.Separator(w.comparerScratch[:0], w.dataBlock.prevKey, key)
+	}
+	if separator == nil {
+		separator = w.dataBlock.prevKey
+	} else {
+		w.comparerScratch = separator
 	}
 	n := encodeBlockHandle(w.scratch[:], w.pendingBH)
 	// Append the block handle to the index block.
@@ -341,11 +347,12 @@ func (w *Writer) Close() error {
 // NewWriter creates a new initialized table writer.
 func NewWriter(f io.Writer, o opt.OptionsGetter) *Writer {
 	w := &Writer{
-		writer:      f,
-		cmp:         o.GetComparer(),
-		filter:      o.GetFilter(),
-		compression: o.GetCompressionType(),
-		blockSize:   o.GetBlockSize(),
+		writer:          f,
+		cmp:             o.GetComparer(),
+		filter:          o.GetFilter(),
+		compression:     o.GetCompressionType(),
+		blockSize:       o.GetBlockSize(),
+		comparerScratch: make([]byte, 0),
 	}
 	// data block
 	w.dataBlock.restartInterval = o.GetBlockRestartInterval()

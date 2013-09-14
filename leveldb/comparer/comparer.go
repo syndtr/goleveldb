@@ -10,56 +10,48 @@ package comparer
 
 // BasicComparer is the interface that wraps the basic Compare method.
 type BasicComparer interface {
-	// Three-way comparison.
-	//
-	// Returns value:
-	//   < 0 iff "a" < "b",
-	//   == 0 iff "a" == "b",
-	//   > 0 iff "a" > "b"
+	// Compare returns -1, 0, or +1 depending on whether a is 'less than',
+	// 'equal to' or 'greater than' b. The two arguments can only be 'equal'
+	// if their contents are exactly equal. Furthermore, the empty slice
+	// must be 'less than' any non-empty slice.
 	Compare(a, b []byte) int
 }
 
+// Comparer defines a total ordering over the space of []byte keys: a 'less
+// than' relationship.
 type Comparer interface {
 	BasicComparer
 
-	// The name of the comparer.  Used to check for comparer
-	// mismatches (i.e., a DB created with one comparer is
-	// accessed using a different comparer.
+	// Name returns name of the comparer.
 	//
-	// The client of this package should switch to a new name whenever
-	// the comparer implementation changes in a way that will cause
-	// the relative ordering of any two keys to change.
+	// The Level-DB on-disk format stores the comparer name, and opening a
+	// database with a different comparer from the one it was created with
+	// will result in an error.
+	//
+	// An implementation to a new name whenever the comparer implementation
+	// changes in a way that will cause the relative ordering of any two keys
+	// to change.
 	//
 	// Names starting with "leveldb." are reserved and should not be used
-	// by any clients of this package.
+	// by any users of this package.
 	Name() string
 
-	// Advanced functions:
+	// Bellow are advanced functions used used to reduce the space requirements
+	// for internal data structures such as index blocks.
 
-	// If 'a' < 'b', changes 'a' to a short string in [a,b).
+	// Separator appends a sequence of bytes x to dst such that a <= x && x < b,
+	// where 'less than' is consistent with Compare. An implementation should
+	// return nil if x equal to a.
 	//
-	// This is an advanced function that's used to reduce the space
-	// requirements for internal data structures such as index blocks.
-	//
-	// Simple Comparer implementations may return with 'a' unchanged,
-	// i.e., an implementation of this method that does nothing is correct.
-	//
-	// NOTE: Don't modify content of either 'a' or 'b', if modification
-	// is necessary copy it first. It is ok to return slice of it.
-	Separator(a, b []byte) []byte
+	// Either contents of a or b should not by any means modified. Doing so
+	// may cause corruption on the internal state.
+	Separator(dst, a, b []byte) []byte
 
-	// Changes 'b' to a short string >= 'b'.
+	// Successor appends a sequence of bytes x to dst such that x >= b, where
+	// 'less than' is consistent with Compare. An implementation should return
+	// nil if x equal to b.
 	//
-	// This is an advanced function that's used to reduce the space
-	// requirements for internal data structures such as index blocks.
-	//
-	// Simple Comparer implementations may return with 'b' unchanged,
-	// i.e., an implementation of this method that does nothing is correct.
-	//
-	// NOTE: Don't modify content of 'b', if modification is necessary
-	// copy it first. It is ok to return slice of it.
-	Successor(b []byte) []byte
+	// Contents of b should not by any means modified. Doing so may cause
+	// corruption on the internal state.
+	Successor(dst, b []byte) []byte
 }
-
-// DefaultComparer are default comparer used by LevelDB.
-var DefaultComparer = BytesComparer{}

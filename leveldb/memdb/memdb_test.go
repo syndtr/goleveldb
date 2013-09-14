@@ -27,7 +27,7 @@ func Test_FieldsAligned(t *testing.T) {
 }
 
 func TestPutRemove(t *testing.T) {
-	p := New(comparer.BytesComparer{})
+	p := New(comparer.DefaultComparer)
 
 	assertExist := func(key string, want bool) {
 		got := p.Contains([]byte(key))
@@ -120,7 +120,7 @@ func BenchmarkPut(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	p := New(comparer.BytesComparer{})
+	p := New(comparer.DefaultComparer)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -133,7 +133,7 @@ func BenchmarkPutRandom(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	p := New(comparer.BytesComparer{})
+	p := New(comparer.DefaultComparer)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -145,7 +145,7 @@ func BenchmarkGet(b *testing.B) {
 		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
 	}
 
-	p := New(comparer.BytesComparer{})
+	p := New(comparer.DefaultComparer)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -162,7 +162,7 @@ func BenchmarkGetRandom(b *testing.B) {
 		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
 	}
 
-	p := New(comparer.BytesComparer{})
+	p := New(comparer.DefaultComparer)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}

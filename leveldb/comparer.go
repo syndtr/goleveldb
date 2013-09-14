@@ -30,26 +30,32 @@ func (p *iComparer) Compare(a, b []byte) int {
 	return r
 }
 
-func (p *iComparer) Separator(a, b []byte) []byte {
+func (p *iComparer) Separator(dst, a, b []byte) []byte {
 	ua, ub := iKey(a).ukey(), iKey(b).ukey()
-	r := p.cmp.Separator(ua, ub)
-	if len(r) < len(ua) && p.cmp.Compare(ua, r) < 0 {
-		rr := make([]byte, len(r)+8)
-		copy(rr, r)
-		copy(rr[len(r):], kMaxNumBytes)
-		return rr
+	dst = p.cmp.Separator(dst, ua, ub)
+	if dst == nil {
+		return nil
 	}
-	return append(r, a[len(r):]...)
+	if len(dst) < len(ua) && p.cmp.Compare(ua, dst) < 0 {
+		dst = append(dst, kMaxNumBytes...)
+	} else {
+		// Did not close possibilities that n maybe longer than len(ub).
+		dst = append(dst, a[len(a)-8:]...)
+	}
+	return dst
 }
 
-func (p *iComparer) Successor(b []byte) []byte {
+func (p *iComparer) Successor(dst, b []byte) []byte {
 	ub := iKey(b).ukey()
-	r := p.cmp.Successor(ub)
-	if len(r) < len(ub) && p.cmp.Compare(ub, r) < 0 {
-		rr := make([]byte, len(r)+8)
-		copy(rr, r)
-		copy(rr[len(r):], kMaxNumBytes)
-		return rr
+	dst = p.cmp.Successor(dst, ub)
+	if dst == nil {
+		return nil
 	}
-	return append(r, b[len(r):]...)
+	if len(dst) < len(ub) && p.cmp.Compare(ub, dst) < 0 {
+		dst = append(dst, kMaxNumBytes...)
+	} else {
+		// Did not close possibilities that n maybe longer than len(ub).
+		dst = append(dst, b[len(b)-8:]...)
+	}
+	return dst
 }

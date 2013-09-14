@@ -8,44 +8,44 @@ package comparer
 
 import "bytes"
 
-type BytesComparer struct{}
+type bytesComparer struct{}
 
-func (BytesComparer) Compare(a, b []byte) int {
+func (bytesComparer) Compare(a, b []byte) int {
 	return bytes.Compare(a, b)
 }
 
-func (BytesComparer) Name() string {
+func (bytesComparer) Name() string {
 	return "leveldb.BytewiseComparator"
 }
 
-func (BytesComparer) Separator(a, b []byte) []byte {
+func (bytesComparer) Separator(dst, a, b []byte) []byte {
 	i, n := 0, len(a)
 	if n > len(b) {
 		n = len(b)
 	}
-	for i < n && a[i] == b[i] {
-		i++
+	for ; i < n && a[i] == b[i]; i++ {
 	}
-
 	if i >= n {
 		// Do not shorten if one string is a prefix of the other
 	} else if c := a[i]; c < 0xff && c+1 < b[i] {
-		r := make([]byte, i+1)
-		copy(r, a)
-		r[i]++
-		return r
+		dst = append(dst, a[:i+1]...)
+		dst[i]++
+		return dst
 	}
-	return a
+	return nil
 }
 
-func (BytesComparer) Successor(b []byte) []byte {
+func (bytesComparer) Successor(dst, b []byte) []byte {
 	for i, c := range b {
 		if c != 0xff {
-			r := make([]byte, i+1)
-			copy(r, b)
-			r[i]++
-			return r
+			dst = append(dst, b[:i+1]...)
+			dst[i]++
+			return dst
 		}
 	}
-	return b
+	return nil
 }
+
+// DefaultComparer are default implementation of the Comparer interface.
+// It uses the natural ordering, consistent with bytes.Compare.
+var DefaultComparer = bytesComparer{}

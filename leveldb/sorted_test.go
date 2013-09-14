@@ -117,7 +117,7 @@ type stConstructor_MemDB struct {
 func (p *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
-	p.mem = memdb.New(comparer.BytesComparer{})
+	p.mem = memdb.New(comparer.DefaultComparer)
 	return nil
 }
 
@@ -146,7 +146,7 @@ func (p *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
 	for i := range p.mem {
-		p.mem[i] = memdb.New(comparer.BytesComparer{})
+		p.mem[i] = memdb.New(comparer.DefaultComparer)
 	}
 	return nil
 }
@@ -169,7 +169,7 @@ func (p *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
 	for _, m := range p.mem {
 		its = append(its, m.NewIterator())
 	}
-	return iterator.NewMergedIterator(its, comparer.BytesComparer{})
+	return iterator.NewMergedIterator(its, comparer.DefaultComparer)
 }
 
 func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}

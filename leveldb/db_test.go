@@ -1392,13 +1392,8 @@ func (p numberComparer) Compare(a, b []byte) int {
 	return p.num(a) - p.num(b)
 }
 
-func (numberComparer) Separator(a, b []byte) []byte {
-	return a
-}
-
-func (numberComparer) Successor(b []byte) []byte {
-	return b
-}
+func (numberComparer) Separator(dst, a, b []byte) []byte { return nil }
+func (numberComparer) Successor(dst, b []byte) []byte    { return nil }
 
 func TestDb_CustomComparer(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
@@ -1621,7 +1616,7 @@ func TestDb_Concurrent2(t *testing.T) {
 			}(i)
 		}
 
-		cmp := comparer.BytesComparer{}
+		cmp := comparer.DefaultComparer
 		ro := &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
 		for i := 0; i < n2; i++ {
 			wg.Add(1)
