@@ -63,10 +63,10 @@ func (c *LRUCache) Purge(fin func()) {
 	c.Lock()
 	top := &c.recent
 	for n := c.recent.rPrev; n != top; {
-		n.deleted = true
+		n.state = -2
 		n.rRemove()
 		n.delfin = fin
-		n.evict_NB()
+		n.evictNB()
 		n = c.recent.rPrev
 	}
 	c.size = 0
@@ -94,8 +94,9 @@ func (c *LRUCache) Zap() {
 func (c *LRUCache) evict() {
 	top := &c.recent
 	for n := c.recent.rPrev; c.size > c.capacity && n != top; {
+		n.state = -1
 		n.rRemove()
-		n.evict_NB()
+		n.evictNB()
 		c.size -= n.charge
 		n = c.recent.rPrev
 	}
@@ -129,12 +130,20 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 
 	n, ok := p.table[key]
 	if ok {
-		if !n.deleted {
-			// bump to front
+		switch n.state {
+		case -1:
+			// Insert to recent list.
+			n.state = 0
+			n.ref++
+			lru.size += n.charge
+			lru.evict()
+			fallthrough
+		case 0:
+			// Bump to front
 			n.rRemove()
 			n.rInsert(&lru.recent)
 		}
-		atomic.AddInt32(&n.ref, 1)
+		n.ref++
 	} else {
 		if setf == nil {
 			lru.Unlock()
@@ -191,16 +200,17 @@ func (p *lruNs) Delete(key uint64, fin func()) bool {
 		return false
 	}
 
-	if n.deleted {
+	n.delfin = fin
+	switch n.state {
+	case -2:
 		lru.Unlock()
 		return false
+	case 0:
+		lru.size -= n.charge
+		n.rRemove()
+		n.evictNB()
 	}
-
-	n.deleted = true
-	n.rRemove()
-	n.delfin = fin
-	n.evict_NB()
-	lru.size -= n.charge
+	n.state = -2
 
 	lru.Unlock()
 	return true
@@ -215,13 +225,13 @@ func (p *lruNs) Purge(fin func()) {
 	}
 
 	for _, n := range p.table {
-		if n.deleted {
-			continue
-		}
-		n.rRemove()
 		n.delfin = fin
-		n.evict_NB()
-		lru.size -= n.charge
+		if n.state == 0 {
+			lru.size -= n.charge
+			n.rRemove()
+			n.evictNB()
+		}
+		n.state = -2
 	}
 	lru.Unlock()
 }
@@ -235,9 +245,11 @@ func (p *lruNs) Zap() {
 	}
 
 	for _, n := range p.table {
-		if n.rRemove() {
+		if n.state == 0 {
 			lru.size -= n.charge
+			n.rRemove()
 		}
+		n.state = -2
 		n.execFin()
 	}
 	p.zapped = true
@@ -251,13 +263,16 @@ type lruNode struct {
 
 	rNext, rPrev *lruNode
 
-	key     uint64
-	value   interface{}
-	charge  int
-	ref     int32
-	deleted bool
-	setfin  func()
-	delfin  func()
+	key    uint64
+	value  interface{}
+	charge int
+	ref    int
+	//  0 = effective
+	// -1 = evicted
+	// -2 = removed
+	state  int
+	setfin func()
+	delfin func()
 }
 
 func (n *lruNode) rInsert(at *lruNode) {
@@ -303,27 +318,21 @@ func (n *lruNode) doEvict() {
 
 	// execute finalizer
 	n.execFin()
-
-	n.value = nil
 }
 
 func (n *lruNode) evict() {
-	if atomic.AddInt32(&n.ref, -1) != 0 {
-		return
-	}
-
-	lru := n.ns.lru
-	lru.Lock()
-	n.doEvict()
-	lru.Unlock()
+	n.ns.lru.Lock()
+	n.evictNB()
+	n.ns.lru.Unlock()
 }
 
-func (n *lruNode) evict_NB() {
-	if atomic.AddInt32(&n.ref, -1) != 0 {
-		return
+func (n *lruNode) evictNB() {
+	n.ref--
+	if n.ref == 0 {
+		n.doEvict()
+	} else if n.ref < 0 {
+		panic("leveldb/cache: LRUCache: negative node reference")
 	}
-
-	n.doEvict()
 }
 
 type lruObject struct {

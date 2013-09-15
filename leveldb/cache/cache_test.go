@@ -102,17 +102,17 @@ func TestCache_HitMiss(t *testing.T) {
 func TestLRUCache_Eviction(t *testing.T) {
 	c := NewLRUCache(12)
 	ns := c.GetNamespace(0)
-	set(ns, 1, 1, 1, nil).Release()
+	o1 := set(ns, 1, 1, 1, nil)
 	set(ns, 2, 2, 1, nil).Release()
 	set(ns, 3, 3, 1, nil).Release()
 	set(ns, 4, 4, 1, nil).Release()
 	set(ns, 5, 5, 1, nil).Release()
-	if r, ok := ns.Get(2, nil); ok {
+	if r, ok := ns.Get(2, nil); ok { // 1,3,4,5,2
 		r.Release()
 	}
-	set(ns, 9, 9, 10, nil).Release()
+	set(ns, 9, 9, 10, nil).Release() // 5,2,9
 
-	for _, x := range []uint64{2, 5, 9} {
+	for _, x := range []uint64{9, 2, 5, 1} {
 		r, ok := ns.Get(x, nil)
 		if !ok {
 			t.Errorf("miss for key '%d'", x)
@@ -123,8 +123,19 @@ func TestLRUCache_Eviction(t *testing.T) {
 			r.Release()
 		}
 	}
-
-	for _, x := range []uint64{1, 3, 4} {
+	o1.Release()
+	for _, x := range []uint64{1, 2, 5} {
+		r, ok := ns.Get(x, nil)
+		if !ok {
+			t.Errorf("miss for key '%d'", x)
+		} else {
+			if r.Value().(int) != int(x) {
+				t.Errorf("invalid value for key '%d' want '%d', got '%d'", x, x, r.Value().(int))
+			}
+			r.Release()
+		}
+	}
+	for _, x := range []uint64{3, 4, 9} {
 		r, ok := ns.Get(x, nil)
 		if ok {
 			t.Errorf("hit for key '%d'", x)
@@ -154,6 +165,38 @@ func TestLRUCache_SetGet(t *testing.T) {
 			p.Release()
 		} else {
 			t.Errorf("key '%d' doesn't exist", n)
+		}
+	}
+}
+
+func TestLRUCache_Purge(t *testing.T) {
+	c := NewLRUCache(3)
+	ns1 := c.GetNamespace(0)
+	o1 := set(ns1, 1, 1, 1, nil)
+	o2 := set(ns1, 2, 2, 1, nil)
+	ns1.Purge(nil)
+	set(ns1, 3, 3, 1, nil).Release()
+	for _, x := range []uint64{1, 2, 3} {
+		r, ok := ns1.Get(x, nil)
+		if !ok {
+			t.Errorf("miss for key '%d'", x)
+		} else {
+			if r.Value().(int) != int(x) {
+				t.Errorf("invalid value for key '%d' want '%d', got '%d'", x, x, r.Value().(int))
+			}
+			r.Release()
+		}
+	}
+	o1.Release()
+	o2.Release()
+	for _, x := range []uint64{1, 2} {
+		r, ok := ns1.Get(x, nil)
+		if ok {
+			t.Errorf("hit for key '%d'", x)
+			if r.Value().(int) != int(x) {
+				t.Errorf("invalid value for key '%d' want '%d', got '%d'", x, x, r.Value().(int))
+			}
+			r.Release()
 		}
 	}
 }
