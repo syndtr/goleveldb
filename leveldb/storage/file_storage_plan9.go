@@ -29,7 +29,12 @@ func newFileLock(path string) (fl fileLock, err error) {
 }
 
 func rename(oldpath, newpath string) error {
-	os.Remove(newpath)
+	if _, err := os.Stat(newpath); err == nil {
+		if err := os.Remove(newpath); err != nil {
+			return err
+		}
+	}
+
 	_, fname := filepath.Split(newpath)
 	return os.Rename(oldpath, fname)
 }
