@@ -8,6 +8,7 @@ package storage
 
 import (
 	"os"
+	"path/filepath"
 )
 
 type plan9FileLock struct {
@@ -19,7 +20,7 @@ func (fl *plan9FileLock) release() error {
 }
 
 func newFileLock(path string) (fl fileLock, err error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, os.ModeExclusive|0644)
 	if err != nil {
 		return
 	}
@@ -28,5 +29,7 @@ func newFileLock(path string) (fl fileLock, err error) {
 }
 
 func rename(oldpath, newpath string) error {
-	return os.Rename(oldpath, newpath)
+	os.Remove(newpath)
+	_, fname := filepath.Split(newpath)
+	return os.Rename(oldpath, fname)
 }
