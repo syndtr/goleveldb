@@ -347,10 +347,15 @@ func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 		return &iterator.EmptyIterator{err}
 	}
 	it := c.Value().(*table.Reader).NewIterator(ro)
-	p := it.(*iterator.IndexedIterator)
-	runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
+	p, ok := it.(*iterator.IndexedIterator)
+	if ok {
+		runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
+			x.Release()
+			c.Release()
+		})
+	} else {
 		c.Release()
-	})
+	}
 	return it
 }
 
@@ -360,15 +365,16 @@ func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []by
 		return nil, nil, err
 	}
 	defer c.Release()
-	return c.Value().(*table.Reader).Get(key, ro)
+	return c.Value().(*table.Reader).Find(key, ro)
 }
 
-func (t *tOps) approximateOffsetOf(f *tFile, key []byte) (offset uint64, err error) {
+func (t *tOps) getApproximateOffset(f *tFile, key []byte) (offset uint64, err error) {
 	c, err := t.lookup(f)
 	if err != nil {
 		return
 	}
-	offset = c.Value().(*table.Reader).ApproximateOffsetOf(key)
+	_offset, err := c.Value().(*table.Reader).GetApproximateOffset(key)
+	offset = uint64(_offset)
 	c.Release()
 	return
 }
@@ -412,11 +418,7 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 			ns = bc.GetNamespace(num)
 		}
 
-		var p *table.Reader
-		p, err = table.NewReader(r, f.size, t.s.o, ns)
-		if err != nil {
-			return
-		}
+		p := table.NewReader(r, int64(f.size), ns, t.s.o)
 
 		ok = true
 		value = p

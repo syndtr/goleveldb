@@ -81,7 +81,7 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 		BlockRestartInterval: 3,
 		Filter:               filter.NewBloomFilter(10),
 	}
-	p.tr, err = table.NewReader(p.r, fsize, o, nil)
+	p.tr = table.NewReader(p.r, int64(fsize), nil, o)
 	return int(fsize), nil
 }
 
@@ -92,7 +92,7 @@ func (p *stConstructor_Table) newIterator() iterator.Iterator {
 func (p *stConstructor_Table) customTest(h *stHarness) {
 	ro := &opt.ReadOptions{}
 	for i := range h.keys {
-		rkey, rval, err := p.tr.Get([]byte(h.keys[i]), ro)
+		rkey, rval, err := p.tr.Find([]byte(h.keys[i]), ro)
 		if err != nil {
 			h.t.Error("table: CustomTest: Get: error: ", err)
 			continue

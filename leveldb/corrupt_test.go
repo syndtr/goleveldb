@@ -146,9 +146,10 @@ func (h *dbCorruptHarness) check(min, max int) {
 			good++
 		}
 	}
-
-	t.Logf("want=%d..%d got=%d badkeys=%d badvalues=%d missed=%d",
-		min, max, good, badk, badv, missed)
+	err := iter.Error()
+	iter.Release()
+	t.Logf("want=%d..%d got=%d badkeys=%d badvalues=%d missed=%d, err=%v",
+		min, max, good, badk, badv, missed, err)
 	if good < min || good > max {
 		t.Errorf("good entries number not in range")
 	}

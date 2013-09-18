@@ -217,7 +217,7 @@ func (v *version) tLen(level int) int {
 	return len(v.tables[level])
 }
 
-func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
+func (v *version) getApproximateOffset(key iKey) (n uint64, err error) {
 	icmp := v.s.cmp
 	tops := v.s.tops
 
@@ -238,7 +238,7 @@ func (v *version) approximateOffsetOf(key iKey) (n uint64, err error) {
 				// "key" falls in the range for this table.  Add the
 				// approximate offset of "key" within the table.
 				var nn uint64
-				nn, err = tops.approximateOffsetOf(t, key)
+				nn, err = tops.getApproximateOffset(t, key)
 				if err != nil {
 					return 0, err
 				}

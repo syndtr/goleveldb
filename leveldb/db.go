@@ -492,11 +492,11 @@ func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
 	for _, r := range rr {
 		min := newIKey(r.Start, kMaxSeq, tSeek)
 		max := newIKey(r.Limit, kMaxSeq, tSeek)
-		start, err := v.approximateOffsetOf(min)
+		start, err := v.getApproximateOffset(min)
 		if err != nil {
 			return nil, err
 		}
-		limit, err := v.approximateOffsetOf(max)
+		limit, err := v.getApproximateOffset(max)
 		if err != nil {
 			return nil, err
 		}

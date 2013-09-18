@@ -230,8 +230,10 @@ func (w *Writer) finishBlock() error {
 	return nil
 }
 
-// Append appends key/value to the table. The keys passed must
+// Append appends key/value pair to the table. The keys passed must
 // be in increasing order.
+//
+// It is safe to modify the contents of the arguments after Append returns.
 func (w *Writer) Append(key, value []byte) error {
 	if w.err != nil {
 		return w.err
@@ -278,7 +280,9 @@ func (w *Writer) BytesLen() int {
 	return int(w.offset)
 }
 
-// Close will finalize the table.
+// Close will finalize the table. Calling Append is not possible
+// after Close, but calling BlocksLen, EntriesLen and BytesLen
+// is still possible.
 func (w *Writer) Close() error {
 	if w.err != nil {
 		return w.err
@@ -344,7 +348,9 @@ func (w *Writer) Close() error {
 	return nil
 }
 
-// NewWriter creates a new initialized table writer.
+// NewWriter creates a new initialized table writer for the file.
+//
+// Table writer is not goroutine-safe.
 func NewWriter(f io.Writer, o opt.OptionsGetter) *Writer {
 	w := &Writer{
 		writer:          f,
