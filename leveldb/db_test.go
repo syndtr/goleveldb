@@ -1334,6 +1334,8 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	h.delete("foo")
 
 	// closing DB
+	iter.Release()
+	iter2.Release()
 	h.closeDB()
 
 	assertErr(t, db.Put([]byte("x"), []byte("y"), h.wo), true)
@@ -1343,14 +1345,14 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	if iter.Valid() {
 		t.Errorf("iter.Valid should false")
 	}
-	assertErr(t, iter.Error(), true)
+	assertErr(t, iter.Error(), false)
 	testKeyVal(t, iter, "->")
 	if iter.Seek([]byte("k")) {
 		t.Errorf("iter.Seek should false")
 	}
 	assertErr(t, iter.Error(), true)
 
-	assertErr(t, iter2.Error(), true)
+	assertErr(t, iter2.Error(), false)
 
 	_, err = snap.Get([]byte("k"), h.ro)
 	assertErr(t, err, true)
