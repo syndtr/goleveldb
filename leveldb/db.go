@@ -42,9 +42,12 @@ type DB struct {
 	mem      unsafe.Pointer
 	journal  *journalWriter
 	fjournal *journalWriter
-	snaps    *snaps
 	closed   uint32
 	err      unsafe.Pointer
+
+	// Snapshot
+	snapsMu   sync.Mutex
+	snapsRoot snapshotElement
 }
 
 func openDB(s *session) (*DB, error) {
@@ -58,8 +61,8 @@ func openDB(s *session) (*DB, error) {
 		jch:    make(chan *Batch),
 		jack:   make(chan error),
 		seq:    s.stSeq,
-		snaps:  newSnaps(),
 	}
+	db.initSnapshot()
 
 	if err := db.recoverJournal(); err != nil {
 		return nil, err

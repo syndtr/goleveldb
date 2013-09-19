@@ -7,146 +7,150 @@
 package leveldb
 
 import (
-	"container/list"
+	"errors"
 	"runtime"
 	"sync"
-	"sync/atomic"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-type snapEntry struct {
-	elem *list.Element
-	seq  uint64
-	ref  int
+var errSnapshotReleased = errors.New("leveldb: snapshot released")
+
+type snapshotElement struct {
+	seq uint64
+	ref int
+	// Next and previous pointers in the doubly-linked list of elements.
+	next, prev *snapshotElement
 }
 
-type snaps struct {
-	sync.Mutex
-	list.List
+// Initialize the snapshot.
+func (db *DB) initSnapshot() {
+	db.snapsRoot.next = &db.snapsRoot
+	db.snapsRoot.prev = &db.snapsRoot
 }
 
-// Create new initaliized snaps object.
-func newSnaps() *snaps {
-	p := new(snaps)
-	p.Init()
-	return p
-}
-
-// Insert given seq to the list.
-func (p *snaps) acquire(seq uint64) (e *snapEntry) {
-	p.Lock()
-	if back := p.Back(); back != nil {
-		e = back.Value.(*snapEntry)
+// Acquires a snapshot, based on latest sequence.
+func (db *DB) acquireSnapshot() *snapshotElement {
+	db.snapsMu.Lock()
+	seq := db.getSeq()
+	elem := db.snapsRoot.prev
+	if elem == &db.snapsRoot || elem.seq != seq {
+		at := db.snapsRoot.prev
+		next := at.next
+		elem = &snapshotElement{
+			seq:  seq,
+			prev: at,
+			next: next,
+		}
+		at.next = elem
+		next.prev = elem
 	}
-	if e == nil || e.seq != seq {
-		e = &snapEntry{seq: seq}
-		e.elem = p.PushBack(e)
-	}
-	e.ref++
-	p.Unlock()
-	return
+	elem.ref++
+	db.snapsMu.Unlock()
+	return elem
 }
 
-// Release given entry; remove it when ref reach zero.
-func (p *snaps) release(e *snapEntry) {
-	p.Lock()
-	e.ref--
-	if e.ref == 0 {
-		p.Remove(e.elem)
+// Releases given snapshot element.
+func (db *DB) releaseSnapshot(elem *snapshotElement) {
+	db.snapsMu.Lock()
+	elem.ref--
+	if elem.ref == 0 {
+		elem.prev.next = elem.next
+		elem.next.prev = elem.prev
+		elem.next = nil
+		elem.prev = nil
+	} else if elem.ref < 0 {
+		panic("leveldb: Snapshot: negative element reference")
 	}
-	p.Unlock()
+	db.snapsMu.Unlock()
 }
 
-// Get smallest sequence or return given seq if list empty.
-func (p *snaps) seq(seq uint64) uint64 {
-	p.Lock()
-	defer p.Unlock()
-	if back := p.Back(); back != nil {
-		return back.Value.(*snapEntry).seq
+// Gets minimum sequence that not being snapshoted.
+func (db *DB) minSeq() uint64 {
+	db.snapsMu.Lock()
+	defer db.snapsMu.Unlock()
+	elem := db.snapsRoot.prev
+	if elem != &db.snapsRoot {
+		return elem.seq
 	}
-	return seq
+	return db.getSeq()
 }
 
-// Snapshot represent a database snapshot.
+// Snapshot represent a DB snapshot.
 type Snapshot struct {
-	d        *DB
-	entry    *snapEntry
-	released uint32
+	db       *DB
+	elem     *snapshotElement
+	mu       sync.Mutex
+	released bool
 }
 
-// Create new snapshot object.
-func (d *DB) newSnapshot() *Snapshot {
-	p := &Snapshot{d: d, entry: d.snaps.acquire(d.getSeq())}
+// Creates new snapshot object.
+func (db *DB) newSnapshot() *Snapshot {
+	p := &Snapshot{
+		db:   db,
+		elem: db.acquireSnapshot(),
+	}
 	runtime.SetFinalizer(p, (*Snapshot).Release)
 	return p
 }
 
-func (p *Snapshot) isOk() bool {
-	if atomic.LoadUint32(&p.released) != 0 {
-		return false
-	}
-	return !p.d.isClosed()
-}
-
-func (p *Snapshot) ok() error {
-	if atomic.LoadUint32(&p.released) != 0 {
-		return errors.ErrSnapshotReleased
-	}
-	return p.d.rok()
-}
-
-// Get get value for given key of this snapshot of database.
+// Get gets the value for the given key. It returns errors.ErrNotFound if
+// the DB does not contain the key.
+//
+// The caller should not modify the contents of the returned slice, but
+// it is safe to modify the contents of the argument after Get returns.
 func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
-	if atomic.LoadUint32(&p.released) != 0 {
-		return nil, errors.ErrSnapshotReleased
-	}
-
-	d := p.d
-	err = d.rok()
+	db := p.db
+	err = db.rok()
 	if err != nil {
 		return
 	}
-
-	return d.get(key, p.entry.seq, ro)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.released {
+		err = errSnapshotReleased
+		return
+	}
+	return db.get(key, p.elem.seq, ro)
 }
 
-// NewIterator return an iterator over the contents of this snapshot of
-// database.
+// NewIterator returns an iterator for the snapshot of the uderlying DB.
 //
-// Please note that the iterator is not thread-safe, you may not use same
-// iterator instance concurrently without external synchronization.
+// The returned iterator is not goroutine-safe, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
+//
+// It is safe to use an iterator concurrently with modifying its
+// underlying DB. The resultant key/value pairs are guaranteed to be
+// consistent.
+//
+// Releasing the snapshot doesn't mean releasing the iterator too, the
+// iterator would be still valid until explicitly released.
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
-	if atomic.LoadUint32(&p.released) != 0 {
-		return &iterator.EmptyIterator{errors.ErrSnapshotReleased}
-	}
-
-	d := p.d
-
-	if err := d.rok(); err != nil {
+	db := p.db
+	if err := db.rok(); err != nil {
 		return &iterator.EmptyIterator{err}
 	}
-
-	return &dbIter{
-		snap:       p,
-		cmp:        d.s.cmp.cmp,
-		it:         d.newRawIterator(ro),
-		seq:        p.entry.seq,
-		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.released {
+		return &iterator.EmptyIterator{errSnapshotReleased}
 	}
+	return db.newIterator(p.elem.seq, ro)
 }
 
-// Release release the snapshot. The caller must not use the snapshot
+// Release releases the snapshot. The caller must not use the snapshot
 // after this call.
 func (p *Snapshot) Release() {
-	if atomic.CompareAndSwapUint32(&p.released, 0, 1) {
+	p.mu.Lock()
+	if !p.released {
 		// not needed anymore
 		runtime.SetFinalizer(p, nil)
 
-		p.d.snaps.release(p.entry)
-		p.d = nil
-		p.entry = nil
+		p.released = true
+		p.db.releaseSnapshot(p.elem)
+		p.db = nil
+		p.elem = nil
 	}
+	p.mu.Unlock()
 }

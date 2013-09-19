@@ -212,7 +212,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	var snapSeq uint64
 	var snapIter int
 	var tw *tWriter
-	minSeq := d.snaps.seq(d.getSeq())
+	minSeq := d.minSeq()
 	stats := new(cStatsStaging)
 
 	finish := func() error {

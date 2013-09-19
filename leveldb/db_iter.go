@@ -7,16 +7,13 @@
 package leveldb
 
 import (
+	"errors"
+
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-var errIKeyCorrupt = errors.ErrCorrupt("internal key corrupted")
-
-// newRawIterator return merged interators of current version, current frozen memdb
-// and current memdb.
 func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 	s := d.s
 
@@ -24,25 +21,35 @@ func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 	v := s.version()
 	defer v.release()
 
-	ti := v.getIterators(ro)
-	ii := make([]iterator.Iterator, 0, len(ti)+2)
-	ii = append(ii, mem.cur.NewIterator())
+	tableIters := v.getIterators(ro)
+	iters := make([]iterator.Iterator, 0, len(tableIters)+2)
+	iters = append(iters, mem.cur.NewIterator())
 	if mem.froze != nil {
-		ii = append(ii, mem.froze.NewIterator())
+		iters = append(iters, mem.froze.NewIterator())
 	}
-	ii = append(ii, ti...)
+	iters = append(iters, tableIters...)
+	return iterator.NewMergedIterator(iters, s.cmp)
+}
 
-	return iterator.NewMergedIterator(ii, s.cmp)
+func (d *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
+	rawIter := d.newRawIterator(ro)
+	iter := &dbIter{
+		cmp:        d.s.cmp.cmp,
+		iter:       rawIter,
+		seq:        seq,
+		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
+	}
+	return iter
 }
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
-	snap       *Snapshot
 	cmp        comparer.BasicComparer
-	it         iterator.Iterator
+	iter       iterator.Iterator
 	seq        uint64
 	copyBuffer bool
 
+	released bool
 	valid    bool
 	backward bool
 	last     bool
@@ -56,10 +63,10 @@ func (i *dbIter) clear() {
 
 func (i *dbIter) scanNext(skip []byte) {
 	cmp := i.cmp
-	it := i.it
+	iter := i.iter
 
 	for {
-		key := iKey(it.Key())
+		key := iKey(iter.Key())
 		if seq, t, ok := key.parseNum(); ok && seq <= i.seq {
 			switch t {
 			case tDel:
@@ -72,7 +79,7 @@ func (i *dbIter) scanNext(skip []byte) {
 			}
 		}
 
-		if !it.Next() {
+		if !iter.Next() {
 			break
 		}
 	}
@@ -82,12 +89,12 @@ func (i *dbIter) scanNext(skip []byte) {
 
 func (i *dbIter) scanPrev() {
 	cmp := i.cmp
-	it := i.it
+	iter := i.iter
 
 	tt := tDel
-	if it.Valid() {
+	if iter.Valid() {
 		for {
-			key := iKey(it.Key())
+			key := iKey(iter.Key())
 			if seq, t, ok := key.parseNum(); ok && seq <= i.seq {
 				if tt != tDel && cmp.Compare(key.ukey(), i.skey) < 0 {
 					break
@@ -97,12 +104,12 @@ func (i *dbIter) scanPrev() {
 					i.skey = nil
 				} else {
 					i.skey = key.ukey()
-					i.sval = it.Value()
+					i.sval = iter.Value()
 				}
 				tt = t
 			}
 
-			if !it.Prev() {
+			if !iter.Prev() {
 				break
 			}
 		}
@@ -117,23 +124,19 @@ func (i *dbIter) scanPrev() {
 	}
 }
 
-func (i *dbIter) isOk() bool {
-	return i.snap.isOk()
-}
-
 func (i *dbIter) Valid() bool {
-	return i.valid && i.isOk()
+	return i.valid
 }
 
 func (i *dbIter) First() bool {
-	if !i.isOk() {
+	if i.released {
 		return false
 	}
 
 	i.clear()
 	i.last = false
 	i.backward = false
-	if i.it.First() {
+	if i.iter.First() {
 		i.scanNext(nil)
 	} else {
 		i.valid = false
@@ -143,14 +146,14 @@ func (i *dbIter) First() bool {
 }
 
 func (i *dbIter) Last() bool {
-	if !i.isOk() {
+	if i.released {
 		return false
 	}
 
 	i.clear()
 	i.last = false
 	i.backward = true
-	if i.it.Last() {
+	if i.iter.Last() {
 		i.scanPrev()
 	} else {
 		i.valid = false
@@ -160,7 +163,7 @@ func (i *dbIter) Last() bool {
 }
 
 func (i *dbIter) Seek(key []byte) bool {
-	if !i.isOk() {
+	if i.released {
 		return false
 	}
 
@@ -168,7 +171,7 @@ func (i *dbIter) Seek(key []byte) bool {
 	i.last = false
 	i.backward = false
 	ikey := newIKey(key, i.seq, tSeek)
-	if i.it.Seek(ikey) {
+	if i.iter.Seek(ikey) {
 		i.scanNext(nil)
 	} else {
 		i.valid = false
@@ -178,11 +181,11 @@ func (i *dbIter) Seek(key []byte) bool {
 }
 
 func (i *dbIter) Next() bool {
-	if !i.isOk() {
+	if i.released {
 		return false
 	}
 
-	it := i.it
+	iter := i.iter
 
 	if !i.valid {
 		if !i.last {
@@ -194,25 +197,25 @@ func (i *dbIter) Next() bool {
 	if i.backward {
 		i.clear()
 		i.backward = false
-		if !it.Next() {
+		if !iter.Next() {
 			i.valid = false
 			return false
 		}
 	}
 
-	ikey := iKey(it.Key())
+	ikey := iKey(iter.Key())
 	i.scanNext(ikey.ukey())
 	i.last = !i.valid
 	return i.valid
 }
 
 func (i *dbIter) Prev() bool {
-	if !i.isOk() {
+	if i.released {
 		return false
 	}
 
 	cmp := i.cmp
-	it := i.it
+	iter := i.iter
 
 	if !i.valid {
 		if i.last {
@@ -222,13 +225,13 @@ func (i *dbIter) Prev() bool {
 	}
 
 	if !i.backward {
-		lkey := iKey(it.Key()).ukey()
+		lkey := iKey(iter.Key()).ukey()
 		for {
-			if !it.Prev() {
+			if !iter.Prev() {
 				i.valid = false
 				return false
 			}
-			ukey := iKey(it.Key()).ukey()
+			ukey := iKey(iter.Key()).ukey()
 			if cmp.Compare(ukey, lkey) < 0 {
 				break
 			}
@@ -241,14 +244,14 @@ func (i *dbIter) Prev() bool {
 }
 
 func (i *dbIter) Key() []byte {
-	if !i.valid || !i.isOk() {
+	if !i.valid {
 		return nil
 	}
 	var ret []byte
 	if i.backward {
 		ret = i.skey
 	} else {
-		ret = iKey(i.it.Key()).ukey()
+		ret = iKey(i.iter.Key()).ukey()
 	}
 	if i.copyBuffer {
 		return dupBytes(ret)
@@ -257,14 +260,14 @@ func (i *dbIter) Key() []byte {
 }
 
 func (i *dbIter) Value() []byte {
-	if !i.valid || !i.isOk() {
+	if !i.valid {
 		return nil
 	}
 	var ret []byte
 	if i.backward {
 		ret = i.sval
 	} else {
-		ret = i.it.Value()
+		ret = i.iter.Value()
 	}
 	if i.copyBuffer {
 		return dupBytes(ret)
@@ -272,11 +275,19 @@ func (i *dbIter) Value() []byte {
 	return ret
 }
 
-func (i *dbIter) Release() {}
+func (i *dbIter) Release() {
+	if !i.released {
+		i.released = true
+		i.valid = false
+		i.skey = nil
+		i.sval = nil
+		i.iter.Release()
+	}
+}
 
 func (i *dbIter) Error() error {
-	if err := i.snap.ok(); err != nil {
-		return err
+	if i.released {
+		return errors.New("interator released")
 	}
-	return i.it.Error()
+	return i.iter.Error()
 }
