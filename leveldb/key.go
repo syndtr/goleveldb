@@ -66,6 +66,20 @@ func newIKey(ukey []byte, seq uint64, t vType) iKey {
 	return b
 }
 
+func parseIkey(p []byte) (ukey []byte, seq uint64, t vType, ok bool) {
+	if len(p) < 8 {
+		return
+	}
+	num := binary.LittleEndian.Uint64(p[len(p)-8:])
+	seq, t = uint64(num>>8), vType(num&0xff)
+	if t > tVal {
+		return
+	}
+	ukey = p[:len(p)-8]
+	ok = true
+	return
+}
+
 func (p iKey) assert() {
 	if p == nil {
 		panic("nil iKey")

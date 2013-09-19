@@ -14,11 +14,14 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
-	s := d.s
+var (
+	errIterReleased = errors.New("leveldb: iterator released")
+	errInvalidIkey  = errors.New("leveldb: Iterator: invalid internal key")
+)
 
-	mem := d.getMem()
-	v := s.version()
+func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
+	mem := db.getMem()
+	v := db.s.version()
 	defer v.release()
 
 	tableIters := v.getIterators(ro)
@@ -28,266 +31,253 @@ func (d *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 		iters = append(iters, mem.froze.NewIterator())
 	}
 	iters = append(iters, tableIters...)
-	return iterator.NewMergedIterator(iters, s.cmp)
+	return iterator.NewMergedIterator(iters, db.s.cmp)
 }
 
-func (d *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
-	rawIter := d.newRawIterator(ro)
+func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
+	rawIter := db.newRawIterator(ro)
 	iter := &dbIter{
-		cmp:        d.s.cmp.cmp,
+		cmp:        db.s.cmp.cmp,
 		iter:       rawIter,
 		seq:        seq,
+		strict:     db.s.o.HasFlag(opt.OFParanoidCheck),
 		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
 	}
 	return iter
 }
+
+type dir int
+
+const (
+	dirReleased dir = iota - 1
+	dirSOI
+	dirEOI
+	dirBackward
+	dirForward
+)
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
 	cmp        comparer.BasicComparer
 	iter       iterator.Iterator
 	seq        uint64
+	strict     bool
 	copyBuffer bool
 
-	released bool
-	valid    bool
-	backward bool
-	last     bool
-	skey     []byte
-	sval     []byte
+	dir   dir
+	key   []byte
+	value []byte
+	err   error
 }
 
-func (i *dbIter) clear() {
-	i.skey, i.sval = nil, nil
+func (i *dbIter) sErr(err error) {
+	i.err = err
+	i.key = nil
+	i.value = nil
 }
 
-func (i *dbIter) scanNext(skip []byte) {
-	cmp := i.cmp
-	iter := i.iter
-
-	for {
-		key := iKey(iter.Key())
-		if seq, t, ok := key.parseNum(); ok && seq <= i.seq {
-			switch t {
-			case tDel:
-				skip = key.ukey()
-			case tVal:
-				if skip == nil || cmp.Compare(key.ukey(), skip) > 0 {
-					i.valid = true
-					return
-				}
-			}
-		}
-
-		if !iter.Next() {
-			break
-		}
-	}
-
-	i.valid = false
-}
-
-func (i *dbIter) scanPrev() {
-	cmp := i.cmp
-	iter := i.iter
-
-	tt := tDel
-	if iter.Valid() {
-		for {
-			key := iKey(iter.Key())
-			if seq, t, ok := key.parseNum(); ok && seq <= i.seq {
-				if tt != tDel && cmp.Compare(key.ukey(), i.skey) < 0 {
-					break
-				}
-
-				if t == tDel {
-					i.skey = nil
-				} else {
-					i.skey = key.ukey()
-					i.sval = iter.Value()
-				}
-				tt = t
-			}
-
-			if !iter.Prev() {
-				break
-			}
-		}
-	}
-
-	if tt == tDel {
-		i.valid = false
-		i.clear()
-		i.backward = false
-	} else {
-		i.valid = true
+func (i *dbIter) iErr() {
+	if err := i.iter.Error(); err != nil {
+		i.sErr(err)
 	}
 }
 
 func (i *dbIter) Valid() bool {
-	return i.valid
+	return i.err == nil && i.dir > dirEOI
 }
 
 func (i *dbIter) First() bool {
-	if i.released {
+	if i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	i.clear()
-	i.last = false
-	i.backward = false
 	if i.iter.First() {
-		i.scanNext(nil)
-	} else {
-		i.valid = false
+		i.dir = dirSOI
+		return i.next()
 	}
-	i.last = false
-	return i.valid
+	i.dir = dirEOI
+	i.iErr()
+	return false
 }
 
 func (i *dbIter) Last() bool {
-	if i.released {
+	if i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	i.clear()
-	i.last = false
-	i.backward = true
 	if i.iter.Last() {
-		i.scanPrev()
-	} else {
-		i.valid = false
+		return i.prev()
 	}
-	i.last = false
-	return i.valid
+	i.dir = dirSOI
+	i.iErr()
+	return false
 }
 
 func (i *dbIter) Seek(key []byte) bool {
-	if i.released {
+	if i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	i.clear()
-	i.last = false
-	i.backward = false
 	ikey := newIKey(key, i.seq, tSeek)
 	if i.iter.Seek(ikey) {
-		i.scanNext(nil)
-	} else {
-		i.valid = false
+		i.dir = dirSOI
+		return i.next()
 	}
-	i.last = !i.valid
-	return i.valid
+	i.dir = dirEOI
+	i.iErr()
+	return false
 }
 
-func (i *dbIter) Next() bool {
-	if i.released {
-		return false
-	}
-
-	iter := i.iter
-
-	if !i.valid {
-		if !i.last {
-			return i.First()
+func (i *dbIter) next() bool {
+	for {
+		ukey, seq, t, ok := parseIkey(i.iter.Key())
+		if ok {
+			if seq <= i.seq {
+				switch t {
+				case tDel:
+					i.key = append(i.key[:0], ukey...)
+					i.dir = dirForward
+				case tVal:
+					if i.dir == dirSOI || i.cmp.Compare(ukey, i.key) > 0 {
+						i.key = append(i.key[:0], ukey...)
+						i.value = append(i.value[:0], i.iter.Value()...)
+						i.dir = dirForward
+						return true
+					}
+				}
+			}
+		} else if i.strict {
+			i.sErr(errInvalidIkey)
+			return false
 		}
-		return false
-	}
-
-	if i.backward {
-		i.clear()
-		i.backward = false
-		if !iter.Next() {
-			i.valid = false
+		if !i.iter.Next() {
+			i.dir = dirEOI
+			i.iErr()
 			return false
 		}
 	}
+	// Not reached.
+	return false
+}
 
-	ikey := iKey(iter.Key())
-	i.scanNext(ikey.ukey())
-	i.last = !i.valid
-	return i.valid
+func (i *dbIter) Next() bool {
+	if i.dir == dirEOI || i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
+		return false
+	}
+
+	if !i.iter.Next() || (i.dir == dirBackward && !i.iter.Next()) {
+		i.dir = dirEOI
+		i.iErr()
+		return false
+	}
+	return i.next()
+}
+
+func (i *dbIter) prev() bool {
+	i.dir = dirBackward
+	del := true
+	for {
+		ukey, seq, t, ok := parseIkey(i.iter.Key())
+		if ok {
+			if seq <= i.seq {
+				if !del && i.cmp.Compare(ukey, i.key) < 0 {
+					return true
+				}
+				del = (t == tDel)
+				if !del {
+					i.key = append(i.key[:0], ukey...)
+					i.value = append(i.value[:0], i.iter.Value()...)
+				}
+			}
+		} else if i.strict {
+			i.sErr(errInvalidIkey)
+			return false
+		}
+		if !i.iter.Prev() {
+			break
+		}
+	}
+	if del {
+		i.dir = dirSOI
+		i.iErr()
+		return false
+	}
+	return true
 }
 
 func (i *dbIter) Prev() bool {
-	if i.released {
+	if i.dir == dirSOI || i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	cmp := i.cmp
-	iter := i.iter
-
-	if !i.valid {
-		if i.last {
-			return i.Last()
-		}
-		return false
-	}
-
-	if !i.backward {
-		lkey := iKey(iter.Key()).ukey()
-		for {
-			if !iter.Prev() {
-				i.valid = false
+	switch i.dir {
+	case dirEOI:
+		return i.Last()
+	case dirForward:
+		for i.iter.Prev() {
+			ukey, _, _, ok := parseIkey(i.iter.Key())
+			if ok {
+				if i.cmp.Compare(ukey, i.key) < 0 {
+					goto cont
+				}
+			} else if i.strict {
+				i.sErr(errInvalidIkey)
 				return false
 			}
-			ukey := iKey(iter.Key()).ukey()
-			if cmp.Compare(ukey, lkey) < 0 {
-				break
-			}
 		}
-		i.backward = true
+		i.iErr()
+		return false
 	}
 
-	i.scanPrev()
-	return i.valid
+cont:
+	return i.prev()
 }
 
 func (i *dbIter) Key() []byte {
-	if !i.valid {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	var ret []byte
-	if i.backward {
-		ret = i.skey
-	} else {
-		ret = iKey(i.iter.Key()).ukey()
-	}
 	if i.copyBuffer {
-		return dupBytes(ret)
+		return append([]byte{}, i.key...)
 	}
-	return ret
+	return i.key
 }
 
 func (i *dbIter) Value() []byte {
-	if !i.valid {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	var ret []byte
-	if i.backward {
-		ret = i.sval
-	} else {
-		ret = i.iter.Value()
-	}
 	if i.copyBuffer {
-		return dupBytes(ret)
+		return append([]byte{}, i.value...)
 	}
-	return ret
+	return i.value
 }
 
 func (i *dbIter) Release() {
-	if !i.released {
-		i.released = true
-		i.valid = false
-		i.skey = nil
-		i.sval = nil
+	if i.dir != dirReleased {
+		i.dir = dirReleased
+		i.key = nil
+		i.value = nil
 		i.iter.Release()
+		i.iter = nil
 	}
 }
 
 func (i *dbIter) Error() error {
-	if i.released {
-		return errors.New("interator released")
-	}
-	return i.iter.Error()
+	return i.err
 }
