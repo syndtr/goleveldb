@@ -376,7 +376,7 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 
 	value, err = d.get(key, d.getSeq(), ro)
 	if !ro.HasFlag(opt.RFDontCopyBuffer) {
-		value = dupBytes(value)
+		value = append([]byte{}, value...)
 	}
 	return
 }

@@ -20,15 +20,6 @@ type readByteReader interface {
 	io.ByteReader
 }
 
-func dupBytes(b []byte) []byte {
-	if len(b) == 0 {
-		return nil
-	}
-	r := make([]byte, len(b))
-	copy(r, b)
-	return r
-}
-
 func sliceBytes(b []byte) []byte {
 	z, n := binary.Uvarint(b)
 	return b[n : n+int(z)]
