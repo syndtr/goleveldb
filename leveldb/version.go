@@ -61,16 +61,18 @@ func (v *version) release_NB() {
 
 	s := v.s
 
-	tables := make(map[uint64]struct{})
+	tables := make(map[uint64]bool)
 	for _, tt := range v.next.tables {
 		for _, t := range tt {
-			tables[t.file.Num()] = struct{}{}
+			num := t.file.Num()
+			tables[num] = true
 		}
 	}
 
 	for _, tt := range v.tables {
 		for _, t := range tt {
-			if _, ok := tables[t.file.Num()]; !ok {
+			num := t.file.Num()
+			if _, ok := tables[num]; !ok {
 				s.tops.remove(t)
 			}
 		}
