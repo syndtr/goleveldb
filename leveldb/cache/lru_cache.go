@@ -63,7 +63,7 @@ func (c *LRUCache) Purge(fin func()) {
 	c.Lock()
 	top := &c.recent
 	for n := c.recent.rPrev; n != top; {
-		n.state = -2
+		n.state = stRemoved
 		n.rRemove()
 		n.delfin = fin
 		n.evictNB()
@@ -94,7 +94,7 @@ func (c *LRUCache) Zap() {
 func (c *LRUCache) evict() {
 	top := &c.recent
 	for n := c.recent.rPrev; c.size > c.capacity && n != top; {
-		n.state = -1
+		n.state = stEvicted
 		n.rRemove()
 		n.evictNB()
 		c.size -= n.charge
@@ -131,14 +131,14 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 	n, ok := p.table[key]
 	if ok {
 		switch n.state {
-		case -1:
+		case stEvicted:
 			// Insert to recent list.
-			n.state = 0
+			n.state = stEffective
 			n.ref++
 			lru.size += n.charge
 			lru.evict()
 			fallthrough
-		case 0:
+		case stEffective:
 			// Bump to front
 			n.rRemove()
 			n.rInsert(&lru.recent)
@@ -202,15 +202,15 @@ func (p *lruNs) Delete(key uint64, fin func()) bool {
 
 	n.delfin = fin
 	switch n.state {
-	case -2:
+	case stRemoved:
 		lru.Unlock()
 		return false
-	case 0:
+	case stEffective:
 		lru.size -= n.charge
 		n.rRemove()
 		n.evictNB()
 	}
-	n.state = -2
+	n.state = stRemoved
 
 	lru.Unlock()
 	return true
@@ -226,12 +226,12 @@ func (p *lruNs) Purge(fin func()) {
 
 	for _, n := range p.table {
 		n.delfin = fin
-		if n.state == 0 {
+		if n.state == stEffective {
 			lru.size -= n.charge
 			n.rRemove()
 			n.evictNB()
 		}
-		n.state = -2
+		n.state = stRemoved
 	}
 	lru.Unlock()
 }
@@ -245,11 +245,11 @@ func (p *lruNs) Zap() {
 	}
 
 	for _, n := range p.table {
-		if n.state == 0 {
+		if n.state == stEffective {
 			lru.size -= n.charge
 			n.rRemove()
 		}
-		n.state = -2
+		n.state = stRemoved
 		n.execFin()
 	}
 	p.zapped = true
@@ -257,6 +257,14 @@ func (p *lruNs) Zap() {
 	delete(lru.table, p.id)
 	lru.Unlock()
 }
+
+type state int
+
+const (
+	stEffective state = iota
+	stEvicted
+	stRemoved
+)
 
 type lruNode struct {
 	ns *lruNs
@@ -267,10 +275,7 @@ type lruNode struct {
 	value  interface{}
 	charge int
 	ref    int
-	//  0 = effective
-	// -1 = evicted
-	// -2 = removed
-	state  int
+	state  state
 	setfin func()
 	delfin func()
 }
