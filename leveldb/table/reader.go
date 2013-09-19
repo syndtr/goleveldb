@@ -127,6 +127,14 @@ type blockIter struct {
 	err error
 }
 
+func (i *blockIter) sErr(err error) {
+	i.err = err
+	i.key = nil
+	i.value = nil
+	i.prevNode = nil
+	i.prevKeys = nil
+}
+
 func (i *blockIter) First() bool {
 	if i.err != nil {
 		return false
@@ -171,7 +179,7 @@ func (i *blockIter) Seek(key []byte) bool {
 
 	offset, err := i.block.seek(key)
 	if err != nil {
-		i.err = err
+		i.sErr(err)
 		return false
 	}
 	if i.dir == dirEOI {
@@ -198,7 +206,7 @@ func (i *blockIter) Next() bool {
 	}
 	key, value, nShared, n, err := i.block.entry(i.offset)
 	if err != nil {
-		i.err = err
+		i.sErr(err)
 		return false
 	}
 	if n == 0 {
@@ -283,7 +291,7 @@ func (i *blockIter) Prev() bool {
 	for {
 		key, value, nShared, n, err := i.block.entry(offset)
 		if err != nil {
-			i.err = err
+			i.sErr(err)
 			return false
 		}
 		if i.value != nil {
@@ -300,7 +308,7 @@ func (i *blockIter) Prev() bool {
 		// Stop if target offset reached.
 		if offset >= i.offset {
 			if offset != i.offset {
-				i.err = errors.New("leveldb/table: Reader: invalid block (block entries offset not aligned)")
+				i.sErr(errors.New("leveldb/table: Reader: invalid block (block entries offset not aligned)"))
 				return false
 			}
 
