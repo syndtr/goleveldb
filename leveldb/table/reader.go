@@ -107,9 +107,9 @@ type dir int
 const (
 	dirReleased dir = iota - 1
 	dirSOI
+	dirEOI
 	dirBackward
 	dirForward
-	dirEOI
 )
 
 type blockIter struct {
@@ -313,14 +313,14 @@ func (i *blockIter) Prev() bool {
 }
 
 func (i *blockIter) Key() []byte {
-	if i.err != nil {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
 	return append([]byte{}, i.key...)
 }
 
 func (i *blockIter) Value() []byte {
-	if i.err != nil {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
 	return append([]byte{}, i.value...)
