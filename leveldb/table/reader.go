@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	errIterClosed = errors.New("leveldb/table: Reader: iterator closed")
+	errIterReleased = errors.New("leveldb/table: Reader: iterator released")
 )
 
 type block struct {
@@ -139,7 +139,7 @@ func (i *blockIter) First() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterClosed
+		i.err = errIterReleased
 		return false
 	}
 
@@ -156,7 +156,7 @@ func (i *blockIter) Last() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterClosed
+		i.err = errIterReleased
 		return false
 	}
 
@@ -173,7 +173,7 @@ func (i *blockIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterClosed
+		i.err = errIterReleased
 		return false
 	}
 
@@ -196,7 +196,7 @@ func (i *blockIter) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterClosed
+		i.err = errIterReleased
 		return false
 	}
 
@@ -227,7 +227,7 @@ func (i *blockIter) Prev() bool {
 	if i.dir == dirSOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterClosed
+		i.err = errIterReleased
 		return false
 	}
 
