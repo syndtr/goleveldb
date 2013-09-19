@@ -98,8 +98,19 @@ func (b *block) newIterator(cache util.Releaser) *blockIter {
 		cache: cache,
 		// Valid key should never be nil.
 		key: make([]byte, 0),
+		dir: dirSOI,
 	}
 }
+
+type dir int
+
+const (
+	dirReleased dir = iota - 1
+	dirSOI
+	dirBackward
+	dirForward
+	dirEOI
+)
 
 type blockIter struct {
 	block           *block
@@ -112,53 +123,48 @@ type blockIter struct {
 	prevKeys     []byte
 	restartIndex int
 	// Iterator direction.
-	// -1 = Released
-	// 0 = SOI
-	// 1 = Left
-	// 2 = Right
-	// 3 = EOI
-	dir int
+	dir dir
 	err error
 }
 
 func (i *blockIter) First() bool {
 	if i.err != nil {
 		return false
-	} else if i.dir == -1 {
+	} else if i.dir == dirReleased {
 		i.err = errIterClosed
 		return false
 	}
 
-	if i.dir == 1 {
+	if i.dir == dirBackward {
 		i.prevNode = i.prevNode[:0]
 		i.prevKeys = i.prevKeys[:0]
 	}
 	i.offset = 0
-	i.dir = 0
+	i.dir = dirSOI
 	return i.Next()
 }
 
 func (i *blockIter) Last() bool {
 	if i.err != nil {
 		return false
-	} else if i.dir == -1 {
+	} else if i.dir == dirReleased {
 		i.err = errIterClosed
 		return false
 	}
 
-	if i.dir == 1 {
+	if i.dir == dirBackward {
 		i.prevNode = i.prevNode[:0]
 		i.prevKeys = i.prevKeys[:0]
 	}
 	i.offset = i.block.restartsOffset
-	i.dir = 3
+	i.dir = dirEOI
 	return i.Prev()
 }
 
 func (i *blockIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
-	} else if i.dir == -1 {
+	} else if i.dir == dirReleased {
 		i.err = errIterClosed
 		return false
 	}
@@ -168,36 +174,35 @@ func (i *blockIter) Seek(key []byte) bool {
 		i.err = err
 		return false
 	}
-	if i.dir == 3 {
-		i.dir = 2
+	if i.dir == dirEOI {
+		i.dir = dirForward
 	}
 	i.offset = offset
 	cmp := i.block.cmp
 	for i.Next() && cmp.Compare(i.key, key) < 0 {
 	}
-	return i.err == nil && i.dir == 2
+	return i.err == nil && i.dir == dirForward
 }
 
 func (i *blockIter) Next() bool {
-	if i.dir == 3 || i.err != nil {
+	if i.dir == dirEOI || i.err != nil {
 		return false
-	} else if i.dir == -1 {
+	} else if i.dir == dirReleased {
 		i.err = errIterClosed
 		return false
 	}
 
-	if i.dir == 1 {
+	if i.dir == dirBackward {
 		i.prevNode = i.prevNode[:0]
 		i.prevKeys = i.prevKeys[:0]
 	}
-	i.dir = 2
 	key, value, nShared, n, err := i.block.entry(i.offset)
 	if err != nil {
 		i.err = err
 		return false
 	}
 	if n == 0 {
-		i.dir = 3
+		i.dir = dirEOI
 		i.key = i.key[:0]
 		i.value = i.value[:0]
 		return false
@@ -206,39 +211,40 @@ func (i *blockIter) Next() bool {
 	i.value = value
 	i.prevOffset = i.offset
 	i.offset += n
+	i.dir = dirForward
 	return true
 }
 
 func (i *blockIter) Prev() bool {
-	if i.dir == 0 || i.err != nil {
+	if i.dir == dirSOI || i.err != nil {
 		return false
-	} else if i.dir == -1 {
+	} else if i.dir == dirReleased {
 		i.err = errIterClosed
 		return false
 	}
 
 	var restartIndex int
-	if i.dir == 2 {
+	if i.dir == dirForward {
 		// Change direction.
 		i.offset = i.prevOffset
 		if i.offset == 0 {
-			i.dir = 0
+			i.dir = dirSOI
 			i.key = i.key[:0]
 			i.value = i.value[:0]
 			return false
 		}
 		restartIndex = i.block.restartIndex(0, i.offset)
-		i.dir = 1
-	} else if i.dir == 3 {
+		i.dir = dirBackward
+	} else if i.dir == dirEOI {
 		// At the end of iterator.
 		restartIndex = i.block.restartsLen - 1
-		i.dir = 1
+		i.dir = dirBackward
 	} else if len(i.prevNode) == 1 {
 		// This is the end of a restart range.
 		i.offset = i.prevNode[0]
 		i.prevNode = i.prevNode[:0]
 		if i.restartIndex == 0 {
-			i.dir = 0
+			i.dir = dirSOI
 			i.key = i.key[:0]
 			i.value = i.value[:0]
 			return false
@@ -268,7 +274,7 @@ func (i *blockIter) Prev() bool {
 	if offset == i.offset {
 		restartIndex--
 		if restartIndex < 0 {
-			i.dir = 0
+			i.dir = dirSOI
 			return false
 		}
 		offset = i.block.restartOffset(restartIndex)
@@ -325,7 +331,7 @@ func (i *blockIter) Release() {
 	i.prevKeys = nil
 	i.key = nil
 	i.value = nil
-	i.dir = -1
+	i.dir = dirReleased
 	if i.cache != nil {
 		i.cache.Release()
 		i.cache = nil
@@ -337,13 +343,13 @@ func (i *blockIter) Release() {
 }
 
 func (i *blockIter) SetReleaser(releaser util.Releaser) {
-	if i.dir > -1 {
+	if i.dir > dirReleased {
 		i.releaser = releaser
 	}
 }
 
 func (i *blockIter) Valid() bool {
-	return i.err == nil && (i.dir == 1 || i.dir == 2)
+	return i.err == nil && (i.dir == dirBackward || i.dir == dirForward)
 }
 
 func (i *blockIter) Error() error {
