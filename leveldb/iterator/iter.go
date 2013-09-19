@@ -8,57 +8,82 @@
 // contents of a database.
 package iterator
 
-type IteratorSeeker interface {
-	// An iterator is either positioned at a key/value pair, or
-	// not valid.  This method returns true if the iterator is valid.
-	Valid() bool
+import (
+	"github.com/syndtr/goleveldb/leveldb/util"
+)
 
-	// Position at the first key in the source.  The iterator is Valid()
-	// after this call if the source is not empty.
-	First() bool
-
-	// Position at the last key in the source.  The iterator is
-	// Valid() after this call if the source is not empty.
-	Last() bool
-
-	// Position at the first key in the source that at or past given 'key'
-	// The iterator is Valid() after this call if the source contains
-	// an entry that comes at or past given 'key'.
-	Seek(key []byte) bool
-
-	// Moves to the next entry in the source.  After this call, Valid() is
-	// true if the iterator was not positioned at the last entry in the source.
-	// REQUIRES: Valid()
-	Next() bool
-
-	// Moves to the previous entry in the source.  After this call, Valid() is
-	// true if the iterator was not positioned at the first entry in source.
-	// REQUIRES: Valid()
-	Prev() bool
-
-	// Release any resources associated with the iterator. It is valid to
-	// call Release multiple times. Other method should not be called after
-	// the iterator has been released.
-	Release()
-
-	// If an error has occurred, return it.  Else return nil.
-	Error() error
-}
-
+// Iterator iterates over a DB's key/value pairs in key order.
+//
+// When encouter an error any 'seeks method' will return false and will
+// yield no key/value pairs. The error can be queried by calling
+// IteratorSeeker.Error method. Calling Release is still necessary.
+//
+// An iterator must be released after use, but it is not necessary to read
+// an iterator until exhaustion.
+//
+// An iterator is not necessarily goroutine-safe, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
 type Iterator interface {
 	IteratorSeeker
 
-	// Return the key for the current entry.  The underlying storage for
-	// the returned slice is valid only until the next modification of
-	// the iterator.
-	// REQUIRES: Valid()
+	// Key returns the key of the current key/value pair, or nil if done.
+	// The caller should not modify the contents of the returned slice, and
+	// its contents may change on the next call to any method of IteratorSeeker.
 	Key() []byte
 
-	// Return the value for the current entry.  The underlying storage for
-	// the returned slice is valid only until the next modification of
-	// the iterator.
-	// REQUIRES: !AtEnd() && !AtStart()
+	// Value returns the key of the current key/value pair, or nil if done.
+	// The caller should not modify the contents of the returned slice, and
+	// its contents may change on the next call to any method of IteratorSeeker.
 	Value() []byte
+}
+
+// IteratorSeeker is the interface that wraps 'iterator seeker methods'.
+// Iterator seeker provides functionality to manipulate an iterator and
+// query its status.
+type IteratorSeeker interface {
+	// util.Releaser is the interface that wraps basic Release method.
+	// When called Release will releases any resources associated with the
+	// iterator.
+	util.Releaser
+
+	// util.ReleaseSetter is the interface that wraps the basic SetReleaser
+	// method.
+	// TODO: Implement this.
+	// util.ReleaseSetter
+
+	// TODO: Remove this when ready.
+	Valid() bool
+
+	// First moves the iterator to the first key/value pair. If the iterator
+	// only contains one key/value pair then First and Last whould moves
+	// to the same key/value pair.
+	// It returns whether such pair exist.
+	First() bool
+
+	// Last moves the iterator to the last key/value pair. If the iterator
+	// only contains one key/value pair then First and Last whould moves
+	// to the same key/value pair.
+	// It returns whether such pair exist.
+	Last() bool
+
+	// Seek moves the iterator to the first key/value pair whose key is greater
+	// than or equal to the given key.
+	// It returns whether such pair exist.
+	//
+	// It is safe to modify the contents of the argument after Seek returns.
+	Seek(key []byte) bool
+
+	// Next moves the iterator to the next key/value pair.
+	// It returns whether the iterator is exhausted.
+	Next() bool
+
+	// Prev moves the iterator to the previous key/value pair.
+	// It returns whether the iterator is exhausted.
+	Prev() bool
+
+	// Error returns any accumulated error. Exhausting all the key/value pairs
+	// is not considered to be an error.
+	Error() error
 }
 
 type EmptyIterator struct {
