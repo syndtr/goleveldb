@@ -389,7 +389,7 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 // iterator instance concurrently without external synchronization.
 func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.rok(); err != nil {
-		return &iterator.EmptyIterator{err}
+		return iterator.NewEmptyIterator(err)
 	}
 
 	p := d.newSnapshot()

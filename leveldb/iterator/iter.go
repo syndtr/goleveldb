@@ -9,6 +9,8 @@
 package iterator
 
 import (
+	"errors"
+
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -86,17 +88,44 @@ type IteratorSeeker interface {
 	Error() error
 }
 
-type EmptyIterator struct {
-	Err error
+type emptyIterator struct {
+	releaser util.Releaser
+	released bool
+	err      error
 }
 
-func (*EmptyIterator) Valid() bool          { return false }
-func (*EmptyIterator) First() bool          { return false }
-func (*EmptyIterator) Last() bool           { return false }
-func (*EmptyIterator) Seek(key []byte) bool { return false }
-func (*EmptyIterator) Next() bool           { return false }
-func (*EmptyIterator) Prev() bool           { return false }
-func (*EmptyIterator) Key() []byte          { return nil }
-func (*EmptyIterator) Value() []byte        { return nil }
-func (*EmptyIterator) Release()             {}
-func (i *EmptyIterator) Error() error       { return i.Err }
+func (i *emptyIterator) rErr() {
+	if i.err == nil && i.released {
+		i.err = errors.New("leveldb/iterator: iterator released")
+	}
+}
+
+func (i *emptyIterator) Release() {
+	if i.releaser != nil {
+		i.releaser.Release()
+		i.releaser = nil
+	}
+	i.released = true
+}
+
+func (i *emptyIterator) SetReleaser(releaser util.Releaser) {
+	if !i.released {
+		i.releaser = releaser
+	}
+}
+
+func (*emptyIterator) Valid() bool            { return false }
+func (i *emptyIterator) First() bool          { i.rErr(); return false }
+func (i *emptyIterator) Last() bool           { i.rErr(); return false }
+func (i *emptyIterator) Seek(key []byte) bool { i.rErr(); return false }
+func (i *emptyIterator) Next() bool           { i.rErr(); return false }
+func (i *emptyIterator) Prev() bool           { i.rErr(); return false }
+func (*emptyIterator) Key() []byte            { return nil }
+func (*emptyIterator) Value() []byte          { return nil }
+func (i *emptyIterator) Error() error         { return i.err }
+
+// NewEmptyIterator creates an empty iterator. The err parameter can be
+// nil, but if not nil the given err will be returned by Error method.
+func NewEmptyIterator(err error) Iterator {
+	return &emptyIterator{err: err}
+}

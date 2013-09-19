@@ -398,7 +398,7 @@ type indexIter struct {
 func (i *indexIter) Get() (iterator.Iterator, error) {
 	dataBH, n := decodeBlockHandle(i.Value())
 	if n == 0 {
-		return &iterator.EmptyIterator{errors.New("leveldb/table: Reader: invalid table (bad data block handle)")}, nil
+		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)")), nil
 	}
 	iter := i.tableReader.getDataIter(dataBH, i.verifyChecksums, i.fillCache)
 	return iter, nil
@@ -503,7 +503,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 			return
 		})
 		if err != nil {
-			return &iterator.EmptyIterator{err}
+			return iterator.NewEmptyIterator(err)
 		}
 		if ok {
 			iter := cache.Value().(*block).newIterator(cache)
@@ -512,7 +512,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 	}
 	dataBlock, err := r.readBlock(dataBH, verifyChecksums)
 	if err != nil {
-		return &iterator.EmptyIterator{err}
+		return iterator.NewEmptyIterator(err)
 	}
 	iter := dataBlock.newIterator(nil)
 	return iter
@@ -524,7 +524,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 // when not used.
 func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 	if r.err != nil {
-		return &iterator.EmptyIterator{r.err}
+		return iterator.NewEmptyIterator(r.err)
 	}
 
 	index := &indexIter{

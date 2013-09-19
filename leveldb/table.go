@@ -225,7 +225,7 @@ func (i *tFilesIter) Prev() bool {
 
 func (i *tFilesIter) Get() (iterator.Iterator, error) {
 	if i.pos < 0 || i.pos >= len(i.tt) {
-		return &iterator.EmptyIterator{}, nil
+		return iterator.NewEmptyIterator(nil), nil
 	}
 	return i.tops.newIterator(i.tt[i.pos], i.ro), nil
 }
@@ -344,7 +344,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 	c, err := t.lookup(f)
 	if err != nil {
-		return &iterator.EmptyIterator{err}
+		return iterator.NewEmptyIterator(err)
 	}
 	it := c.Value().(*table.Reader).NewIterator(ro)
 	p, ok := it.(*iterator.IndexedIterator)

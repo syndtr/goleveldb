@@ -129,12 +129,12 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	db := p.db
 	if err := db.rok(); err != nil {
-		return &iterator.EmptyIterator{err}
+		return iterator.NewEmptyIterator(err)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.released {
-		return &iterator.EmptyIterator{errSnapshotReleased}
+		return iterator.NewEmptyIterator(errSnapshotReleased)
 	}
 	return db.newIterator(p.elem.seq, ro)
 }
