@@ -50,8 +50,7 @@ type IteratorSeeker interface {
 
 	// util.ReleaseSetter is the interface that wraps the basic SetReleaser
 	// method.
-	// TODO: Implement this.
-	// util.ReleaseSetter
+	util.ReleaseSetter
 
 	// TODO: Remove this when ready.
 	Valid() bool

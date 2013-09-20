@@ -229,6 +229,7 @@ func (p *dbBench) seeks() {
 	b := p.b
 
 	iter := p.newIter()
+	defer iter.Release()
 	b.ResetTimer()
 	for i := range p.keys {
 		if !iter.Seek(p.keys[i]) {
@@ -338,6 +339,7 @@ func BenchmarkDBRead(b *testing.B) {
 	b.ResetTimer()
 	for iter.Next() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()
@@ -352,6 +354,7 @@ func BenchmarkDBReadGC(b *testing.B) {
 	b.ResetTimer()
 	for iter.Next() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()
@@ -368,6 +371,7 @@ func BenchmarkDBReadUncompressed(b *testing.B) {
 	b.ResetTimer()
 	for iter.Next() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()
@@ -384,6 +388,7 @@ func BenchmarkDBReadTable(b *testing.B) {
 	b.ResetTimer()
 	for iter.Next() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()
@@ -400,6 +405,7 @@ func BenchmarkDBReadReverse(b *testing.B) {
 	iter.Last()
 	for iter.Prev() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()
@@ -417,6 +423,7 @@ func BenchmarkDBReadReverseTable(b *testing.B) {
 	iter.Last()
 	for iter.Prev() {
 	}
+	iter.Release()
 	b.StopTimer()
 	b.SetBytes(116)
 	p.close()

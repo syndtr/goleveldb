@@ -8,10 +8,12 @@ package leveldb
 
 import (
 	"errors"
+	"runtime"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var (
@@ -43,6 +45,7 @@ func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
 		strict:     db.s.o.HasFlag(opt.OFParanoidCheck),
 		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
 	}
+	runtime.SetFinalizer(iter, (*dbIter).Release)
 	return iter
 }
 
@@ -64,21 +67,22 @@ type dbIter struct {
 	strict     bool
 	copyBuffer bool
 
-	dir   dir
-	key   []byte
-	value []byte
-	err   error
+	dir      dir
+	key      []byte
+	value    []byte
+	err      error
+	releaser util.Releaser
 }
 
-func (i *dbIter) sErr(err error) {
+func (i *dbIter) setErr(err error) {
 	i.err = err
 	i.key = nil
 	i.value = nil
 }
 
-func (i *dbIter) iErr() {
+func (i *dbIter) iterErr() {
 	if err := i.iter.Error(); err != nil {
-		i.sErr(err)
+		i.setErr(err)
 	}
 }
 
@@ -99,7 +103,7 @@ func (i *dbIter) First() bool {
 		return i.next()
 	}
 	i.dir = dirEOI
-	i.iErr()
+	i.iterErr()
 	return false
 }
 
@@ -115,7 +119,7 @@ func (i *dbIter) Last() bool {
 		return i.prev()
 	}
 	i.dir = dirSOI
-	i.iErr()
+	i.iterErr()
 	return false
 }
 
@@ -133,7 +137,7 @@ func (i *dbIter) Seek(key []byte) bool {
 		return i.next()
 	}
 	i.dir = dirEOI
-	i.iErr()
+	i.iterErr()
 	return false
 }
 
@@ -156,12 +160,12 @@ func (i *dbIter) next() bool {
 				}
 			}
 		} else if i.strict {
-			i.sErr(errInvalidIkey)
+			i.setErr(errInvalidIkey)
 			return false
 		}
 		if !i.iter.Next() {
 			i.dir = dirEOI
-			i.iErr()
+			i.iterErr()
 			return false
 		}
 	}
@@ -179,7 +183,7 @@ func (i *dbIter) Next() bool {
 
 	if !i.iter.Next() || (i.dir == dirBackward && !i.iter.Next()) {
 		i.dir = dirEOI
-		i.iErr()
+		i.iterErr()
 		return false
 	}
 	return i.next()
@@ -202,7 +206,7 @@ func (i *dbIter) prev() bool {
 				}
 			}
 		} else if i.strict {
-			i.sErr(errInvalidIkey)
+			i.setErr(errInvalidIkey)
 			return false
 		}
 		if !i.iter.Prev() {
@@ -211,7 +215,7 @@ func (i *dbIter) prev() bool {
 	}
 	if del {
 		i.dir = dirSOI
-		i.iErr()
+		i.iterErr()
 		return false
 	}
 	return true
@@ -236,11 +240,11 @@ func (i *dbIter) Prev() bool {
 					goto cont
 				}
 			} else if i.strict {
-				i.sErr(errInvalidIkey)
+				i.setErr(errInvalidIkey)
 				return false
 			}
 		}
-		i.iErr()
+		i.iterErr()
 		return false
 	}
 
@@ -270,11 +274,20 @@ func (i *dbIter) Value() []byte {
 
 func (i *dbIter) Release() {
 	if i.dir != dirReleased {
+		// Clear finalizer.
+		runtime.SetFinalizer(i, nil)
+
 		i.dir = dirReleased
 		i.key = nil
 		i.value = nil
 		i.iter.Release()
 		i.iter = nil
+	}
+}
+
+func (i *dbIter) SetReleaser(releaser util.Releaser) {
+	if i.dir != dirReleased {
+		i.releaser = releaser
 	}
 }
 

@@ -244,6 +244,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 		stats.startTimer()
 		iter := c.newIterator()
+		defer iter.Release()
 		for i := 0; iter.Next(); i++ {
 			// Skip until last state
 			if i < snapIter {

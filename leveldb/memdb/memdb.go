@@ -14,6 +14,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const tMaxHeight = 12
@@ -262,6 +263,7 @@ func (p *DB) randHeight() (h int32) {
 }
 
 type Iterator struct {
+	util.BasicReleaser
 	p      *DB
 	node   *mNode
 	onLast bool
@@ -323,5 +325,4 @@ func (i *Iterator) Value() []byte {
 	return i.node.value
 }
 
-func (i *Iterator) Release()     {}
 func (i *Iterator) Error() error { return nil }

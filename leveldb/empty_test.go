@@ -54,5 +54,6 @@ func TestIter_Empty(t *testing.T) {
 		if iter.Last() {
 			t.Error(name + ": Last() return true")
 		}
+		iter.Release()
 	}
 }

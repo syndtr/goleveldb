@@ -6,11 +6,15 @@
 
 package iterator
 
-import "github.com/syndtr/goleveldb/leveldb/comparer"
+import (
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/util"
+)
 
 // MergedIterator represent a merged iterators. MergedIterator can be used
 // to merge multiple iterators into one.
 type MergedIterator struct {
+	util.BasicReleaser
 	cmp   comparer.Comparer
 	iters []Iterator
 
@@ -22,7 +26,10 @@ type MergedIterator struct {
 
 // NewMergedIterator create new initialized merged iterators.
 func NewMergedIterator(iters []Iterator, cmp comparer.Comparer) *MergedIterator {
-	return &MergedIterator{iters: iters, cmp: cmp}
+	return &MergedIterator{
+		iters: iters,
+		cmp:   cmp,
+	}
 }
 
 func (i *MergedIterator) Valid() bool {

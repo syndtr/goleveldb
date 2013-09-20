@@ -166,18 +166,23 @@ func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 		if iter.First() {
 			t.min = iter.Key()
 		} else if err := iter.Error(); err != nil {
+			iter.Release()
 			return nil, err
 		} else {
+			iter.Release()
 			continue
 		}
 		// max ikey
 		if iter.Last() {
 			t.max = iter.Key()
 		} else if err := iter.Error(); err != nil {
+			iter.Release()
 			return nil, err
 		} else {
+			iter.Release()
 			continue
 		}
+		iter.Release()
 
 		// add table to level 0
 		rec.addTableFile(0, t)
@@ -198,6 +203,7 @@ func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 				lseq = seq
 			}
 		}
+		iter.Release()
 		rec.setSeq(lseq)
 	}
 
@@ -393,11 +399,8 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	}
 
 	p := d.newSnapshot()
-	i := p.NewIterator(ro)
-	if _, ok := i.(*dbIter); !ok {
-		p.Release()
-	}
-	return i
+	defer p.Release()
+	return p.NewIterator(ro)
 }
 
 // GetSnapshot return a handle to the current DB state.

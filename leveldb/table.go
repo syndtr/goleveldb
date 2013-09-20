@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"runtime"
 	"sort"
 	"sync/atomic"
 
@@ -347,22 +346,31 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	return
 }
 
-func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
-	c, err := t.lookup(f)
-	if err != nil {
-		return iterator.NewEmptyIterator(err)
-	}
-	it := c.Value().(*table.Reader).NewIterator(ro)
-	p, ok := it.(*iterator.IndexedIterator)
-	if ok {
-		runtime.SetFinalizer(p, func(x *iterator.IndexedIterator) {
-			x.Release()
-			c.Release()
-		})
-	} else {
-		c.Release()
-	}
-	return it
+func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
+	num := f.file.Num()
+	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
+		var r storage.Reader
+		r, err = f.file.Open()
+		if err != nil {
+			return
+		}
+
+		o := t.s.o
+
+		var cacheNS cache.Namespace
+		if blockCache := o.GetBlockCache(); blockCache != nil {
+			cacheNS = blockCache.GetNamespace(num)
+		}
+
+		ok = true
+		value = table.NewReader(r, int64(f.size), cacheNS, o)
+		charge = 1
+		fin = func() {
+			r.Close()
+		}
+		return
+	})
+	return
 }
 
 func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
@@ -385,58 +393,32 @@ func (t *tOps) getApproximateOffset(f *tFile, key []byte) (offset uint64, err er
 	return
 }
 
+func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
+	c, err := t.lookup(f)
+	if err != nil {
+		return iterator.NewEmptyIterator(err)
+	}
+	iter := c.Value().(*table.Reader).NewIterator(ro)
+	iter.SetReleaser(c)
+	return iter
+}
+
 func (t *tOps) remove(f *tFile) {
 	num := f.file.Num()
-
-	var ns cache.Namespace
-	bc := t.s.o.GetBlockCache()
-	if bc != nil {
-		ns = bc.GetNamespace(num)
+	var bCacheNS cache.Namespace
+	if blockCache := t.s.o.GetBlockCache(); blockCache != nil {
+		bCacheNS = blockCache.GetNamespace(num)
 	}
-
 	t.cachens.Delete(num, func() {
 		f.file.Remove()
-		if ns != nil {
-			ns.Zap()
+		if bCacheNS != nil {
+			bCacheNS.Zap()
 		}
 	})
 }
 
 func (t *tOps) zapCache() {
 	t.cache.Zap()
-}
-
-func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
-	num := f.file.Num()
-
-	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
-		var r storage.Reader
-		r, err = f.file.Open()
-		if err != nil {
-			return
-		}
-
-		o := t.s.o
-
-		var ns cache.Namespace
-		bc := o.GetBlockCache()
-		if bc != nil {
-			ns = bc.GetNamespace(num)
-		}
-
-		p := table.NewReader(r, int64(f.size), ns, t.s.o)
-
-		ok = true
-		value = p
-		charge = 1
-		fin = func() {
-			r.Close()
-		}
-
-		return
-	})
-
-	return
 }
 
 type tWriter struct {

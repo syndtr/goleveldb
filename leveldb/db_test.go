@@ -274,6 +274,7 @@ func (h *dbHarness) getKeyVal(want string) {
 	for iter.Next() {
 		res += fmt.Sprintf("(%s->%s)", string(iter.Key()), string(iter.Value()))
 	}
+	iter.Release()
 
 	if res != want {
 		t.Errorf("GetKeyVal: invalid key/value pair, got=%q want=%q", res, want)
@@ -710,6 +711,7 @@ func TestDb_IterMultiWithDelete(t *testing.T) {
 		testKeyVal(t, iter, "c->vc")
 		iter.Prev()
 		testKeyVal(t, iter, "a->va")
+		iter.Release()
 
 		h.compactMem()
 
@@ -718,6 +720,7 @@ func TestDb_IterMultiWithDelete(t *testing.T) {
 		testKeyVal(t, iter, "c->vc")
 		iter.Prev()
 		testKeyVal(t, iter, "a->va")
+		iter.Release()
 	})
 }
 
@@ -741,6 +744,7 @@ func TestDb_IteratorPinsRef(t *testing.T) {
 	if iter.Next() {
 		t.Errorf("expect eof")
 	}
+	iter.Release()
 
 	h.close()
 }
@@ -1650,6 +1654,7 @@ func TestDb_Concurrent2(t *testing.T) {
 				if err := it.Error(); err != nil {
 					t.Errorf("iter %d: Got error: %v", i, err)
 				}
+				it.Release()
 				wg.Done()
 			}(i)
 		}
@@ -1675,6 +1680,7 @@ func TestDb_ModifyingBuffer(t *testing.T) {
 		key, value := iter.Key(), iter.Value()
 		copy(key, []byte("bar"))
 		copy(value, []byte("olleh"))
+		iter.Release()
 	}
 
 	modifyBuffer()

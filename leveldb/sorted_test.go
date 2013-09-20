@@ -293,7 +293,6 @@ func (h *stHarness) test(name string, c stConstructor) {
 
 func (h *stHarness) testScan(name string, c stConstructor) {
 	it := c.newIterator()
-
 	for i := 0; i < 3; i++ {
 		if it.Prev() {
 			h.t.Errorf(name+": SortedTest: Scan: Backward: expecting eof (it=%d)", i)
@@ -301,8 +300,10 @@ func (h *stHarness) testScan(name string, c stConstructor) {
 			h.t.Errorf(name+": SortedTest: Scan: Backward: Valid != false (it=%d)", i)
 		}
 	}
+	it.Release()
 
 	it = c.newIterator()
+	defer it.Release()
 	var first, last bool
 
 first:
@@ -406,6 +407,7 @@ last:
 
 func (h *stHarness) testSeek(name string, c stConstructor) {
 	it := c.newIterator()
+	defer it.Release()
 
 	for i, key := range h.keys {
 		if !it.Seek([]byte(key)) {
