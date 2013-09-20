@@ -396,7 +396,11 @@ type indexIter struct {
 }
 
 func (i *indexIter) Get() iterator.Iterator {
-	dataBH, n := decodeBlockHandle(i.Value())
+	value := i.Value()
+	if value == nil {
+		return nil
+	}
+	dataBH, n := decodeBlockHandle(value)
 	if n == 0 {
 		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)"))
 	}
