@@ -223,11 +223,11 @@ func (i *tFilesIter) Prev() bool {
 	return true
 }
 
-func (i *tFilesIter) Get() (iterator.Iterator, error) {
+func (i *tFilesIter) Get() iterator.Iterator {
 	if i.pos < 0 || i.pos >= len(i.tt) {
-		return iterator.NewEmptyIterator(nil), nil
+		return iterator.NewEmptyIterator(nil)
 	}
-	return i.tops.newIterator(i.tt[i.pos], i.ro), nil
+	return i.tops.newIterator(i.tt[i.pos], i.ro)
 }
 
 func (i *tFilesIter) Release() {}

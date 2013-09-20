@@ -6,26 +6,62 @@
 
 package iterator
 
-// IteratorIndexer is the interface that group IteratorSeeker and basic Get
-// method. An index of indexed iterator need to implement this interface.
+import (
+	"github.com/syndtr/goleveldb/leveldb/util"
+)
+
+// IteratorIndexer is the interface that wraps IteratorSeeker and basic Get
+// method. IteratorIndexer provides index for indexed iterator.
 type IteratorIndexer interface {
 	IteratorSeeker
 
-	// Return iterator for current entry.
-	Get() (Iterator, error)
+	// Get returns a new data iterator for the current position, or nil if
+	// done.
+	Get() Iterator
 }
 
-// IndexedIterator represent an indexed interator. IndexedIterator can be used
-// to access an indexed data, which the index is a pointer to actual data.
 type IndexedIterator struct {
-	index IteratorIndexer
-	data  Iterator
-	err   error
+	util.BasicReleaser
+	index  IteratorIndexer
+	strict bool
+
+	data Iterator
+	err  error
 }
 
-// NewIndexedIterator create new initialized indexed iterator.
-func NewIndexedIterator(index IteratorIndexer) *IndexedIterator {
-	return &IndexedIterator{index: index}
+// NewIndexedIterator returns an indexed iterator. An index is iterator
+// that returns another iterator, a data iterator. A data iterator is the
+// iterator that contains actual key/value pairs.
+//
+// If strict is true then error yield by data iterator will halt the indexed
+// iterator, on contrary if strict is false then the indexed iterator will
+// ignore those error and move on to the next index.
+func NewIndexedIterator(index IteratorIndexer, strict bool) *IndexedIterator {
+	return &IndexedIterator{index: index, strict: strict}
+}
+
+func (i *IndexedIterator) setData() {
+	if i.data != nil {
+		i.data.Release()
+	}
+	i.data = i.index.Get()
+}
+
+func (i *IndexedIterator) clearData() {
+	if i.data != nil {
+		i.data.Release()
+	}
+	i.data = nil
+}
+
+func (i *IndexedIterator) dataErr() bool {
+	if i.strict {
+		if err := i.data.Error(); err != nil {
+			i.err = err
+			return true
+		}
+	}
+	return false
 }
 
 func (i *IndexedIterator) Valid() bool {
@@ -37,10 +73,11 @@ func (i *IndexedIterator) First() bool {
 		return false
 	}
 
-	if !i.index.First() || !i.setData() {
-		i.data = nil
+	if !i.index.First() {
+		i.clearData()
 		return false
 	}
+	i.setData()
 	return i.Next()
 }
 
@@ -49,13 +86,16 @@ func (i *IndexedIterator) Last() bool {
 		return false
 	}
 
-	if !i.index.Last() || !i.setData() {
-		i.data = nil
+	if !i.index.Last() {
+		i.clearData()
 		return false
 	}
+	i.setData()
 	if !i.data.Last() {
-		// empty data block, try prev block
-		i.data = nil
+		if i.dataErr() {
+			return false
+		}
+		i.clearData()
 		return i.Prev()
 	}
 	return true
@@ -66,11 +106,16 @@ func (i *IndexedIterator) Seek(key []byte) bool {
 		return false
 	}
 
-	if !i.index.Seek(key) || !i.setData() {
-		i.data = nil
+	if !i.index.Seek(key) {
+		i.clearData()
 		return false
 	}
+	i.setData()
 	if !i.data.Seek(key) {
+		if i.dataErr() {
+			return false
+		}
+		i.clearData()
 		return i.Next()
 	}
 	return true
@@ -81,11 +126,18 @@ func (i *IndexedIterator) Next() bool {
 		return false
 	}
 
-	if i.data == nil || !i.data.Next() {
-		if !i.index.Next() || !i.setData() {
-			i.data = nil
+	switch {
+	case i.data != nil && !i.data.Next():
+		if i.dataErr() {
 			return false
 		}
+		i.clearData()
+		fallthrough
+	case i.data == nil:
+		if !i.index.Next() {
+			return false
+		}
+		i.setData()
 		return i.Next()
 	}
 	return true
@@ -96,17 +148,25 @@ func (i *IndexedIterator) Prev() bool {
 		return false
 	}
 
-	if i.data == nil || !i.data.Prev() {
-		if !i.index.Prev() || !i.setData() {
-			i.data = nil
+	switch {
+	case i.data != nil && !i.data.Prev():
+		if i.dataErr() {
 			return false
 		}
+		i.clearData()
+		fallthrough
+	case i.data == nil:
+		if !i.index.Prev() {
+			return false
+		}
+		i.setData()
 		if !i.data.Last() {
-			// empty data block, try prev block
-			i.data = nil
+			if i.dataErr() {
+				return false
+			}
+			i.clearData()
 			return i.Prev()
 		}
-		return true
 	}
 	return true
 }
@@ -126,28 +186,17 @@ func (i *IndexedIterator) Value() []byte {
 }
 
 func (i *IndexedIterator) Release() {
-	if i.data != nil {
-		i.data.Release()
-		i.data = nil
-	}
+	i.clearData()
 	i.index.Release()
+	i.BasicReleaser.Release()
 }
 
-func (i *IndexedIterator) Error() (err error) {
+func (i *IndexedIterator) Error() error {
 	if i.err != nil {
-		err = i.err
-	} else if i.index.Error() != nil {
-		err = i.index.Error()
-	} else if i.data != nil && i.data.Error() != nil {
-		err = i.data.Error()
+		return i.err
 	}
-	return
-}
-
-func (i *IndexedIterator) setData() bool {
-	if i.data != nil {
-		i.data.Release()
+	if err := i.index.Error(); err != nil {
+		return err
 	}
-	i.data, i.err = i.index.Get()
-	return i.err == nil
+	return nil
 }

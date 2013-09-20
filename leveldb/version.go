@@ -189,7 +189,7 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 			continue
 		}
 
-		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro))
+		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), s.o.HasFlag(opt.OFParanoidCheck))
 		its = append(its, it)
 	}
 

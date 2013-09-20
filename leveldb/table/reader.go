@@ -395,13 +395,13 @@ type indexIter struct {
 	fillCache       bool
 }
 
-func (i *indexIter) Get() (iterator.Iterator, error) {
+func (i *indexIter) Get() iterator.Iterator {
 	dataBH, n := decodeBlockHandle(i.Value())
 	if n == 0 {
-		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)")), nil
+		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)"))
 	}
 	iter := i.tableReader.getDataIter(dataBH, i.verifyChecksums, i.fillCache)
-	return iter, nil
+	return iter
 }
 
 // Reader is a table reader.
@@ -410,9 +410,9 @@ type Reader struct {
 	cache  cache.Namespace
 	err    error
 	// Options
-	cmp             comparer.Comparer
-	filter          filter.Filter
-	verifyChecksums bool
+	cmp    comparer.Comparer
+	filter filter.Filter
+	strict bool
 
 	dataEnd     int64
 	indexBlock  *block
@@ -424,7 +424,7 @@ func (r *Reader) readRawBlock(bh blockHandle, verifyChecksums bool) ([]byte, err
 	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil {
 		return nil, err
 	}
-	if verifyChecksums || r.verifyChecksums {
+	if verifyChecksums || r.strict {
 		checksum0 := binary.LittleEndian.Uint32(data[bh.length+1:])
 		checksum1 := util.NewCRC(data[:bh.length+1]).Value()
 		if checksum0 != checksum1 {
@@ -533,7 +533,7 @@ func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 		verifyChecksums: ro.HasFlag(opt.RFVerifyChecksums),
 		fillCache:       !ro.HasFlag(opt.RFDontFillCache),
 	}
-	return iterator.NewIndexedIterator(index)
+	return iterator.NewIndexedIterator(index, r.strict)
 }
 
 // Find finds key/value pair whose key is greater than or equal to the
@@ -630,10 +630,10 @@ func (r *Reader) GetApproximateOffset(key []byte) (offset int64, err error) {
 // The cache is optional and can be nil.
 func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGetter) *Reader {
 	r := &Reader{
-		reader:          f,
-		cache:           cache,
-		cmp:             o.GetComparer(),
-		verifyChecksums: o.HasFlag(opt.OFParanoidCheck),
+		reader: f,
+		cache:  cache,
+		cmp:    o.GetComparer(),
+		strict: o.HasFlag(opt.OFParanoidCheck),
 	}
 	if f == nil {
 		r.err = errors.New("leveldb/table: Reader: nil file")
