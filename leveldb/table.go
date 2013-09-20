@@ -17,6 +17,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // table file
@@ -161,10 +162,17 @@ func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 }
 
 func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *opt.ReadOptions) *tFilesIter {
-	return &tFilesIter{tops, cmp, ro, p, -1}
+	return &tFilesIter{
+		tops: tops,
+		cmp:  cmp,
+		ro:   ro,
+		tt:   p,
+		pos:  -1,
+	}
 }
 
 type tFilesIter struct {
+	util.BasicReleaser
 	tops *tOps
 	cmp  *iComparer
 	ro   *opt.ReadOptions
@@ -172,7 +180,7 @@ type tFilesIter struct {
 	pos  int
 }
 
-func (i *tFilesIter) Empty() bool {
+func (i *tFilesIter) empty() bool {
 	return len(i.tt) == 0
 }
 
@@ -184,7 +192,7 @@ func (i *tFilesIter) Valid() bool {
 }
 
 func (i *tFilesIter) First() bool {
-	if i.Empty() {
+	if i.empty() {
 		return false
 	}
 	i.pos = 0
@@ -192,7 +200,7 @@ func (i *tFilesIter) First() bool {
 }
 
 func (i *tFilesIter) Last() bool {
-	if i.Empty() {
+	if i.empty() {
 		return false
 	}
 	i.pos = len(i.tt) - 1
@@ -200,7 +208,7 @@ func (i *tFilesIter) Last() bool {
 }
 
 func (i *tFilesIter) Seek(key []byte) bool {
-	if i.Empty() {
+	if i.empty() {
 		return false
 	}
 	i.pos = i.tt.search(iKey(key), i.cmp)
@@ -208,11 +216,11 @@ func (i *tFilesIter) Seek(key []byte) bool {
 }
 
 func (i *tFilesIter) Next() bool {
-	if i.Empty() || i.pos >= len(i.tt) {
+	if i.pos >= len(i.tt) {
 		return false
 	}
 	i.pos++
-	return true
+	return i.pos < len(i.tt)
 }
 
 func (i *tFilesIter) Prev() bool {
@@ -220,17 +228,15 @@ func (i *tFilesIter) Prev() bool {
 		return false
 	}
 	i.pos--
-	return true
+	return i.pos >= 0
 }
 
 func (i *tFilesIter) Get() iterator.Iterator {
 	if i.pos < 0 || i.pos >= len(i.tt) {
-		return iterator.NewEmptyIterator(nil)
+		return nil
 	}
 	return i.tops.newIterator(i.tt[i.pos], i.ro)
 }
-
-func (i *tFilesIter) Release() {}
 
 func (i *tFilesIter) Error() error {
 	return nil
