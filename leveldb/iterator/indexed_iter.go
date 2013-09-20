@@ -145,6 +145,9 @@ func (i *IndexedIterator) Error() (err error) {
 }
 
 func (i *IndexedIterator) setData() bool {
+	if i.data != nil {
+		i.data.Release()
+	}
 	i.data, i.err = i.index.Get()
 	return i.err == nil
 }
