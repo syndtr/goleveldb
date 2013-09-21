@@ -169,7 +169,7 @@ func (p *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
 	for _, m := range p.mem {
 		its = append(its, m.NewIterator())
 	}
-	return iterator.NewMergedIterator(its, comparer.DefaultComparer)
+	return iterator.NewMergedIterator(its, comparer.DefaultComparer, true)
 }
 
 func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}

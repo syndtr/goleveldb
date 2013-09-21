@@ -7,208 +7,324 @@
 package iterator
 
 import (
+	"errors"
+
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-// MergedIterator represent a merged iterators. MergedIterator can be used
-// to merge multiple iterators into one.
-type MergedIterator struct {
-	util.BasicReleaser
-	cmp   comparer.Comparer
-	iters []Iterator
+var (
+	errIterReleased = errors.New("leveldb/iterator: iterator released")
+)
 
-	iter     Iterator
-	backward bool
-	last     bool
+type dir int
+
+const (
+	dirReleased dir = iota - 1
+	dirSOI
+	dirEOI
+	dirBackward
+	dirForward
+)
+
+type mergedIterator struct {
+	cmp    comparer.Comparer
+	iters  []Iterator
+	strict bool
+
+	keys     [][]byte
+	index    int
+	dir      dir
 	err      error
+	releaser util.Releaser
 }
 
-// NewMergedIterator create new initialized merged iterators.
-func NewMergedIterator(iters []Iterator, cmp comparer.Comparer) *MergedIterator {
-	return &MergedIterator{
-		iters: iters,
-		cmp:   cmp,
+// NewMergedIterator returns an iterator that merges its input. Walking the
+// resultant iterator will return all key/value pairs of all input iterators
+// in strictly increasing key order, as defined by cmp.
+//
+// The input's key ranges may overlap, but there are assumed to be no duplicate
+// keys: if iters[i] contains a key k then iters[j] will not contain that key k.
+//
+// None of the iters may be nil.
+//
+// If strict is true then error yield by any iterators will halt the merged
+// iterator, on contrary if strict is false then the merged iterator will
+// ignore those error and move on to the next iterator.
+func NewMergedIterator(iters []Iterator, cmp comparer.Comparer, strict bool) *mergedIterator {
+	return &mergedIterator{
+		iters:  iters,
+		cmp:    cmp,
+		strict: strict,
+		keys:   make([][]byte, len(iters)),
 	}
 }
 
-func (i *MergedIterator) Valid() bool {
-	return i.err == nil && i.iter != nil
+func (i *mergedIterator) Valid() bool {
+	return i.err == nil && i.dir > dirEOI
 }
 
-func (i *MergedIterator) First() bool {
+func (i *mergedIterator) First() bool {
 	if i.err != nil {
 		return false
-	}
-
-	for _, p := range i.iters {
-		if !p.First() && p.Error() != nil {
-			i.err = p.Error()
-			return false
-		}
-	}
-	i.smallest()
-	i.backward = false
-	i.last = false
-	return i.iter != nil
-}
-
-func (i *MergedIterator) Last() bool {
-	if i.err != nil {
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	for _, p := range i.iters {
-		if !p.Last() && p.Error() != nil {
-			i.err = p.Error()
-			return false
-		}
-	}
-	i.largest()
-	i.backward = true
-	i.last = false
-	return i.iter != nil
-}
-
-func (i *MergedIterator) Seek(key []byte) bool {
-	if i.err != nil {
-		return false
-	}
-
-	for _, p := range i.iters {
-		if !p.Seek(key) && p.Error() != nil {
-			i.err = p.Error()
-			return false
-		}
-	}
-	i.smallest()
-	i.backward = false
-	i.last = i.iter == nil
-	return !i.last
-}
-
-func (i *MergedIterator) Next() bool {
-	if i.err != nil {
-		return false
-	}
-
-	if i.iter == nil {
-		if !i.last {
-			return i.First()
-		}
-		return false
-	}
-
-	if i.backward {
-		key := i.iter.Key()
-		for _, p := range i.iters {
-			if p == i.iter {
-				continue
+	for x, iter := range i.iters {
+		switch {
+		case iter.First():
+			key := iter.Key()
+			if key == nil {
+				key = []byte{}
 			}
-			if p.Seek(key) && i.cmp.Compare(key, p.Key()) == 0 {
-				p.Next()
-			}
-			if p.Error() != nil {
-				i.err = p.Error()
+			i.keys[x] = key
+		case i.strict:
+			if err := i.Error(); err != nil {
+				i.err = err
 				return false
 			}
+			fallthrough
+		default:
+			i.keys[x] = nil
 		}
-		i.backward = false
 	}
-
-	if !i.iter.Next() && i.iter.Error() != nil {
-		i.err = i.iter.Error()
-		return false
-	}
-	i.smallest()
-	i.last = i.iter == nil
-	return !i.last
+	i.dir = dirSOI
+	return i.next()
 }
 
-func (i *MergedIterator) Prev() bool {
+func (i *mergedIterator) Last() bool {
 	if i.err != nil {
 		return false
-	}
-
-	if i.iter == nil {
-		if i.last {
-			return i.Last()
-		}
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
 
-	if !i.backward {
-		key := i.iter.Key()
-		for _, p := range i.iters {
-			if p == i.iter {
-				continue
+	for x, iter := range i.iters {
+		switch {
+		case iter.Last():
+			key := iter.Key()
+			if key == nil {
+				key = []byte{}
 			}
-			if p.Seek(key) {
-				p.Prev()
-			} else {
-				p.Last()
-			}
-			if p.Error() != nil {
-				i.err = p.Error()
+			i.keys[x] = key
+		case i.strict:
+			if err := i.Error(); err != nil {
+				i.err = err
 				return false
 			}
+			fallthrough
+		default:
+			i.keys[x] = nil
 		}
-		i.backward = true
 	}
+	i.dir = dirEOI
+	return i.prev()
+}
 
-	if !i.iter.Prev() && i.iter.Error() != nil {
-		i.err = i.iter.Error()
+func (i *mergedIterator) Seek(key []byte) bool {
+	if i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
 		return false
 	}
-	i.largest()
-	return i.iter != nil
+
+	for x, iter := range i.iters {
+		switch {
+		case iter.Seek(key):
+			k := iter.Key()
+			if k == nil {
+				k = []byte{}
+			}
+			i.keys[x] = k
+		case i.strict:
+			if err := i.Error(); err != nil {
+				i.err = err
+				return false
+			}
+			fallthrough
+		default:
+			i.keys[x] = nil
+		}
+	}
+	i.dir = dirSOI
+	return i.next()
 }
 
-func (i *MergedIterator) Key() []byte {
-	if i.iter == nil || i.err != nil {
+func (i *mergedIterator) next() bool {
+	var key []byte
+	if i.dir == dirForward {
+		key = i.keys[i.index]
+	}
+	for x, tkey := range i.keys {
+		if tkey != nil && (key == nil || i.cmp.Compare(tkey, key) < 0) {
+			key = tkey
+			i.index = x
+		}
+	}
+	if key == nil {
+		i.dir = dirEOI
+		return false
+	}
+	i.dir = dirForward
+	return true
+}
+
+func (i *mergedIterator) Next() bool {
+	if i.dir == dirEOI || i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
+		return false
+	}
+
+	switch i.dir {
+	case dirSOI:
+		return i.First()
+	case dirBackward:
+		key := append([]byte{}, i.keys[i.index]...)
+		if !i.Seek(key) {
+			return false
+		}
+		return i.Next()
+	}
+
+	x := i.index
+	iter := i.iters[x]
+	switch {
+	case iter.Next():
+		key := iter.Key()
+		if key == nil {
+			key = []byte{}
+		}
+		i.keys[x] = key
+	case i.strict:
+		if err := iter.Error(); err != nil {
+			i.err = err
+			return false
+		}
+		fallthrough
+	default:
+		i.keys[x] = nil
+	}
+	return i.next()
+}
+
+func (i *mergedIterator) prev() bool {
+	var key []byte
+	if i.dir == dirBackward {
+		key = i.keys[i.index]
+	}
+	for x, tkey := range i.keys {
+		if tkey != nil && (key == nil || i.cmp.Compare(tkey, key) > 0) {
+			key = tkey
+			i.index = x
+		}
+	}
+	if key == nil {
+		i.dir = dirSOI
+		return false
+	}
+	i.dir = dirBackward
+	return true
+}
+
+func (i *mergedIterator) Prev() bool {
+	if i.dir == dirSOI || i.err != nil {
+		return false
+	} else if i.dir == dirReleased {
+		i.err = errIterReleased
+		return false
+	}
+
+	switch i.dir {
+	case dirEOI:
+		return i.Last()
+	case dirForward:
+		key := append([]byte{}, i.keys[i.index]...)
+		for x, iter := range i.iters {
+			if x == i.index {
+				continue
+			}
+			seek := iter.Seek(key)
+			switch {
+			case seek && iter.Prev(), !seek && iter.Last():
+				key := iter.Key()
+				if key == nil {
+					key = []byte{}
+				}
+				i.keys[x] = key
+			case i.strict:
+				if err := i.Error(); err != nil {
+					i.err = err
+					return false
+				}
+				fallthrough
+			default:
+				i.keys[x] = nil
+			}
+		}
+	}
+
+	x := i.index
+	iter := i.iters[x]
+	switch {
+	case iter.Prev():
+		key := iter.Key()
+		if key == nil {
+			key = []byte{}
+		}
+		i.keys[x] = key
+	case i.strict:
+		if err := i.Error(); err != nil {
+			i.err = err
+			return false
+		}
+		fallthrough
+	default:
+		i.keys[x] = nil
+	}
+	return i.prev()
+}
+
+func (i *mergedIterator) Key() []byte {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	return i.iter.Key()
+	return i.keys[i.index]
 }
 
-func (i *MergedIterator) Value() []byte {
-	if i.iter == nil || i.err != nil {
+func (i *mergedIterator) Value() []byte {
+	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	return i.iter.Value()
+	return i.iters[i.index].Value()
 }
 
-func (i *MergedIterator) Release() {
-	i.iter = nil
-	for _, p := range i.iters {
-		p.Release()
+func (i *mergedIterator) Release() {
+	if i.dir != dirReleased {
+		i.dir = dirReleased
+		for _, iter := range i.iters {
+			iter.Release()
+		}
+		i.iters = nil
+		i.keys = nil
+		if i.releaser != nil {
+			i.releaser.Release()
+			i.releaser = nil
+		}
 	}
 }
 
-func (i *MergedIterator) Error() error {
+func (i *mergedIterator) SetReleaser(releaser util.Releaser) {
+	if i.dir != dirReleased {
+		i.releaser = releaser
+	}
+}
+
+func (i *mergedIterator) Error() error {
 	return i.err
-}
-
-func (i *MergedIterator) smallest() {
-	i.iter = nil
-	for _, p := range i.iters {
-		if !p.Valid() {
-			continue
-		}
-		if i.iter == nil || i.cmp.Compare(p.Key(), i.iter.Key()) < 0 {
-			i.iter = p
-		}
-	}
-}
-
-func (i *MergedIterator) largest() {
-	i.iter = nil
-	for _, p := range i.iters {
-		if !p.Valid() {
-			continue
-		}
-		if i.iter == nil || i.cmp.Compare(p.Key(), i.iter.Key()) > 0 {
-			i.iter = p
-		}
-	}
 }

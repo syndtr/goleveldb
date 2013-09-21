@@ -373,5 +373,5 @@ func (c *compaction) newIterator() iterator.Iterator {
 		}
 	}
 
-	return iterator.NewMergedIterator(its, icmp)
+	return iterator.NewMergedIterator(its, icmp, false)
 }

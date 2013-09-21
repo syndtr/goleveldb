@@ -33,7 +33,7 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 		iters = append(iters, mem.froze.NewIterator())
 	}
 	iters = append(iters, tableIters...)
-	return iterator.NewMergedIterator(iters, db.s.cmp)
+	return iterator.NewMergedIterator(iters, db.s.cmp, db.s.o.HasFlag(opt.OFParanoidCheck))
 }
 
 func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
