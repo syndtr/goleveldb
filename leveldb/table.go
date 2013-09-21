@@ -434,10 +434,10 @@ type tWriter struct {
 
 func (w *tWriter) add(key, value []byte) error {
 	if w.notFirst {
-		w.last = key
+		w.last = append(w.last[:0], key...)
 	} else {
-		w.first = key
-		w.last = key
+		w.first = append(w.first[:0], key...)
+		w.last = append(w.last[:0], key...)
 		w.notFirst = true
 	}
 	return w.tw.Append(key, value)

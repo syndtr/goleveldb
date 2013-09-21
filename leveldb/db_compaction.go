@@ -229,7 +229,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 	d.transact(func() (err error) {
 		tw = nil
-		ukey := snapUkey
+		ukey := append([]byte{}, snapUkey...)
 		hasUkey := snapHasUkey
 		lseq := snapSeq
 		snapSched := snapIter == 0
@@ -286,7 +286,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			// Scheduled for snapshot, snapshot will used to retry compaction
 			// if error occured.
 			if snapSched {
-				snapUkey = ukey
+				snapUkey = append(snapUkey[:0], ukey...)
 				snapHasUkey = hasUkey
 				snapSeq = lseq
 				snapIter = i
@@ -300,13 +300,13 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 			if seq, t, ok := key.parseNum(); !ok {
 				// Don't drop error keys
-				ukey = nil
+				ukey = ukey[:0]
 				hasUkey = false
 				lseq = kMaxSeq
 			} else {
 				if !hasUkey || ucmp.Compare(key.ukey(), ukey) != 0 {
 					// First occurrence of this user key
-					ukey = key.ukey()
+					ukey = append(ukey[:0], key.ukey()...)
 					hasUkey = true
 					lseq = kMaxSeq
 				}
