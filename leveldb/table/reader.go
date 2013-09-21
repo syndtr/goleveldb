@@ -295,7 +295,7 @@ func (i *blockIter) Prev() bool {
 			return false
 		}
 		if i.value != nil {
-			// Append 3 variable:
+			// Appends 3 variables:
 			// 1. Previous keys offset
 			// 2. Value offset in the data block
 			// 3. Value length
@@ -324,14 +324,14 @@ func (i *blockIter) Key() []byte {
 	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	return append([]byte{}, i.key...)
+	return i.key
 }
 
 func (i *blockIter) Value() []byte {
 	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	return append([]byte{}, i.value...)
+	return i.value
 }
 
 func (i *blockIter) Release() {
