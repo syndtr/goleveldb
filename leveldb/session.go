@@ -354,9 +354,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 	ro := &opt.ReadOptions{
 		Flag: opt.RFDontFillCache,
 	}
-	if s.o.HasFlag(opt.OFParanoidCheck) {
-		ro.Flag |= opt.RFVerifyChecksums
-	}
+	strict := s.o.HasFlag(opt.OFStrict)
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {
@@ -368,10 +366,10 @@ func (c *compaction) newIterator() iterator.Iterator {
 				its = append(its, s.tops.newIterator(t, ro))
 			}
 		} else {
-			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), false)
+			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict)
 			its = append(its, it)
 		}
 	}
 
-	return iterator.NewMergedIterator(its, icmp, false)
+	return iterator.NewMergedIterator(its, icmp, strict)
 }

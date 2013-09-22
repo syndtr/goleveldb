@@ -45,7 +45,7 @@ const (
 	// errors.  This may have unforeseen ramifications: for example, a
 	// corruption of one DB entry may cause a large number of entries to
 	// become unreadable or for the entire DB to become unopenable.
-	OFParanoidCheck
+	OFStrict
 )
 
 // Database compression type

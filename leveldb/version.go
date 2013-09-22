@@ -184,12 +184,13 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 		its = append(its, it)
 	}
 
+	strict := s.o.HasFlag(opt.OFStrict)
 	for _, tt := range v.tables[1:] {
 		if len(tt) == 0 {
 			continue
 		}
 
-		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), s.o.HasFlag(opt.OFParanoidCheck))
+		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict)
 		its = append(its, it)
 	}
 

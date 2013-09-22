@@ -637,7 +637,7 @@ func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGe
 		reader: f,
 		cache:  cache,
 		cmp:    o.GetComparer(),
-		strict: o.HasFlag(opt.OFParanoidCheck),
+		strict: o.HasFlag(opt.OFStrict),
 	}
 	if f == nil {
 		r.err = errors.New("leveldb/table: Reader: nil file")

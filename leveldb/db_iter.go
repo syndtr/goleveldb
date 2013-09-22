@@ -33,7 +33,7 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 		iters = append(iters, mem.froze.NewIterator())
 	}
 	iters = append(iters, tableIters...)
-	return iterator.NewMergedIterator(iters, db.s.cmp, db.s.o.HasFlag(opt.OFParanoidCheck))
+	return iterator.NewMergedIterator(iters, db.s.cmp, db.s.o.HasFlag(opt.OFStrict))
 }
 
 func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
@@ -42,7 +42,7 @@ func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
 		cmp:        db.s.cmp.cmp,
 		iter:       rawIter,
 		seq:        seq,
-		strict:     db.s.o.HasFlag(opt.OFParanoidCheck),
+		strict:     db.s.o.HasFlag(opt.OFStrict),
 		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
 	}
 	runtime.SetFinalizer(iter, (*dbIter).Release)
