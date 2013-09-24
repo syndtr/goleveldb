@@ -77,7 +77,7 @@ func (db *DB) minSeq() uint64 {
 	return db.getSeq()
 }
 
-// Snapshot represent a DB snapshot.
+// Snapshot is a DB snapshot.
 type Snapshot struct {
 	db       *DB
 	elem     *snapshotElement
@@ -116,16 +116,15 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 }
 
 // NewIterator returns an iterator for the snapshot of the uderlying DB.
-//
 // The returned iterator is not goroutine-safe, but it is safe to use
 // multiple iterators concurrently, with each in a dedicated goroutine.
-//
-// It is safe to use an iterator concurrently with modifying its
+// It is also safe to use an iterator concurrently with modifying its
 // underlying DB. The resultant key/value pairs are guaranteed to be
 // consistent.
 //
+// The iterator must be released after use, by calling Release method.
 // Releasing the snapshot doesn't mean releasing the iterator too, the
-// iterator would be still valid until explicitly released.
+// iterator would be still valid until released.
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	db := p.db
 	if err := db.rok(); err != nil {
@@ -139,12 +138,15 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	return db.newIterator(p.elem.seq, ro)
 }
 
-// Release releases the snapshot. The caller must not use the snapshot
-// after this call.
+// Release releases the snapshot. This will not release any returned
+// iterators, the iterators would still be valid until released or the
+// underlying DB is closed.
+//
+// Other methods should not be called after the snapshot has been released.
 func (p *Snapshot) Release() {
 	p.mu.Lock()
 	if !p.released {
-		// not needed anymore
+		// Clear the finalizer.
 		runtime.SetFinalizer(p, nil)
 
 		p.released = true

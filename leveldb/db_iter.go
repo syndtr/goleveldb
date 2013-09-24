@@ -274,7 +274,7 @@ func (i *dbIter) Value() []byte {
 
 func (i *dbIter) Release() {
 	if i.dir != dirReleased {
-		// Clear finalizer.
+		// Clear the finalizer.
 		runtime.SetFinalizer(i, nil)
 
 		i.dir = dirReleased

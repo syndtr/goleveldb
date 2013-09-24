@@ -21,7 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
-// DB represent a database session.
+// DB is a LevelDB database.
 type DB struct {
 	// Need 64-bit alignment.
 	seq, fseq uint64
@@ -81,7 +81,12 @@ func openDB(s *session) (*DB, error) {
 	return db, nil
 }
 
-// Open open or create database from given storage.
+// Open opens or creates a DB for the given storage.
+// If opt.OFCreateIfMissing is set then the DB will be created if not exist,
+// otherwise it will returns an error. If opt.OFErrorIfExist is set and the DB
+// exist Open will returns os.ErrExist error.
+//
+// The DB must be closed after use, by calling Close method.
 func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	s, err := openSession(p, o)
 	if err != nil {
@@ -106,13 +111,14 @@ func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	return openDB(s)
 }
 
-// OpenFile open or create database from given file.
+// Open opens or creates a DB for the given path. OpenFile uses standard
+// file-system backed storage implementation as desribed in the
+// leveldb/storage package.
+// If opt.OFCreateIfMissing is set then the DB will be created if not exist,
+// otherwise it will returns error. If opt.OFErrorIfExist is set and the DB
+// exist OpenFile will returns os.ErrExist error.
 //
-// This is alias of:
-//	stor, err := storage.OpenFile("path/to/db")
-//	...
-//	db, err := Open(stor, &opt.Options{})
-//	...
+// The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (*DB, error) {
 	stor, err := storage.OpenFile(path)
 	if err != nil {
@@ -125,8 +131,12 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 	return db, err
 }
 
-// Recover recover database with missing or corrupted manifest file. It will
-// ignore any manifest files, valid or not.
+// Recover recovers and opens a DB with missing or corrupted manifest files
+// for the given storage. It will ignore any manifest files, valid or not.
+// The DB must already exist or it will returns an error.
+// Also Recover will ignore opt.OFCreateIfMissing and opt.OFErrorIfExist flags.
+//
+// The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 	s, err := openSession(p, o)
 	if err != nil {
@@ -322,8 +332,9 @@ func (d *DB) recoverJournal() error {
 	return nil
 }
 
-// GetOptionsSetter return OptionsSetter for this database. OptionsSetter
-// allows safely set options of an opened database.
+// GetOptionsSetter returns and opt.OptionsSetter for the DB.
+// The opt.OptionsSetter allows modify options of an opened DB safely,
+// as documented in the leveldb/opt package.
 func (d *DB) GetOptionsSetter() opt.OptionsSetter {
 	return d.s.o
 }
@@ -373,7 +384,11 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	return
 }
 
-// Get get value for given key of the latest snapshot of database.
+// Get gets the value for the given key. It returns error.ErrNotFound if the
+// DB does not contain the key.
+//
+// The caller should not modify the contents of the returned slice, but
+// it is safe to modify the contents of the argument after Get returns.
 func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	err = d.rok()
 	if err != nil {
@@ -387,12 +402,15 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	return
 }
 
-// NewIterator return an iterator over the contents of the latest snapshot of
-// database. The result of NewIterator() is initially invalid (caller must
-// call Next or one of Seek method, i.e. First, Last or Seek).
+// NewIterator returns an iterator for the latest snapshot of the
+// uderlying DB.
+// The returned iterator is not goroutine-safe, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
+// It is also safe to use an iterator concurrently with modifying its
+// underlying DB. The resultant key/value pairs are guaranteed to be
+// consistent.
 //
-// Please note that the iterator is not thread-safe, you may not use same
-// iterator instance concurrently without external synchronization.
+// The iterator must be released after use, by calling Release method.
 func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.rok(); err != nil {
 		return iterator.NewEmptyIterator(err)
@@ -403,10 +421,11 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	return p.NewIterator(ro)
 }
 
-// GetSnapshot return a handle to the current DB state.
-// Iterators created with this handle will all observe a stable snapshot
-// of the current DB state. The caller must call *Snapshot.Release() when the
-// snapshot is no longer needed.
+// GetSnapshot returns a latest snapshot of the underlying DB. A snapshot
+// is a frozen snapshot of a DB state at a particular point in time. The
+// content of snapshot are guaranteed to be consistent.
+//
+// The snapshot must be released after use, by calling Release method.
 func (d *DB) GetSnapshot() (*Snapshot, error) {
 	if err := d.rok(); err != nil {
 		return nil, err
@@ -415,28 +434,27 @@ func (d *DB) GetSnapshot() (*Snapshot, error) {
 	return d.newSnapshot(), nil
 }
 
-// GetProperty used to query exported database state.
+// GetProperty returns value of the given property name.
 //
-// Valid property names include:
-//
-//  "leveldb.num-files-at-level<N>" - return the number of files at level <N>,
-//     where <N> is an ASCII representation of a level number (e.g. "0").
-//  "leveldb.stats" - returns a multi-line string that storribes statistics
-//     about the internal operation of the DB.
-//  "leveldb.sstables" - returns a multi-line string that storribes all
-//     of the sstables that make up the db contents.
-func (d *DB) GetProperty(prop string) (value string, err error) {
+// Property names:
+//	leveldb.num-files-at-level{n}
+//		Returns the number of filer at level 'n'.
+//	leveldb.stats
+//		Returns statistics of the underlying DB.
+//	leveldb.sstables
+//		Returns sstables list for each level.
+func (d *DB) GetProperty(name string) (value string, err error) {
 	err = d.rok()
 	if err != nil {
 		return
 	}
 
 	const prefix = "leveldb."
-	if !strings.HasPrefix(prop, prefix) {
-		return "", errors.ErrInvalid("unknown property: " + prop)
+	if !strings.HasPrefix(name, prefix) {
+		return "", errors.ErrInvalid("unknown property: " + name)
 	}
 
-	p := prop[len(prefix):]
+	p := name[len(prefix):]
 
 	s := d.s
 	v := s.version()
@@ -448,7 +466,7 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 		var rest string
 		n, _ := fmt.Scanf("%d%s", &level, &rest)
 		if n != 1 || level >= kNumLevels {
-			err = errors.ErrInvalid("invalid property: " + prop)
+			err = errors.ErrInvalid("invalid property: " + name)
 		} else {
 			value = fmt.Sprint(v.tLen(int(level)))
 		}
@@ -473,20 +491,19 @@ func (d *DB) GetProperty(prop string) (value string, err error) {
 			}
 		}
 	default:
-		err = errors.ErrInvalid("unknown property: " + prop)
+		err = errors.ErrInvalid("unknown property: " + name)
 	}
 
 	return
 }
 
-// GetApproximateSizes calculate approximate sizes of given ranges.
-//
-// Note that the returned sizes measure file system space usage, so
-// if the user data compresses by a factor of ten, the returned
-// sizes will be one-tenth the size of the corresponding user data size.
-//
+// GetApproximateSizes calculates approximate sizes of the given key ranges.
+// The length of the returned sizes are equal with the length of the given
+// ranges. The returned sizes measure storage space usage, so if the user
+// data compresses by a factor of ten, the returned sizes will be one-tenth
+// the size of the corresponding user data size.
 // The results may not include the sizes of recently written data.
-func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
+func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
 	if err := d.rok(); err != nil {
 		return nil, err
 	}
@@ -494,8 +511,8 @@ func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
 	v := d.s.version()
 	defer v.release()
 
-	sizes := make(Sizes, 0, len(rr))
-	for _, r := range rr {
+	sizes := make(Sizes, 0, len(ranges))
+	for _, r := range ranges {
 		min := newIKey(r.Start, kMaxSeq, tSeek)
 		max := newIKey(r.Limit, kMaxSeq, tSeek)
 		start, err := v.getApproximateOffset(min)
@@ -516,17 +533,16 @@ func (d *DB) GetApproximateSizes(rr []Range) (Sizes, error) {
 	return sizes, nil
 }
 
-// CompactRange compact the underlying storage for the key range.
-//
+// CompactRange compacts the underlying DB for the given key range.
 // In particular, deleted and overwritten versions are discarded,
 // and the data is rearranged to reduce the cost of operations
-// needed to access the data.  This operation should typically only
+// needed to access the data. This operation should typically only
 // be invoked by users who understand the underlying implementation.
 //
-// Range.Start==nil is treated as a key before all keys in the database.
-// Range.Limit==nil is treated as a key after all keys in the database.
-// Therefore calling with Start==nil and Limit==nil will compact entire
-// database.
+//
+// A nil Range.Start is treated as a key before all keys in the DB.
+// And a nil Range.Limit is treated as a key after all keys in the DB.
+// Therefore if both is nil then it will compact entire DB.
 func (d *DB) CompactRange(r Range) error {
 	err := d.wok()
 	if err != nil {
@@ -543,14 +559,17 @@ func (d *DB) CompactRange(r Range) error {
 	return d.wok()
 }
 
-// Close closes the database. Snapshot and iterator are invalid
-// after this call
+// Close closes the DB. This will also releases any outstanding snapshot.
+//
+// It is not safe to close a DB until all outstanding iterators are released.
+// It is valid to call Close multiple times. Other methods should not be
+// called after the DB has been closed.
 func (d *DB) Close() error {
 	if !d.setClosed() {
 		return errors.ErrClosed
 	}
 
-	// not needed anymore
+	// Clear the finalizer.
 	runtime.SetFinalizer(d, nil)
 
 	d.wlock <- struct{}{}

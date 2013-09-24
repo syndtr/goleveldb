@@ -83,7 +83,10 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 	return
 }
 
-// Write apply the specified batch to the database.
+// Write apply the given batch to the DB. The batch will be applied
+// sequentially.
+//
+// It is safe to modify the contents of the arguments after Write returns.
 func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	err = d.wok()
 	if err != nil || b == nil || b.len() == 0 {
@@ -155,15 +158,20 @@ drain:
 	return
 }
 
-// Put set the database entry for "key" to "value".
+// Put sets the value for the given key. It overwrites any previous value
+// for that key; a DB is not a multi-map.
+//
+// It is safe to modify the contents of the arguments after Put returns.
 func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Put(key, value)
 	return d.Write(b, wo)
 }
 
-// Delete remove the database entry (if any) for "key". It is not an error
-// if "key" did not exist in the database.
+// Delete deletes the value for the given key. It returns errors.ErrNotFound if
+// the DB does not contain the key.
+//
+// It is safe to modify the contents of the arguments after Delete returns.
 func (d *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 	b := new(Batch)
 	b.Delete(key)

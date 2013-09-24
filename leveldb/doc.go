@@ -10,6 +10,8 @@
 //
 //	db, err := leveldb.OpenFile("path/to/db", &opt.Options{Flag: opt.OFCreateIfMissing})
 //	...
+//	defer db.Close()
+//	...
 //
 // Read or modify the database content:
 //
@@ -30,6 +32,7 @@
 //		value := iter.Value()
 //		...
 //	}
+//	iter.Release()
 //	err = iter.Error()
 //	...
 //
@@ -48,6 +51,8 @@
 //		Flag:   opt.OFCreateIfMissing,
 //		Filter: filter.NewBloomFilter(10),
 //	}
-//	db, err := leveldb.Open(stor, o)
+//	db, err := leveldb.OpenFile("path/to/db", o)
+//	...
+//	defer db.Close()
 //	...
 package leveldb

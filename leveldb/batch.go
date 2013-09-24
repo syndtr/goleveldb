@@ -25,7 +25,7 @@ type batchReplay interface {
 	delete(key []byte, seq uint64)
 }
 
-// Batch represent a write batch.
+// Batch is a write batch.
 type Batch struct {
 	buf  []byte
 	rLen int
@@ -69,19 +69,21 @@ func (b *Batch) appendRec(t vType, key, value []byte) {
 	b.buf = buf[:off]
 }
 
-// Put put given key/value to the batch for insert operation.
+// Put appends 'put operation' of the given key/value pair to the batch.
+// It is safe to modify the contents of the argument after Put returns.
 func (b *Batch) Put(key, value []byte) {
 	b.appendRec(tVal, key, value)
 	b.rLen++
 }
 
-// Delete put given key to the batch for delete operation.
+// Delete appends 'delete operation' of the given key to the batch.
+// It is safe to modify the contents of the argument after Delete returns.
 func (b *Batch) Delete(key []byte) {
 	b.appendRec(tDel, key, nil)
 	b.rLen++
 }
 
-// Reset reset contents of the batch.
+// Reset resets the batch.
 func (b *Batch) Reset() {
 	b.buf = nil
 	b.seq = 0

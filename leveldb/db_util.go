@@ -13,24 +13,24 @@ import (
 )
 
 // Reader is the interface that wraps basic Get and NewIterator methods.
-// This interface implemented by both *DB and *Snapshot.
+// This interface implemented by both DB and Snapshot.
 type Reader interface {
 	Get(key []byte, ro *opt.ReadOptions) (value []byte, err error)
 	NewIterator(ro *opt.ReadOptions) iterator.Iterator
 }
 
-// Range represent key range.
+// Range is a key range.
 type Range struct {
-	// Start key, include in the range
+	// Start of the key range, include in the range.
 	Start []byte
 
-	// Limit, not include in the range
+	// Limit of the key range, not include in the range.
 	Limit []byte
 }
 
 type Sizes []uint64
 
-// Sum return sum of the sizes.
+// Sum returns sum of the sizes.
 func (p Sizes) Sum() (n uint64) {
 	for _, s := range p {
 		n += s
