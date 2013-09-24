@@ -24,7 +24,7 @@ import (
 // DB is a LevelDB database.
 type DB struct {
 	// Need 64-bit alignment.
-	seq, fseq uint64
+	seq uint64
 
 	s *session
 
@@ -38,12 +38,16 @@ type DB struct {
 	ewg     sync.WaitGroup     // exit WaitGroup
 	cstats  [kNumLevels]cStats // Compaction stats
 	closeCb func() error
+	closed  uint32
+	err     unsafe.Pointer
 
-	mem      unsafe.Pointer
-	journal  *journalWriter
-	fjournal *journalWriter
-	closed   uint32
-	err      unsafe.Pointer
+	// MemDB
+	memMu         sync.RWMutex
+	mem           *memdb.DB
+	frozenMem     *memdb.DB
+	journal       *journalWriter
+	frozenJournal *journalWriter
+	frozenSeq     uint64
 
 	// Snapshot
 	snapsMu   sync.Mutex
@@ -346,27 +350,21 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	ikey := newIKey(key, seq, tSeek)
 
 	memGet := func(m *memdb.DB) bool {
-		var k []byte
-		k, value, err = m.Find(ikey)
+		var rkey []byte
+		rkey, value, err = m.Find(ikey)
 		if err != nil {
 			return false
 		}
-		ik := iKey(k)
-		if ucmp.Compare(ik.ukey(), key) != 0 {
+		ukey, _, t, ok := parseIkey(rkey)
+		if !ok || ucmp.Compare(ukey, key) != 0 || t == tDel {
+			value = nil
+			err = errors.ErrNotFound
 			return false
 		}
-		if _, t, ok := ik.parseNum(); ok {
-			if t == tDel {
-				value = nil
-				err = errors.ErrNotFound
-			}
-			return true
-		}
-		return false
+		return true
 	}
 
-	mem := d.getMem()
-	if memGet(mem.cur) || (mem.froze != nil && memGet(mem.froze)) {
+	if mem, frozenMem := d.getMem(); memGet(mem) || (frozenMem != nil && memGet(frozenMem)) {
 		return
 	}
 
@@ -380,7 +378,6 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		default:
 		}
 	}
-
 	return
 }
 

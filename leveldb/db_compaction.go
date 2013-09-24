@@ -173,7 +173,7 @@ func (d *DB) memCompaction(mem *memdb.DB) {
 	d.transact(func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.commit(d.journal.file.Num(), d.fseq)
+		return c.commit(d.journal.file.Num(), d.frozenSeq)
 	})
 
 	stats.write = c.t.size

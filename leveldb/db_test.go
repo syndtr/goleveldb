@@ -288,7 +288,7 @@ func (h *dbHarness) compactMem() {
 
 	db.cch <- cSched
 
-	if db.getMem().cur.Len() == 0 {
+	if mem, _ := db.getMem(); mem.Len() == 0 {
 		return
 	}
 
@@ -453,7 +453,6 @@ func testAligned(t *testing.T, name string, offset uintptr) {
 func Test_FieldsAligned(t *testing.T) {
 	p1 := new(DB)
 	testAligned(t, "DB.seq", unsafe.Offsetof(p1.seq))
-	testAligned(t, "DB.fseq", unsafe.Offsetof(p1.fseq))
 	p2 := new(session)
 	testAligned(t, "session.stFileNum", unsafe.Offsetof(p2.stFileNum))
 	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))

@@ -56,8 +56,8 @@ func (d *DB) cleanFiles() {
 		case storage.TypeManifest:
 			keep = !s.manifest.closed() && f.Num() >= s.manifest.file.Num()
 		case storage.TypeJournal:
-			if d.fjournal != nil && !d.fjournal.closed() {
-				keep = f.Num() >= d.fjournal.file.Num()
+			if d.frozenJournal != nil && !d.frozenJournal.closed() {
+				keep = f.Num() >= d.frozenJournal.file.Num()
 			} else {
 				keep = f.Num() >= d.journal.file.Num()
 			}

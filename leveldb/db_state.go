@@ -24,74 +24,65 @@ func (d *DB) addSeq(delta uint64) {
 	atomic.AddUint64(&d.seq, delta)
 }
 
-type memSet struct {
-	cur, froze *memdb.DB
-}
-
 // Create new memdb and froze the old one; need external synchronization.
+// newMem only called synchronously by the writer.
 func (d *DB) newMem() (m *memdb.DB, err error) {
 	s := d.s
 
 	num := s.allocFileNum()
-	w, err := newJournalWriter(s.getJournalFile(num))
+	newJournal, err := newJournalWriter(s.getJournalFile(num))
 	if err != nil {
 		s.reuseFileNum(num)
 		return
 	}
 
-	old := d.journal
-	d.journal = w
-	if old != nil {
-		old.close()
-		d.fjournal = old
+	d.memMu.Lock()
+	if d.journal != nil {
+		d.journal.close()
+		d.frozenJournal = d.journal
 	}
-
-	d.fseq = d.seq
-
-	m = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
-	mem := &memSet{cur: m}
-	if old := d.getMem_NB(); old != nil {
-		mem.froze = old.cur
-	}
-	atomic.StorePointer(&d.mem, unsafe.Pointer(mem))
-
+	d.journal = newJournal
+	d.frozenMem = d.mem
+	d.mem = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
+	// The seq only incremented by the writer.
+	d.frozenSeq = d.seq
+	d.memMu.Unlock()
 	return
 }
 
 // Get mem; no barrier.
-func (d *DB) getMem_NB() *memSet {
-	return (*memSet)(d.mem)
+func (d *DB) getMemNB() (mem, frozenMem *memdb.DB) {
+	return d.mem, d.frozenMem
 }
 
 // Get mem.
-func (d *DB) getMem() *memSet {
-	return (*memSet)(atomic.LoadPointer(&d.mem))
+func (d *DB) getMem() (mem, frozenMem *memdb.DB) {
+	d.memMu.RLock()
+	defer d.memMu.RUnlock()
+	return d.mem, d.frozenMem
 }
 
-// Check whether we has frozen mem; assume that mem wasn't nil.
+// Check whether we has frozen mem.
 func (d *DB) hasFrozenMem() bool {
-	if mem := d.getMem(); mem.froze != nil {
-		return true
-	}
-	return false
+	d.memMu.RLock()
+	defer d.memMu.RUnlock()
+	return d.frozenMem != nil
 }
 
-// Get current frozen mem; assume that mem wasn't nil.
+// Get current frozen mem; assume that mem isn't nil.
 func (d *DB) getFrozenMem() *memdb.DB {
-	return d.getMem().froze
+	d.memMu.RLock()
+	defer d.memMu.RUnlock()
+	return d.frozenMem
 }
 
-// Drop frozen mem; assume that mem wasn't nil and frozen mem present.
+// Drop frozen mem; assume that mem and frozen mem isn't nil.
 func (d *DB) dropFrozenMem() {
-	d.fjournal.remove()
-	d.fjournal = nil
-	for {
-		old := d.mem
-		mem := &memSet{cur: (*memSet)(old).cur}
-		if atomic.CompareAndSwapPointer(&d.mem, old, unsafe.Pointer(mem)) {
-			break
-		}
-	}
+	d.memMu.Lock()
+	d.frozenJournal.remove()
+	d.frozenJournal = nil
+	d.frozenMem = nil
+	d.memMu.Unlock()
 }
 
 // Set closed flag; return true if not already closed.

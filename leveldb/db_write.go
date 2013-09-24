@@ -42,16 +42,16 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 	delayed, cwait := false, false
 	for {
 		v := s.version()
-		mem := d.getMem()
+		mem, frozenMem := d.getMem()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
-		case mem.cur.Size() <= s.o.GetWriteBuffer():
+		case mem.Size() <= s.o.GetWriteBuffer():
 			// still room
 			v.release()
-			return mem.cur, nil
-		case mem.froze != nil:
+			return mem, nil
+		case frozenMem != nil:
 			if cwait {
 				err = d.geterr()
 				if err != nil {
@@ -95,6 +95,7 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 
 	b.init(wo.HasFlag(opt.WFSync))
 
+	// The write happen synchronously.
 	select {
 	case d.wqueue <- b:
 		return <-d.wack
