@@ -10,24 +10,12 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
-	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
 
-func testAligned(t *testing.T, name string, offset uintptr) {
-	if offset%8 != 0 {
-		t.Errorf("field %s offset is not 64-bit aligned", name)
-	}
-}
-
-func Test_FieldsAligned(t *testing.T) {
-	p1 := new(DB)
-	testAligned(t, "DB.kvSize", unsafe.Offsetof(p1.kvSize))
-}
-
-func TestPutRemove(t *testing.T) {
-	p := New(comparer.DefaultComparer)
+func TestPutDelete(t *testing.T) {
+	p := New(comparer.DefaultComparer, 0)
 
 	assertExist := func(key string, want bool) {
 		got := p.Contains([]byte(key))
@@ -88,10 +76,10 @@ func TestPutRemove(t *testing.T) {
 	assertExist("bar", true)
 	p.Put([]byte("bar"), []byte(""))
 	assertSize(6)
-	p.Remove([]byte("foo"))
+	p.Delete([]byte("foo"))
 	assertLen(1)
 	assertExist("foo", false)
-	p.Remove([]byte("foo"))
+	p.Delete([]byte("foo"))
 	assertLen(1)
 	assertSize(3)
 	assertExist("bar", true)
@@ -100,13 +88,13 @@ func TestPutRemove(t *testing.T) {
 	assertLen(2)
 	assertSize(5)
 	assertExist("zz", true)
-	p.Remove([]byte("bar"))
+	p.Delete([]byte("bar"))
 	assertExist("bar", false)
 	assertFind("bar", true, "zz")
 	assertExist("zz", true)
-	p.Remove([]byte("bar"))
+	p.Delete([]byte("bar"))
 	assertExist("zz", true)
-	p.Remove([]byte("zz"))
+	p.Delete([]byte("zz"))
 	assertExist("zz", false)
 	assertFind("zz", false, "")
 	assertLen(0)
@@ -120,7 +108,7 @@ func BenchmarkPut(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	p := New(comparer.DefaultComparer)
+	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -133,7 +121,7 @@ func BenchmarkPutRandom(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	p := New(comparer.DefaultComparer)
+	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -145,7 +133,7 @@ func BenchmarkGet(b *testing.B) {
 		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
 	}
 
-	p := New(comparer.DefaultComparer)
+	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}
@@ -162,7 +150,7 @@ func BenchmarkGetRandom(b *testing.B) {
 		binary.LittleEndian.PutUint32(buf[i][:], uint32(i))
 	}
 
-	p := New(comparer.DefaultComparer)
+	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
 		p.Put(buf[i][:], nil)
 	}

@@ -55,6 +55,10 @@ func shorten(str string) string {
 	return str[:5] + "..." + str[len(str)-5:]
 }
 
+func toPercent(n, percent int) int {
+	return n * percent / 100
+}
+
 type files []storage.File
 
 func (p files) Len() int {

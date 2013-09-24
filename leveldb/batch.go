@@ -207,6 +207,6 @@ func (b *Batch) memReplay(to *memdb.DB) error {
 func (b *Batch) revertMemReplay(to *memdb.DB) error {
 	return b.decodeRec(func(i int, t vType, key, value []byte) {
 		ikey := newIKey(key, b.seq+uint64(i), t)
-		to.Remove(ikey)
+		to.Delete(ikey)
 	})
 }

@@ -300,10 +300,7 @@ func (h *dbHarness) compactMem() {
 	}
 
 	// schedule compaction
-	select {
-	case db.cch <- cSched:
-	default:
-	}
+	db.cch <- cSched
 	db.cch <- cWait
 
 	if h.totalTables() == 0 {
@@ -685,6 +682,7 @@ func TestDb_GetEncountersEmptyLevel(t *testing.T) {
 		}
 
 		// Step 4: Wait for compaction to finish
+		h.db.cch <- cSched
 		h.db.cch <- cWait
 
 		v := h.db.s.version()

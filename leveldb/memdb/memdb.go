@@ -9,251 +9,130 @@ package memdb
 
 import (
 	"math/rand"
-	"sync/atomic"
-	"unsafe"
+	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const tMaxHeight = 12
 
-type mNode struct {
-	key   []byte
-	value []byte
-	next  []unsafe.Pointer
+type dbIter struct {
+	util.BasicReleaser
+	p          *DB
+	node       int
+	forward    bool
+	key, value []byte
 }
 
-func newNode(key, value []byte, height int32) *mNode {
-	return &mNode{key, value, make([]unsafe.Pointer, height)}
+func (i *dbIter) fill() bool {
+	if i.node != 0 {
+		n := i.p.nodeData[i.node]
+		m := n + i.p.nodeData[i.node+nKey]
+		i.key = i.p.kvData[n:m]
+		i.value = i.p.kvData[m : m+i.p.nodeData[i.node+nVal]]
+		return true
+	}
+	i.key = nil
+	i.value = nil
+	return false
 }
 
-func (p *mNode) getNext(n int) *mNode {
-	return (*mNode)(atomic.LoadPointer(&p.next[n]))
+func (i *dbIter) Valid() bool {
+	return i.node != 0
 }
 
-func (p *mNode) setNext(n int, x *mNode) {
-	atomic.StorePointer(&p.next[n], unsafe.Pointer(x))
+func (i *dbIter) First() bool {
+	i.p.mu.RLock()
+	defer i.p.mu.RUnlock()
+	i.node = i.p.nodeData[nNext]
+	i.forward = true
+	return i.fill()
 }
 
-func (p *mNode) getNext_NB(n int) *mNode {
-	return (*mNode)(p.next[n])
+func (i *dbIter) Last() bool {
+	i.p.mu.RLock()
+	defer i.p.mu.RUnlock()
+	i.node = i.p.findLast()
+	i.forward = false
+	return i.fill()
 }
 
-func (p *mNode) setNext_NB(n int, x *mNode) {
-	p.next[n] = unsafe.Pointer(x)
+func (i *dbIter) Seek(key []byte) bool {
+	i.p.mu.RLock()
+	defer i.p.mu.RUnlock()
+	i.node, _ = i.p.findGE(key, false)
+	i.forward = true
+	return i.fill()
 }
 
-// DB represent an in-memory key/value database.
+func (i *dbIter) Next() bool {
+	if i.node == 0 {
+		if !i.forward {
+			return i.First()
+		}
+		return false
+	}
+	i.p.mu.RLock()
+	defer i.p.mu.RUnlock()
+	i.node = i.p.nodeData[i.node+nNext]
+	return i.fill()
+}
+
+func (i *dbIter) Prev() bool {
+	if i.node == 0 {
+		if i.forward {
+			return i.Last()
+		}
+		return false
+	}
+	i.p.mu.RLock()
+	defer i.p.mu.RUnlock()
+	i.node = i.p.findLT(i.key)
+	return i.fill()
+}
+
+func (i *dbIter) Key() []byte {
+	return i.key
+}
+
+func (i *dbIter) Value() []byte {
+	return i.value
+}
+
+func (i *dbIter) Error() error { return nil }
+
+const (
+	nKV = iota
+	nKey
+	nVal
+	nHeight
+	nNext
+)
+
+// DB ia an in-memory key/value database.
 type DB struct {
-	// Need 64-bit alignment.
-	kvSize int64
+	cmp comparer.BasicComparer
+	rnd *rand.Rand
 
-	cmp       comparer.BasicComparer
-	rnd       *rand.Rand
-	head      *mNode
-	maxHeight int32
-	n         int32
-
-	prev [tMaxHeight]*mNode
+	mu     sync.RWMutex
+	kvData []byte
+	// Node data:
+	// [0]         : KV offset
+	// [1]         : Key length
+	// [2]         : Value length
+	// [3]         : Height
+	// [3..height] : Next nodes
+	nodeData  []int
+	prevNode  [tMaxHeight]int
+	maxHeight int
+	n         int
+	kvSize    int
 }
 
-// New create new initalized in-memory key/value database.
-func New(cmp comparer.BasicComparer) *DB {
-	return &DB{
-		cmp:       cmp,
-		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
-		maxHeight: 1,
-		head:      newNode(nil, nil, tMaxHeight),
-	}
-}
-
-// Put insert given key and value to the database. Need external synchronization.
-// Key and value will not be copied; and should not modified after this point.
-func (p *DB) Put(key []byte, value []byte) {
-	if m, exact := p.findGE_NB(key, true); exact {
-		h := int32(len(m.next))
-		x := newNode(key, value, h)
-		for i, n := range p.prev[:h] {
-			x.setNext_NB(i, m.getNext_NB(i))
-			n.setNext(i, x)
-		}
-		atomic.AddInt64(&p.kvSize, int64(len(value)-len(m.value)))
-		return
-	}
-
-	h := p.randHeight()
-	if h > p.maxHeight {
-		for i := p.maxHeight; i < h; i++ {
-			p.prev[i] = p.head
-		}
-		atomic.StoreInt32(&p.maxHeight, h)
-	}
-
-	x := newNode(key, value, h)
-	for i, n := range p.prev[:h] {
-		x.setNext_NB(i, n.getNext_NB(i))
-		n.setNext(i, x)
-	}
-
-	atomic.AddInt64(&p.kvSize, int64(len(key)+len(value)))
-	atomic.AddInt32(&p.n, 1)
-}
-
-// Remove remove given key from the database. Need external synchronization.
-func (p *DB) Remove(key []byte) {
-	x, exact := p.findGE_NB(key, true)
-	if !exact {
-		return
-	}
-
-	h := len(x.next)
-	for i, n := range p.prev[:h] {
-		n.setNext(i, n.getNext_NB(i).getNext_NB(i))
-	}
-
-	atomic.AddInt64(&p.kvSize, -int64(len(x.key)+len(x.value)))
-	atomic.AddInt32(&p.n, -1)
-}
-
-// Contains return true if given key are in database.
-func (p *DB) Contains(key []byte) bool {
-	_, exact := p.findGE(key, false)
-	return exact
-}
-
-// Get return value for the given key.
-func (p *DB) Get(key []byte) (value []byte, err error) {
-	if x, exact := p.findGE(key, false); exact {
-		value = x.value
-	} else {
-		err = errors.ErrNotFound
-	}
-	return
-}
-
-// Find return key/value equal or greater than given key.
-func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
-	if x, _ := p.findGE(key, false); x != nil {
-		rkey = x.key
-		value = x.value
-	} else {
-		err = errors.ErrNotFound
-	}
-	return
-}
-
-// NewIterator create a new iterator over the database content.
-func (p *DB) NewIterator() *Iterator {
-	return &Iterator{p: p}
-}
-
-// Size return sum of key/value size.
-func (p *DB) Size() int {
-	return int(atomic.LoadInt64(&p.kvSize))
-}
-
-// Len return the number of entries in the database.
-func (p *DB) Len() int {
-	return int(atomic.LoadInt32(&p.n))
-}
-
-func (p *DB) findGE(key []byte, prev bool) (*mNode, bool) {
-	x := p.head
-	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
-	for {
-		next := x.getNext(h)
-		cmp := 1
-		if next != nil {
-			cmp = p.cmp.Compare(next.key, key)
-		}
-		if cmp < 0 {
-			// Keep searching in this list
-			x = next
-		} else {
-			if prev {
-				p.prev[h] = x
-			} else if cmp == 0 {
-				return next, true
-			}
-			if h == 0 {
-				return next, cmp == 0
-			}
-			h--
-		}
-	}
-	return nil, false
-}
-
-func (p *DB) findGE_NB(key []byte, prev bool) (*mNode, bool) {
-	x := p.head
-	h := int(p.maxHeight) - 1
-	for {
-		next := x.getNext_NB(h)
-		cmp := 1
-		if next != nil {
-			cmp = p.cmp.Compare(next.key, key)
-		}
-		if cmp < 0 {
-			// Keep searching in this list
-			x = next
-		} else {
-			if prev {
-				p.prev[h] = x
-			} else if cmp == 0 {
-				return next, true
-			}
-			if h == 0 {
-				return next, cmp == 0
-			}
-			h--
-		}
-	}
-	return nil, false
-}
-
-func (p *DB) findLT(key []byte) *mNode {
-	x := p.head
-	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
-	for {
-		next := x.getNext(h)
-		if next == nil || p.cmp.Compare(next.key, key) >= 0 {
-			if h == 0 {
-				if x == p.head {
-					return nil
-				}
-				return x
-			}
-			h--
-		} else {
-			x = next
-		}
-	}
-	return nil
-}
-
-func (p *DB) findLast() *mNode {
-	x := p.head
-	h := int(atomic.LoadInt32(&p.maxHeight)) - 1
-	for {
-		next := x.getNext(h)
-		if next == nil {
-			if h == 0 {
-				if x == p.head {
-					return nil
-				}
-				return x
-			}
-			h--
-		} else {
-			x = next
-		}
-	}
-	return nil
-}
-
-func (p *DB) randHeight() (h int32) {
+func (p *DB) randHeight() (h int) {
 	const branching = 4
 	h = 1
 	for h < tMaxHeight && p.rnd.Int()%branching == 0 {
@@ -262,67 +141,220 @@ func (p *DB) randHeight() (h int32) {
 	return
 }
 
-type Iterator struct {
-	util.BasicReleaser
-	p      *DB
-	node   *mNode
-	onLast bool
-}
-
-func (i *Iterator) Valid() bool {
-	return i.node != nil
-}
-
-func (i *Iterator) First() bool {
-	i.node = i.p.head.getNext(0)
-	return i.Valid()
-}
-
-func (i *Iterator) Last() bool {
-	i.node = i.p.findLast()
-	return i.Valid()
-}
-
-func (i *Iterator) Seek(key []byte) bool {
-	i.node, _ = i.p.findGE(key, false)
-	return i.Valid()
-}
-
-func (i *Iterator) Next() bool {
-	if i.node == nil {
-		return i.First()
-	}
-	i.node = i.node.getNext(0)
-	res := i.Valid()
-	if !res {
-		i.onLast = true
-	}
-	return res
-}
-
-func (i *Iterator) Prev() bool {
-	if i.node == nil {
-		if i.onLast {
-			return i.Last()
+func (p *DB) findGE(key []byte, prev bool) (int, bool) {
+	node := 0
+	h := p.maxHeight - 1
+	for {
+		next := p.nodeData[node+nNext+h]
+		cmp := 1
+		if next != 0 {
+			o := p.nodeData[next]
+			cmp = p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key)
 		}
-		return false
+		if cmp < 0 {
+			// Keep searching in this list
+			node = next
+		} else {
+			if prev {
+				p.prevNode[h] = node
+			} else if cmp == 0 {
+				return next, true
+			}
+			if h == 0 {
+				return next, cmp == 0
+			}
+			h--
+		}
 	}
-	i.node = i.p.findLT(i.node.key)
-	return i.Valid()
+	return 0, false
 }
 
-func (i *Iterator) Key() []byte {
-	if !i.Valid() {
-		return nil
+func (p *DB) findLT(key []byte) int {
+	node := 0
+	h := p.maxHeight - 1
+	for {
+		next := p.nodeData[node+nNext+h]
+		o := p.nodeData[next]
+		if next == 0 || p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key) >= 0 {
+			if h == 0 {
+				return node
+			}
+			h--
+		} else {
+			node = next
+		}
 	}
-	return i.node.key
+	return 0
 }
 
-func (i *Iterator) Value() []byte {
-	if !i.Valid() {
-		return nil
+func (p *DB) findLast() int {
+	node := 0
+	h := p.maxHeight - 1
+	for {
+		next := p.nodeData[node+nNext+h]
+		if next == 0 {
+			if h == 0 {
+				return node
+			}
+			h--
+		} else {
+			node = next
+		}
 	}
-	return i.node.value
+	return 0
 }
 
-func (i *Iterator) Error() error { return nil }
+// Put sets the value for the given key. It overwrites any previous value
+// for that key; a DB is not a multi-map.
+//
+// It is safe to modify the contents of the arguments after Put returns.
+func (p *DB) Put(key []byte, value []byte) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if node, exact := p.findGE(key, true); exact {
+		kvOffset := len(p.kvData)
+		p.kvData = append(p.kvData, key...)
+		p.kvData = append(p.kvData, value...)
+		p.nodeData[node] = kvOffset
+		m := p.nodeData[node+nVal]
+		p.nodeData[node+nVal] = len(value)
+		p.kvSize += len(value) - m
+		return
+	}
+
+	h := p.randHeight()
+	if h > p.maxHeight {
+		for i := p.maxHeight; i < h; i++ {
+			p.prevNode[i] = 0
+		}
+		p.maxHeight = h
+	}
+
+	kvOffset := len(p.kvData)
+	p.kvData = append(p.kvData, key...)
+	p.kvData = append(p.kvData, value...)
+	// Node
+	node := len(p.nodeData)
+	p.nodeData = append(p.nodeData, kvOffset, len(key), len(value), h)
+	for i, n := range p.prevNode[:h] {
+		m := n + 4 + i
+		p.nodeData = append(p.nodeData, p.nodeData[m])
+		p.nodeData[m] = node
+	}
+
+	p.kvSize += len(key) + len(value)
+	p.n++
+}
+
+// Delete deletes the value for the given key. It returns errors.ErrNotFound if
+// the DB does not contain the key.
+//
+// It is safe to modify the contents of the arguments after Delete returns.
+func (p *DB) Delete(key []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	node, exact := p.findGE(key, true)
+	if !exact {
+		return errors.ErrNotFound
+	}
+
+	h := p.nodeData[node+nHeight]
+	for i, n := range p.prevNode[:h] {
+		m := n + 4 + i
+		p.nodeData[m] = p.nodeData[p.nodeData[m]+nNext+i]
+	}
+
+	p.kvSize -= p.nodeData[node+nKey] + p.nodeData[node+nVal]
+	p.n--
+	return nil
+}
+
+// Contains returns true if the given key are in the DB.
+//
+// It is safe to modify the contents of the arguments after Contains returns.
+func (p *DB) Contains(key []byte) bool {
+	p.mu.RLock()
+	_, exact := p.findGE(key, false)
+	p.mu.RUnlock()
+	return exact
+}
+
+// Get gets the value for the given key. It returns error.ErrNotFound if the
+// DB does not contain the key.
+//
+// The caller should not modify the contents of the returned slice, but
+// it is safe to modify the contents of the argument after Get returns.
+func (p *DB) Get(key []byte) (value []byte, err error) {
+	p.mu.RLock()
+	if node, exact := p.findGE(key, false); exact {
+		o := p.nodeData[node] + p.nodeData[node+nKey]
+		value = p.kvData[o : o+p.nodeData[node+nVal]]
+	} else {
+		err = errors.ErrNotFound
+	}
+	p.mu.RUnlock()
+	return
+}
+
+// Find finds key/value pair whose key is greater than or equal to the
+// given key. It returns errors.ErrNotFound if the table doesn't contain
+// such pair.
+//
+// The caller should not modify the contents of the returned slice, but
+// it is safe to modify the contents of the argument after Find returns.
+func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
+	p.mu.RLock()
+	if node, _ := p.findGE(key, false); node != 0 {
+		n := p.nodeData[node]
+		m := n + p.nodeData[node+nKey]
+		rkey = p.kvData[n:m]
+		value = p.kvData[m : m+p.nodeData[node+nVal]]
+	} else {
+		err = errors.ErrNotFound
+	}
+	p.mu.RUnlock()
+	return
+}
+
+// NewIterator returns an iterator of the DB.
+// The returned iterator is not goroutine-safe, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
+// It is also safe to use an iterator concurrently with modifying its
+// underlying DB. However, the resultant key/value pairs are not guaranteed
+// to be a consistent snapshot of the DB at a particular point in time.
+//
+// The iterator must be released after use, by calling Release method.
+func (p *DB) NewIterator() iterator.Iterator {
+	return &dbIter{p: p}
+}
+
+// Size returns sum of keys and values length.
+func (p *DB) Size() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.kvSize
+}
+
+// Len returns the number of entries in the DB.
+func (p *DB) Len() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.n
+}
+
+// New creates a new initalized in-memory key/value DB. The capacity
+// is the initial key/value buffer capacity. The capacity is advisory,
+// not enforced.
+func New(cmp comparer.BasicComparer, capacity int) *DB {
+	p := &DB{
+		cmp:       cmp,
+		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
+		maxHeight: 1,
+		kvData:    make([]byte, 0, capacity),
+		nodeData:  make([]int, 4+tMaxHeight),
+	}
+	p.nodeData[nHeight] = tMaxHeight
+	return p
+}

@@ -117,7 +117,7 @@ type stConstructor_MemDB struct {
 func (p *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
-	p.mem = memdb.New(comparer.DefaultComparer)
+	p.mem = memdb.New(comparer.DefaultComparer, 0)
 	return nil
 }
 
@@ -146,7 +146,7 @@ func (p *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
 	p.t = t
 	for i := range p.mem {
-		p.mem[i] = memdb.New(comparer.DefaultComparer)
+		p.mem[i] = memdb.New(comparer.DefaultComparer, 0)
 	}
 	return nil
 }

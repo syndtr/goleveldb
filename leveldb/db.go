@@ -278,7 +278,7 @@ func (d *DB) recoverJournal() error {
 			fr = nil
 		}
 
-		mem = memdb.New(icmp)
+		mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
 
 		for r.journal.Next() {
 			if err = batch.decode(r.journal.Record()); err != nil {
@@ -291,14 +291,14 @@ func (d *DB) recoverJournal() error {
 
 			d.seq = batch.seq + uint64(batch.len())
 
-			if mem.Size() > s.o.GetWriteBuffer() {
+			if mem.Size() >= s.o.GetWriteBuffer() {
 				// flush to table
 				if err = cm.flush(mem, 0); err != nil {
 					return err
 				}
 
 				// create new memdb
-				mem = memdb.New(icmp)
+				mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
 			}
 		}
 

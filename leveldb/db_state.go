@@ -48,7 +48,7 @@ func (d *DB) newMem() (m *memdb.DB, err error) {
 
 	d.fseq = d.seq
 
-	m = memdb.New(s.cmp)
+	m = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
 	mem := &memSet{cur: m}
 	if old := d.getMem_NB(); old != nil {
 		mem.froze = old.cur
