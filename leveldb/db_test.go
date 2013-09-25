@@ -286,9 +286,16 @@ func (h *dbHarness) compactMem() {
 	t := h.t
 	db := h.db
 
-	db.cch <- cSched
+	db.compCh <- nil
 
 	if mem, _ := db.getMem(); mem.Len() == 0 {
+		return
+	}
+
+	select {
+	case <-db.compMemAckCh:
+	case err := <-db.compErrCh:
+		t.Error("compaction error: ", err)
 		return
 	}
 
@@ -299,9 +306,11 @@ func (h *dbHarness) compactMem() {
 		return
 	}
 
+	cch := make(chan struct{})
 	// schedule compaction
-	db.cch <- cSched
-	db.cch <- cWait
+	db.compMemCh <- cch
+	// wait
+	<-cch
 
 	if h.totalTables() == 0 {
 		t.Error("zero tables after mem compaction")
@@ -312,27 +321,35 @@ func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) 
 	t := h.t
 	db := h.db
 
-	r := new(cReq)
-	r.level = level
+	cch := make(chan struct{})
+	req := &cReq{level: level, cch: cch}
 	if min != "" {
-		r.min = []byte(min)
+		req.min = []byte(min)
 	}
 	if max != "" {
-		r.max = []byte(max)
+		req.max = []byte(max)
 	}
 
-	db.creq <- r
-	db.cch <- cWait
+	// Push manual compaction request.
+	select {
+	case err := <-db.compErrCh:
+		t.Error("CompactRangeAt: compaction error: ", err)
+		return
+	case db.compReqCh <- req:
+	}
 
-	err := db.wok()
-	if err != nil {
+	// Wait for compaction
+	select {
+	case err := <-db.compErrCh:
 		if wanterr {
 			t.Log("CompactRangeAt: got error (expected): ", err)
 		} else {
 			t.Error("CompactRangeAt: got error: ", err)
 		}
-	} else if wanterr {
-		t.Error("CompactRangeAt: expect error")
+	case <-cch:
+		if wanterr {
+			t.Error("CompactRangeAt: expect error")
+		}
 	}
 }
 
@@ -681,8 +698,11 @@ func TestDb_GetEncountersEmptyLevel(t *testing.T) {
 		}
 
 		// Step 4: Wait for compaction to finish
-		h.db.cch <- cSched
-		h.db.cch <- cWait
+		select {
+		case err := <-h.db.compErrCh:
+			t.Error("compaction error: ", err)
+		case h.db.compCh <- nil:
+		}
 
 		v := h.db.s.version()
 		if v.tLen(0) > 0 {
@@ -1224,7 +1244,11 @@ func TestDb_L0_CompactionBug_Issue44_a(t *testing.T) {
 	h.reopenDB()
 	h.reopenDB()
 	h.getKeyVal("(a->v)")
-	h.db.cch <- cWait
+	select {
+	case err := <-h.db.compErrCh:
+		t.Error("compaction error: ", err)
+	case h.db.compCh <- nil:
+	}
 	h.getKeyVal("(a->v)")
 
 	h.close()
@@ -1244,7 +1268,11 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.put("", "")
 	h.reopenDB()
 	h.put("", "")
-	h.db.cch <- cWait
+	select {
+	case err := <-h.db.compErrCh:
+		t.Error("compaction error: ", err)
+	case h.db.compCh <- nil:
+	}
 	h.reopenDB()
 	h.put("d", "dv")
 	h.reopenDB()
@@ -1254,7 +1282,11 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.delete("b")
 	h.reopenDB()
 	h.getKeyVal("(->)(c->cv)")
-	h.db.cch <- cWait
+	select {
+	case err := <-h.db.compErrCh:
+		t.Error("compaction error: ", err)
+	case h.db.compCh <- nil:
+	}
 	h.getKeyVal("(->)(c->cv)")
 
 	h.close()
@@ -1526,18 +1558,18 @@ func TestDb_Concurrent(t *testing.T) {
 
 	runtime.GOMAXPROCS(n)
 	runAllOpts(t, func(h *dbHarness) {
-		var wg sync.WaitGroup
+		var closeWg sync.WaitGroup
 		var stop uint32
 		var cnt [n]uint32
 
 		for i := 0; i < n; i++ {
-			wg.Add(1)
+			closeWg.Add(1)
 			go func(i int) {
 				var put, get, found uint
 				defer func() {
 					t.Logf("goroutine %d stopped after %d ops, put=%d get=%d found=%d missing=%d",
 						i, cnt[i], put, get, found, get-found)
-					wg.Done()
+					closeWg.Done()
 				}()
 
 				rnd := rand.New(rand.NewSource(int64(1000 + i)))
@@ -1583,7 +1615,7 @@ func TestDb_Concurrent(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 		atomic.StoreUint32(&stop, 1)
-		wg.Wait()
+		closeWg.Wait()
 	})
 
 	runtime.GOMAXPROCS(1)
@@ -1594,35 +1626,35 @@ func TestDb_Concurrent2(t *testing.T) {
 
 	runtime.GOMAXPROCS(n*2 + 2)
 	runAllOpts(t, func(h *dbHarness) {
-		var wg sync.WaitGroup
+		var closeWg sync.WaitGroup
 		var stop uint32
 
 		h.oo.SetWriteBuffer(30)
 
 		for i := 0; i < n; i++ {
-			wg.Add(1)
+			closeWg.Add(1)
 			go func(i int) {
 				for k := 0; atomic.LoadUint32(&stop) == 0; k++ {
 					h.put(fmt.Sprintf("k%d", k), fmt.Sprintf("%d.%d.", k, i)+strings.Repeat("x", 10))
 				}
-				wg.Done()
+				closeWg.Done()
 			}(i)
 		}
 
 		for i := 0; i < n; i++ {
-			wg.Add(1)
+			closeWg.Add(1)
 			go func(i int) {
 				for k := 1000000; k < 0 || atomic.LoadUint32(&stop) == 0; k-- {
 					h.put(fmt.Sprintf("k%d", k), fmt.Sprintf("%d.%d.", k, i)+strings.Repeat("x", 10))
 				}
-				wg.Done()
+				closeWg.Done()
 			}(i)
 		}
 
 		cmp := comparer.DefaultComparer
 		ro := &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
 		for i := 0; i < n2; i++ {
-			wg.Add(1)
+			closeWg.Add(1)
 			go func(i int) {
 				it := h.db.NewIterator(ro)
 				var pk []byte
@@ -1652,12 +1684,12 @@ func TestDb_Concurrent2(t *testing.T) {
 					t.Errorf("iter %d: Got error: %v", i, err)
 				}
 				it.Release()
-				wg.Done()
+				closeWg.Done()
 			}(i)
 		}
 
 		atomic.StoreUint32(&stop, 1)
-		wg.Wait()
+		closeWg.Wait()
 	})
 
 	runtime.GOMAXPROCS(1)

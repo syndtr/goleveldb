@@ -9,6 +9,7 @@ package leveldb
 import (
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -22,65 +23,68 @@ func (d *DB) doWriteJournal(b *Batch) error {
 }
 
 func (d *DB) writeJournal() {
-	for b := range d.jch {
-		if b == nil {
-			break
+	defer d.closeWg.Done()
+	for {
+		select {
+		case _, _ = <-d.closeCh:
+			return
+		case b := <-d.journalCh:
+			if b != nil {
+				d.journalAckCh <- d.doWriteJournal(b)
+			}
 		}
-
-		// write journal
-		d.jack <- d.doWriteJournal(b)
 	}
-
-	close(d.jch)
-	close(d.jack)
-	d.ewg.Done()
 }
 
-func (d *DB) flush() (m *memdb.DB, err error) {
+func (d *DB) flush() (*memdb.DB, error) {
 	s := d.s
 
-	delayed, cwait := false, false
+	delayed := false
 	for {
 		v := s.version()
-		mem, frozenMem := d.getMem()
+		mem, _ := d.getMem()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
-		case mem.Size() <= s.o.GetWriteBuffer():
+		case mem.Size() < s.o.GetWriteBuffer():
 			// still room
 			v.release()
 			return mem, nil
-		case frozenMem != nil:
-			if cwait {
-				err = d.geterr()
-				if err != nil {
-					return
-				}
-				d.cch <- cSched
-			} else {
-				cwait = true
-				d.cch <- cWait
-			}
 		case v.tLen(0) >= kL0_StopWritesTrigger:
-			d.cch <- cSched
+			select {
+			case _, _ = <-d.closeCh:
+				v.release()
+				return nil, errors.ErrClosed
+			case d.compCh <- nil:
+			}
 		default:
-			// create new memdb and journal
-			m, err = d.newMem()
-			if err != nil {
-				return
+			// Wait for pending memdb compaction.
+			select {
+			case _, _ = <-d.closeCh:
+				v.release()
+				return nil, errors.ErrClosed
+			case <-d.compMemAckCh:
+			case err := <-d.compErrCh:
+				v.release()
+				return nil, err
 			}
 
-			// schedule compaction
-			select {
-			case d.cch <- cSched:
-			default:
+			// Create new memdb and journal.
+			mem, err := d.newMem()
+			if err != nil {
+				v.release()
+				return nil, err
 			}
+
+			// Schedule memdb compaction.
+			d.compMemCh <- nil
+			v.release()
+			return mem, nil
 		}
 		v.release()
 	}
-
-	return
+	return nil, nil
 }
 
 // Write apply the given batch to the DB. The batch will be applied
@@ -88,7 +92,7 @@ func (d *DB) flush() (m *memdb.DB, err error) {
 //
 // It is safe to modify the contents of the arguments after Write returns.
 func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
-	err = d.wok()
+	err = d.ok()
 	if err != nil || b == nil || b.len() == 0 {
 		return
 	}
@@ -97,16 +101,18 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 
 	// The write happen synchronously.
 	select {
-	case d.wqueue <- b:
-		return <-d.wack
-	case d.wlock <- struct{}{}:
+	case _, _ = <-d.closeCh:
+		return errors.ErrClosed
+	case d.writeCh <- b:
+		return <-d.writeAckCh
+	case d.writeLockCh <- struct{}{}:
 	}
 
 	merged := 0
 	defer func() {
-		<-d.wlock
+		<-d.writeLockCh
 		for i := 0; i < merged; i++ {
-			d.wack <- err
+			d.writeAckCh <- err
 		}
 	}()
 
@@ -115,17 +121,17 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 		return
 	}
 
-	// calculate maximum size of the batch
+	// Calculate maximum size of the batch.
 	m := 1 << 20
 	if x := b.size(); x <= 128<<10 {
 		m = x + (128 << 10)
 	}
 
-	// merge with other batch
+	// Merge with other batch.
 drain:
 	for b.size() <= m && !b.sync {
 		select {
-		case nb := <-d.wqueue:
+		case nb := <-d.writeCh:
 			b.append(nb)
 			merged++
 		default:
@@ -133,17 +139,31 @@ drain:
 		}
 	}
 
-	// set batch first seq number relative from last seq
+	// Set batch first seq number relative from last seq.
 	b.seq = d.seq + 1
 
-	// write journal concurrently if it is large enough
+	// Write journal concurrently if it is large enough.
 	if b.size() >= (128 << 10) {
-		d.jch <- b
-		b.memReplay(mem)
-		err = <-d.jack
-		if err != nil {
-			b.revertMemReplay(mem)
+		// Push the write batch to the journal writer
+		select {
+		case _, _ = <-d.closeCh:
+			err = errors.ErrClosed
 			return
+		case d.journalCh <- b:
+			// Write into memdb
+			b.memReplay(mem)
+		}
+		// Wait for journal writer
+		select {
+		case _, _ = <-d.closeCh:
+			err = errors.ErrClosed
+			return
+		case err = <-d.journalAckCh:
+			if err != nil {
+				// Revert memdb if error detected
+				b.revertMemReplay(mem)
+				return
+			}
 		}
 	} else {
 		err = d.doWriteJournal(b)
@@ -153,9 +173,8 @@ drain:
 		b.memReplay(mem)
 	}
 
-	// set last seq number
+	// Set last seq number.
 	d.addSeq(uint64(b.len()))
-
 	return
 }
 

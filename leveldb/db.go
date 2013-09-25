@@ -8,6 +8,7 @@ package leveldb
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -28,19 +29,6 @@ type DB struct {
 
 	s *session
 
-	cch     chan cSignal       // compaction worker signal
-	creq    chan *cReq         // compaction request
-	wlock   chan struct{}      // writer mutex
-	wqueue  chan *Batch        // writer queue
-	wack    chan error         // writer ack
-	jch     chan *Batch        // journal writer chan
-	jack    chan error         // journal writer ack
-	ewg     sync.WaitGroup     // exit WaitGroup
-	cstats  [kNumLevels]cStats // Compaction stats
-	closeCb func() error
-	closed  uint32
-	err     unsafe.Pointer
-
 	// MemDB
 	memMu         sync.RWMutex
 	mem           *memdb.DB
@@ -52,34 +40,68 @@ type DB struct {
 	// Snapshot
 	snapsMu   sync.Mutex
 	snapsRoot snapshotElement
+
+	// Write
+	writeCh      chan *Batch
+	writeLockCh  chan struct{}
+	writeAckCh   chan error
+	journalCh    chan *Batch
+	journalAckCh chan error
+
+	// Compaction
+	compCh       chan chan<- struct{}
+	compMemCh    chan chan<- struct{}
+	compMemAckCh chan struct{}
+	compReqCh    chan *cReq
+	compErrCh    chan error
+	compErrSetCh chan error
+	compStats    [kNumLevels]cStats
+
+	// Close
+	closeWg sync.WaitGroup
+	closeCh chan struct{}
+	closed  uint32
+	err     unsafe.Pointer
+	closer  io.Closer
 }
 
 func openDB(s *session) (*DB, error) {
 	db := &DB{
-		s:      s,
-		cch:    make(chan cSignal),
-		creq:   make(chan *cReq),
-		wlock:  make(chan struct{}, 1),
-		wqueue: make(chan *Batch),
-		wack:   make(chan error),
-		jch:    make(chan *Batch),
-		jack:   make(chan error),
-		seq:    s.stSeq,
+		s: s,
+		// Initial sequence
+		seq: s.stSeq,
+		// Write
+		writeCh:      make(chan *Batch),
+		writeLockCh:  make(chan struct{}, 1),
+		writeAckCh:   make(chan error),
+		journalCh:    make(chan *Batch),
+		journalAckCh: make(chan error),
+		// Compaction
+		compCh:       make(chan chan<- struct{}, 1),
+		compMemCh:    make(chan chan<- struct{}, 1),
+		compMemAckCh: make(chan struct{}, 1),
+		compReqCh:    make(chan *cReq),
+		compErrCh:    make(chan error),
+		compErrSetCh: make(chan error),
+		// Close
+		closeCh: make(chan struct{}),
 	}
 	db.initSnapshot()
+	db.compMemAckCh <- struct{}{}
 
 	if err := db.recoverJournal(); err != nil {
 		return nil, err
 	}
 
-	// remove any obsolete files
+	// Remove any obsolete files.
 	db.cleanFiles()
 
-	db.ewg.Add(2)
+	// Don't include compaction error goroutine into wait group.
+	go db.compactionError()
+
+	db.closeWg.Add(2)
 	go db.compaction()
 	go db.writeJournal()
-	// wait for compaction goroutine
-	db.cch <- cWait
 
 	runtime.SetFinalizer(db, (*DB).Close)
 	return db, nil
@@ -92,7 +114,7 @@ func openDB(s *session) (*DB, error) {
 //
 // The DB must be closed after use, by calling Close method.
 func Open(p storage.Storage, o *opt.Options) (*DB, error) {
-	s, err := openSession(p, o)
+	s, err := newSession(p, o)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +151,10 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 		return nil, err
 	}
 	db, err := Open(stor, o)
-	db.closeCb = func() error {
-		return stor.Close()
+	if err != nil {
+		stor.Close()
+	} else {
+		db.closer = stor
 	}
 	return db, err
 }
@@ -142,7 +166,7 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 //
 // The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
-	s, err := openSession(p, o)
+	s, err := newSession(p, o)
 	if err != nil {
 		return nil, err
 	}
@@ -371,10 +395,10 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	v := s.version()
 	value, cState, err := v.get(ikey, ro)
 	v.release()
-	if cState && !d.isClosed() {
-		// schedule compaction
+	if cState {
+		// Schedule compaction.
 		select {
-		case d.cch <- cSched:
+		case d.compCh <- nil:
 		default:
 		}
 	}
@@ -387,7 +411,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Get returns.
 func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
-	err = d.rok()
+	err = d.ok()
 	if err != nil {
 		return
 	}
@@ -409,7 +433,7 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 //
 // The iterator must be released after use, by calling Release method.
 func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
-	if err := d.rok(); err != nil {
+	if err := d.ok(); err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
 
@@ -424,7 +448,7 @@ func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 //
 // The snapshot must be released after use, by calling Release method.
 func (d *DB) GetSnapshot() (*Snapshot, error) {
-	if err := d.rok(); err != nil {
+	if err := d.ok(); err != nil {
 		return nil, err
 	}
 
@@ -441,7 +465,7 @@ func (d *DB) GetSnapshot() (*Snapshot, error) {
 //	leveldb.sstables
 //		Returns sstables list for each level.
 func (d *DB) GetProperty(name string) (value string, err error) {
-	err = d.rok()
+	err = d.ok()
 	if err != nil {
 		return
 	}
@@ -472,7 +496,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 			" Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)\n" +
 			"-------+------------+---------------+---------------+---------------+---------------\n"
 		for level, tt := range v.tables {
-			duration, read, write := d.cstats[level].get()
+			duration, read, write := d.compStats[level].get()
 			if len(tt) == 0 && duration == 0 {
 				continue
 			}
@@ -501,7 +525,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 // the size of the corresponding user data size.
 // The results may not include the sizes of recently written data.
 func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
-	if err := d.rok(); err != nil {
+	if err := d.ok(); err != nil {
 		return nil, err
 	}
 
@@ -541,19 +565,34 @@ func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
 // And a nil Range.Limit is treated as a key after all keys in the DB.
 // Therefore if both is nil then it will compact entire DB.
 func (d *DB) CompactRange(r Range) error {
-	err := d.wok()
+	err := d.ok()
 	if err != nil {
 		return err
 	}
 
-	req := &cReq{level: -1}
-	req.min = r.Start
-	req.max = r.Limit
+	cch := make(chan struct{})
+	req := &cReq{
+		level: -1,
+		min:   r.Start,
+		max:   r.Limit,
+		cch:   cch,
+	}
 
-	d.creq <- req
-	d.cch <- cWait
-
-	return d.wok()
+	// Push manual compaction request.
+	select {
+	case _, _ = <-d.closeCh:
+		return errors.ErrClosed
+	case err := <-d.compErrCh:
+		return err
+	case d.compReqCh <- req:
+	}
+	// Wait for compaction
+	select {
+	case _, _ = <-d.closeCh:
+		return errors.ErrClosed
+	case <-cch:
+	}
+	return nil
 }
 
 // Close closes the DB. This will also releases any outstanding snapshot.
@@ -569,26 +608,17 @@ func (d *DB) Close() error {
 	// Clear the finalizer.
 	runtime.SetFinalizer(d, nil)
 
-	d.wlock <- struct{}{}
-drain:
-	for {
-		select {
-		case <-d.wqueue:
-			d.wack <- errors.ErrClosed
-		default:
-			break drain
-		}
+	// Get compaction error.
+	var err error
+	select {
+	case err = <-d.compErrCh:
+	default:
 	}
-	close(d.wlock)
 
-	// wake journal writer goroutine
-	d.jch <- nil
-
-	// wake Compaction goroutine
-	d.cch <- cClose
+	close(d.closeCh)
 
 	// wait for the WaitGroup
-	d.ewg.Wait()
+	d.closeWg.Wait()
 
 	// close journal
 	if d.journal != nil {
@@ -598,13 +628,11 @@ drain:
 	// close session
 	d.s.close()
 
-	if d.closeCb != nil {
-		cerr := d.closeCb()
-		if err := d.geterr(); err != nil {
-			return err
+	if d.closer != nil {
+		if err1 := d.closer.Close(); err == nil {
+			err = err1
 		}
-		return cerr
 	}
 
-	return d.geterr()
+	return err
 }

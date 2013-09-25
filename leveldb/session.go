@@ -38,7 +38,7 @@ type session struct {
 	vmu       sync.Mutex
 }
 
-func openSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
+func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 	if stor == nil || o == nil {
 		return nil, os.ErrInvalid
 	}

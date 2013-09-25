@@ -26,7 +26,7 @@ func (d *DB) addSeq(delta uint64) {
 
 // Create new memdb and froze the old one; need external synchronization.
 // newMem only called synchronously by the writer.
-func (d *DB) newMem() (m *memdb.DB, err error) {
+func (d *DB) newMem() (mem *memdb.DB, err error) {
 	s := d.s
 
 	num := s.allocFileNum()
@@ -43,7 +43,8 @@ func (d *DB) newMem() (m *memdb.DB, err error) {
 	}
 	d.journal = newJournal
 	d.frozenMem = d.mem
-	d.mem = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
+	mem = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
+	d.mem = mem
 	// The seq only incremented by the writer.
 	d.frozenSeq = d.seq
 	d.memMu.Unlock()
@@ -96,7 +97,7 @@ func (d *DB) isClosed() bool {
 }
 
 // Check read ok status.
-func (d *DB) rok() error {
+func (d *DB) ok() error {
 	if d.isClosed() {
 		return errors.ErrClosed
 	}
@@ -120,17 +121,6 @@ func (d *DB) seterr(err error) {
 func (d *DB) geterr() error {
 	if p := atomic.LoadPointer(&d.err); p != nil {
 		return (*errWrap)(p).err
-	}
-	return nil
-}
-
-// Check write ok status.
-func (d *DB) wok() error {
-	if err := d.geterr(); err != nil {
-		return err
-	}
-	if d.isClosed() {
-		return errors.ErrClosed
 	}
 	return nil
 }

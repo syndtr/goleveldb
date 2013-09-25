@@ -7,10 +7,16 @@
 package leveldb
 
 import (
+	"errors"
 	"sync"
 	"time"
 
+	ierrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
+)
+
+var (
+	errTransactExiting = errors.New("leveldb: transact exiting")
 )
 
 type cStats struct {
@@ -59,6 +65,7 @@ func (p *cStatsStaging) stopTimer() {
 type cReq struct {
 	level    int
 	min, max iKey
+	cch      chan<- struct{}
 }
 
 type cSignal int
@@ -114,70 +121,77 @@ func (c *cMem) commit(journal, seq uint64) error {
 	return c.s.commit(c.rec)
 }
 
-func (d *DB) transact(f func() error) {
-	s := d.s
-
-	exit := func() {
-		s.print("Transact: exiting")
-
-		// dry out, until found close signal
-		for signal := range d.cch {
-			if signal == cClose {
-				break
+func (d *DB) compactionError() {
+	var err error
+noerr:
+	for {
+		select {
+		case _, _ = <-d.closeCh:
+			return
+		case err = <-d.compErrSetCh:
+			if err != nil {
+				goto haserr
 			}
 		}
-		panic(d)
 	}
+haserr:
+	for {
+		select {
+		case _, _ = <-d.closeCh:
+			return
+		case err = <-d.compErrSetCh:
+			if err == nil {
+				goto noerr
+			}
+		case d.compErrCh <- err:
+		}
+	}
+}
 
+func (d *DB) transact(name string, f func() error) {
+	s := d.s
 	for {
 		if d.isClosed() {
-			exit()
+			s.printf("Transact: %s: exiting", name)
+			panic(errTransactExiting)
 		}
 		err := f()
-		if (d.err == nil) != (err == nil) {
-			d.seterr(err)
+		select {
+		case _, _ = <-d.closeCh:
+			s.printf("Transact: %s: exiting", name)
+			panic(errTransactExiting)
+		case d.compErrSetCh <- err:
 		}
 		if err == nil {
 			return
 		}
-		s.printf("Transact: err=%q", err)
-		// dry the channel
-	drain:
-		for {
-			select {
-			case <-d.cch:
-			default:
-				break drain
-			}
-		}
-		if d.isClosed() {
-			exit()
-		}
+		s.printf("Transact: %s: err=%q", name, err)
 		time.Sleep(time.Second)
 	}
 }
 
-func (d *DB) memCompaction(mem *memdb.DB) {
+func (d *DB) memCompaction() {
 	s := d.s
 	c := newCMem(s)
 	stats := new(cStatsStaging)
+	mem := d.getFrozenMem()
 
 	s.printf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
 
-	d.transact(func() (err error) {
+	d.transact("mem[flush]", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.flush(mem, -1)
 	})
 
-	d.transact(func() (err error) {
+	d.transact("mem[commit]", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.commit(d.journal.file.Num(), d.frozenSeq)
 	})
 
 	stats.write = c.t.size
-	d.cstats[c.level].add(stats)
+	d.compStats[c.level].add(stats)
 
 	// drop frozen mem
 	d.dropFrozenMem()
@@ -199,7 +213,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		t := c.tables[0][0]
 		rec.deleteTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
-		d.transact(func() (err error) {
+		d.transact("table[rename]", func() (err error) {
 			return s.commit(rec)
 		})
 		s.printf("Compaction: table level changed, num=%d from=%d to=%d",
@@ -222,12 +236,12 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		}
 		rec.addTableFile(c.level+1, t)
 		stats.write += t.size
-		s.printf("Compaction: table created, source=file level=%d num=%d size=%d entries=%d min=%q max=%q",
+		s.printf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
 			c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
 		return nil
 	}
 
-	d.transact(func() (err error) {
+	d.transact("table[build]", func() (err error) {
 		tw = nil
 		ukey := append([]byte{}, snapUkey...)
 		hasUkey := snapHasUkey
@@ -246,28 +260,25 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		iter := c.newIterator()
 		defer iter.Release()
 		for i := 0; iter.Next(); i++ {
-			// Skip until last state
+			// Skip until last state.
 			if i < snapIter {
 				continue
 			}
 
-			// Prioritize memdb compaction
-			if mem := d.getFrozenMem(); mem != nil {
+			// Prioritize memdb compaction.
+			select {
+			case _, _ = <-d.closeCh:
+				err = ierrors.ErrClosed
+				return
+			case cch := <-d.compMemCh:
 				stats.stopTimer()
-				d.memCompaction(mem)
-				// dry the channel
-			drain:
-				for {
-					select {
-					case signal := <-d.cch:
-						if signal == cClose {
-							panic(d)
-						}
-					default:
-						break drain
-					}
+				d.memCompaction()
+				d.compMemAckCh <- struct{}{}
+				if cch != nil {
+					cch <- struct{}{}
 				}
 				stats.startTimer()
+			default:
 			}
 
 			key := iKey(iter.Key())
@@ -365,7 +376,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return
 	})
 
-	s.print("Compaction: done")
+	s.print("Compaction: build done")
 
 	for n, tt := range c.tables {
 		for _, t := range tt {
@@ -376,60 +387,42 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	}
 
 	// Commit changes
-	d.transact(func() (err error) {
+	d.transact("table[commit]", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return s.commit(rec)
 	})
 
+	s.print("Compaction: commited")
+
 	// Save compaction stats
-	d.cstats[c.level+1].add(stats)
+	d.compStats[c.level+1].add(stats)
 }
 
 func (d *DB) compaction() {
+	s := d.s
 	defer func() {
 		if x := recover(); x != nil {
-			if x != d {
+			if x != errTransactExiting {
 				panic(x)
 			}
 		}
-		// dry the channel
-	drain:
-		for {
-			select {
-			case <-d.cch:
-			case <-d.creq:
-			default:
-				break drain
-			}
-		}
-		close(d.cch)
-		d.ewg.Done()
+		d.closeWg.Done()
 	}()
-
-	s := d.s
 	for {
-		var creq *cReq
+		var cch chan<- struct{}
 		select {
-		case signal := <-d.cch:
-			switch signal {
-			case cWait:
-				continue
-			case cSched:
-			case cClose:
-				return
-			}
-		case creq = <-d.creq:
+		case _, _ = <-d.closeCh:
+			return
+		case cch = <-d.compMemCh:
+			d.memCompaction()
+			d.compMemAckCh <- struct{}{}
+		case cch = <-d.compCh:
+		case creq := <-d.compReqCh:
 			if creq == nil {
 				continue
 			}
-
 			s.printf("CompactRange: ordered, level=%d", creq.level)
-
-			if mem := d.getFrozenMem(); mem != nil {
-				d.memCompaction(mem)
-			}
-
 			if creq.level >= 0 {
 				c := s.getCompactionRange(creq.level, creq.min, creq.max)
 				if c != nil {
@@ -451,16 +444,17 @@ func (d *DB) compaction() {
 				}
 			}
 			s.print("CompactRange: done")
+			cch = creq.cch
 		}
-
-		for {
-			if mem := d.getFrozenMem(); mem != nil {
-				d.memCompaction(mem)
-			} else if s.version_NB().needCompaction() {
-				d.doCompaction(s.pickCompaction(), false)
-			} else {
-				break
+		if s.version_NB().needCompaction() {
+			d.doCompaction(s.pickCompaction(), false)
+			select {
+			case d.compCh <- nil:
+			default:
 			}
+		}
+		if cch != nil {
+			cch <- struct{}{}
 		}
 	}
 }

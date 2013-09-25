@@ -102,7 +102,7 @@ func (db *DB) newSnapshot() *Snapshot {
 // it is safe to modify the contents of the argument after Get returns.
 func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	db := p.db
-	err = db.rok()
+	err = db.ok()
 	if err != nil {
 		return
 	}
@@ -127,7 +127,7 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 // iterator would be still valid until released.
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	db := p.db
-	if err := db.rok(); err != nil {
+	if err := db.ok(); err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
 	p.mu.Lock()
