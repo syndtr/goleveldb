@@ -493,7 +493,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 	if r.cache != nil {
 		// Get/set block cache.
 		var err error
-		cache, ok := r.cache.Get(dataBH.offset, func() (ok bool, value interface{}, charge int, fin func()) {
+		cache, ok := r.cache.Get(dataBH.offset, func() (ok bool, value interface{}, charge int, fin cache.SetFin) {
 			if !fillCache {
 				return
 			}
@@ -522,7 +522,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 	return iter
 }
 
-// NewIterator returns an iterator for the table.
+// NewIterator returns an iterator of the table.
 //
 // The returned iterator is not goroutine-safe and should be released
 // when not used.
@@ -585,7 +585,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 }
 
 // Get gets the value for the given key. It returns errors.ErrNotFound
-// if the table doesn't contain the key.
+// if the table does not contain the key.
 //
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Get returns.

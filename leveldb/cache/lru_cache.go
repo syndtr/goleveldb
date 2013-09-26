@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 )
 
-// LRUCache represent a LRU cache state.
-type LRUCache struct {
+// lruCache represent a LRU cache state.
+type lruCache struct {
 	sync.Mutex
 
 	recent   lruNode
@@ -21,9 +21,9 @@ type LRUCache struct {
 	size     int
 }
 
-// NewLRUCache create new initialized LRU cache.
-func NewLRUCache(capacity int) *LRUCache {
-	c := &LRUCache{
+// NewLRUCache creates a new initialized LRU cache with the given capacity.
+func NewLRUCache(capacity int) Cache {
+	c := &lruCache{
 		table:    make(map[uint64]*lruNs),
 		capacity: capacity,
 	}
@@ -33,7 +33,7 @@ func NewLRUCache(capacity int) *LRUCache {
 }
 
 // SetCapacity set cache capacity.
-func (c *LRUCache) SetCapacity(capacity int) {
+func (c *lruCache) SetCapacity(capacity int) {
 	c.Lock()
 	c.capacity = capacity
 	c.evict()
@@ -41,7 +41,7 @@ func (c *LRUCache) SetCapacity(capacity int) {
 }
 
 // GetNamespace return namespace object for given id.
-func (c *LRUCache) GetNamespace(id uint64) Namespace {
+func (c *lruCache) GetNamespace(id uint64) Namespace {
 	c.Lock()
 	defer c.Unlock()
 
@@ -59,42 +59,27 @@ func (c *LRUCache) GetNamespace(id uint64) Namespace {
 }
 
 // Purge purge entire cache.
-func (c *LRUCache) Purge(fin func()) {
+func (c *lruCache) Purge(fin PurgeFin) {
 	c.Lock()
-	top := &c.recent
-	for n := c.recent.rPrev; n != top; {
-		n.state = stRemoved
-		n.rRemove()
-		n.delfin = fin
-		n.evictNB()
-		n = c.recent.rPrev
+	for _, ns := range c.table {
+		ns.purgeNB(fin)
 	}
-	c.size = 0
 	c.Unlock()
 }
 
-func (c *LRUCache) Zap() {
+func (c *lruCache) Zap(closed bool) {
 	c.Lock()
 	for _, ns := range c.table {
-		for _, n := range ns.table {
-			n.rNext = nil
-			n.rPrev = nil
-			n.execFin()
-		}
-		ns.zapped = true
-		ns.table = nil
+		ns.zapNB(closed)
 	}
-	c.recent.rNext = &c.recent
-	c.recent.rPrev = &c.recent
-	c.size = 0
 	c.table = make(map[uint64]*lruNs)
 	c.Unlock()
 }
 
-func (c *LRUCache) evict() {
+func (c *lruCache) evict() {
 	top := &c.recent
 	for n := c.recent.rPrev; c.size > c.capacity && n != top; {
-		n.state = stEvicted
+		n.state = nodeEvicted
 		n.rRemove()
 		n.evictNB()
 		c.size -= n.charge
@@ -103,17 +88,18 @@ func (c *LRUCache) evict() {
 }
 
 type lruNs struct {
-	lru    *LRUCache
-	id     uint64
-	table  map[uint64]*lruNode
-	zapped bool
+	lru   *lruCache
+	id    uint64
+	table map[uint64]*lruNode
+	state nsState
 }
 
-func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
-	lru := p.lru
+func (ns *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
+	lru := ns.lru
 	lru.Lock()
 
-	if p.zapped {
+	switch ns.state {
+	case nsZapped:
 		lru.Unlock()
 		if setf == nil {
 			return
@@ -123,22 +109,28 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 		var fin func()
 		ok, value, _, fin = setf()
 		if ok {
-			o = &emptyCacheObj{value, fin}
+			o = &fakeObject{
+				value: value,
+				fin:   fin,
+			}
 		}
+		return
+	case nsClosed:
+		lru.Unlock()
 		return
 	}
 
-	n, ok := p.table[key]
+	n, ok := ns.table[key]
 	if ok {
 		switch n.state {
-		case stEvicted:
+		case nodeEvicted:
 			// Insert to recent list.
-			n.state = stEffective
+			n.state = nodeEffective
 			n.ref++
 			lru.size += n.charge
 			lru.evict()
 			fallthrough
-		case stEffective:
+		case nodeEffective:
 			// Bump to front
 			n.rRemove()
 			n.rInsert(&lru.recent)
@@ -160,14 +152,14 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 		}
 
 		n = &lruNode{
-			ns:     p,
+			ns:     ns,
 			key:    key,
 			value:  value,
 			charge: charge,
 			setfin: fin,
 			ref:    2,
 		}
-		p.table[key] = n
+		ns.table[key] = n
 		n.rInsert(&lru.recent)
 
 		lru.size += charge
@@ -179,105 +171,108 @@ func (p *lruNs) Get(key uint64, setf SetFunc) (o Object, ok bool) {
 	return
 }
 
-func (p *lruNs) Delete(key uint64, fin func()) bool {
-	lru := p.lru
+func (ns *lruNs) Delete(key uint64, fin DelFin) bool {
+	lru := ns.lru
 	lru.Lock()
 
-	if p.zapped {
+	if ns.state != nsEffective {
 		lru.Unlock()
 		if fin != nil {
-			fin()
+			fin(false)
 		}
 		return false
 	}
 
-	n, ok := p.table[key]
+	n, ok := ns.table[key]
 	if !ok {
 		lru.Unlock()
 		if fin != nil {
-			fin()
+			fin(false)
 		}
 		return false
 	}
 
 	n.delfin = fin
 	switch n.state {
-	case stRemoved:
+	case nodeRemoved:
 		lru.Unlock()
 		return false
-	case stEffective:
+	case nodeEffective:
 		lru.size -= n.charge
 		n.rRemove()
 		n.evictNB()
 	}
-	n.state = stRemoved
+	n.state = nodeRemoved
 
 	lru.Unlock()
 	return true
 }
 
-func (p *lruNs) Purge(fin func()) {
-	lru := p.lru
-
-	lru.Lock()
-	if p.zapped {
+func (ns *lruNs) purgeNB(fin PurgeFin) {
+	lru := ns.lru
+	if ns.state != nsEffective {
 		return
 	}
 
-	for _, n := range p.table {
-		n.delfin = fin
-		if n.state == stEffective {
+	for _, n := range ns.table {
+		n.purgefin = fin
+		if n.state == nodeEffective {
 			lru.size -= n.charge
 			n.rRemove()
 			n.evictNB()
 		}
-		n.state = stRemoved
+		n.state = nodeRemoved
 	}
-	lru.Unlock()
 }
 
-func (p *lruNs) Zap() {
-	lru := p.lru
+func (ns *lruNs) Purge(fin PurgeFin) {
+	ns.lru.Lock()
+	ns.purgeNB(fin)
+	ns.lru.Unlock()
+}
 
-	lru.Lock()
-	if p.zapped {
+func (ns *lruNs) zapNB(closed bool) {
+	lru := ns.lru
+	if ns.state != nsEffective {
 		return
 	}
 
-	for _, n := range p.table {
-		if n.state == stEffective {
+	if closed {
+		ns.state = nsClosed
+	} else {
+		ns.state = nsZapped
+	}
+	for _, n := range ns.table {
+		if n.state == nodeEffective {
 			lru.size -= n.charge
 			n.rRemove()
 		}
-		n.state = stRemoved
+		n.state = nodeRemoved
 		n.execFin()
 	}
-	p.zapped = true
-	p.table = nil
-	delete(lru.table, p.id)
-	lru.Unlock()
+	ns.table = nil
 }
 
-type state int
-
-const (
-	stEffective state = iota
-	stEvicted
-	stRemoved
-)
+func (ns *lruNs) Zap(closed bool) {
+	ns.lru.Lock()
+	ns.zapNB(closed)
+	delete(ns.lru.table, ns.id)
+	ns.lru.Unlock()
+}
 
 type lruNode struct {
 	ns *lruNs
 
 	rNext, rPrev *lruNode
 
-	key    uint64
-	value  interface{}
-	charge int
-	ref    int
-	state  state
-	setfin func()
-	delfin func()
+	key      uint64
+	value    interface{}
+	charge   int
+	ref      int
+	state    nodeState
+	setfin   SetFin
+	delfin   DelFin
+	purgefin PurgeFin
 }
 
 func (n *lruNode) rInsert(at *lruNode) {
@@ -307,22 +302,28 @@ func (n *lruNode) execFin() {
 		n.setfin()
 		n.setfin = nil
 	}
-	if n.delfin != nil {
-		n.delfin()
+	if n.purgefin != nil {
+		n.purgefin(n.ns.id, n.key, n.delfin)
+		n.delfin = nil
+		n.purgefin = nil
+	} else if n.delfin != nil {
+		n.delfin(true)
 		n.delfin = nil
 	}
 }
 
-func (n *lruNode) doEvict() {
-	if n.ns.zapped {
-		return
+func (n *lruNode) evictNB() {
+	n.ref--
+	if n.ref == 0 {
+		if n.ns.state == nsEffective {
+			// remove elem
+			delete(n.ns.table, n.key)
+			// execute finalizer
+			n.execFin()
+		}
+	} else if n.ref < 0 {
+		panic("leveldb/cache: lruCache: negative node reference")
 	}
-
-	// remove elem
-	delete(n.ns.table, n.key)
-
-	// execute finalizer
-	n.execFin()
 }
 
 func (n *lruNode) evict() {
@@ -331,32 +332,23 @@ func (n *lruNode) evict() {
 	n.ns.lru.Unlock()
 }
 
-func (n *lruNode) evictNB() {
-	n.ref--
-	if n.ref == 0 {
-		n.doEvict()
-	} else if n.ref < 0 {
-		panic("leveldb/cache: LRUCache: negative node reference")
-	}
-}
-
 type lruObject struct {
 	node *lruNode
 	once uint32
 }
 
-func (p *lruObject) Value() interface{} {
-	if atomic.LoadUint32(&p.once) == 0 {
-		return p.node.value
+func (o *lruObject) Value() interface{} {
+	if atomic.LoadUint32(&o.once) == 0 {
+		return o.node.value
 	}
 	return nil
 }
 
-func (p *lruObject) Release() {
-	if !atomic.CompareAndSwapUint32(&p.once, 0, 1) {
+func (o *lruObject) Release() {
+	if !atomic.CompareAndSwapUint32(&o.once, 0, 1) {
 		return
 	}
 
-	p.node.evict()
-	p.node = nil
+	o.node.evict()
+	o.node = nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -295,7 +296,7 @@ func (p tFileSorterNewest) Swap(i, j int) {
 type tOps struct {
 	s       *session
 	cache   cache.Cache
-	cachens cache.Namespace
+	cacheNS cache.Namespace
 }
 
 func newTableOps(s *session, cacheCap int) *tOps {
@@ -348,7 +349,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 
 func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 	num := f.file.Num()
-	c, _ = t.cachens.Get(num, func() (ok bool, value interface{}, charge int, fin func()) {
+	c, ok := t.cacheNS.Get(num, func() (ok bool, value interface{}, charge int, fin cache.SetFin) {
 		var r storage.Reader
 		r, err = f.file.Open()
 		if err != nil {
@@ -370,6 +371,9 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		}
 		return
 	})
+	if !ok && err == nil {
+		err = errors.ErrClosed
+	}
 	return
 }
 
@@ -409,16 +413,16 @@ func (t *tOps) remove(f *tFile) {
 	if blockCache := t.s.o.GetBlockCache(); blockCache != nil {
 		bCacheNS = blockCache.GetNamespace(num)
 	}
-	t.cachens.Delete(num, func() {
+	t.cacheNS.Delete(num, func(exist bool) {
 		f.file.Remove()
 		if bCacheNS != nil {
-			bCacheNS.Zap()
+			bCacheNS.Zap(false)
 		}
 	})
 }
 
-func (t *tOps) zapCache() {
-	t.cache.Zap()
+func (t *tOps) close() {
+	t.cache.Zap(true)
 }
 
 type tWriter struct {

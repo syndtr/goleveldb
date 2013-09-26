@@ -58,7 +58,7 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 
 // Close session.
 func (s *session) close() {
-	s.tops.zapCache()
+	s.tops.close()
 	cache := s.o.GetBlockCache()
 	if cache != nil {
 		cache.Purge(nil)

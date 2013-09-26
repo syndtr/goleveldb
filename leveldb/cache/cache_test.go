@@ -12,7 +12,7 @@ import (
 )
 
 func set(ns Namespace, key uint64, value interface{}, charge int, fin func()) Object {
-	obj, _ := ns.Get(key, func() (bool, interface{}, int, func()) {
+	obj, _ := ns.Get(key, func() (bool, interface{}, int, SetFin) {
 		return true, value, charge, fin
 	})
 	return obj
@@ -65,7 +65,7 @@ func TestCache_HitMiss(t *testing.T) {
 
 	for i, x := range cases {
 		finalizerOk := false
-		ns.Delete(x.key, func() {
+		ns.Delete(x.key, func(exist bool) {
 			finalizerOk = true
 		})
 

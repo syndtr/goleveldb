@@ -1502,7 +1502,7 @@ func TestDb_ManualCompaction(t *testing.T) {
 
 func TestDb_BloomFilter(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		BlockCache: cache.EmptyCache{},
+		BlockCache: cache.NewEmptyCache(),
 		Filter:     filter.NewBloomFilter(10),
 	})
 
