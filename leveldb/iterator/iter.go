@@ -22,8 +22,7 @@ import (
 //
 // An iterator must be released after use, but it is not necessary to read
 // an iterator until exhaustion.
-//
-// An iterator is not necessarily goroutine-safe, but it is safe to use
+// Also, an iterator is not necessarily goroutine-safe, but it is safe to use
 // multiple iterators concurrently, with each in a dedicated goroutine.
 type Iterator interface {
 	IteratorSeeker

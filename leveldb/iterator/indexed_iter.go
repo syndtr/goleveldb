@@ -20,7 +20,7 @@ type IteratorIndexer interface {
 	Get() Iterator
 }
 
-type IndexedIterator struct {
+type indexedIterator struct {
 	util.BasicReleaser
 	index  IteratorIndexer
 	strict bool
@@ -29,32 +29,21 @@ type IndexedIterator struct {
 	err  error
 }
 
-// NewIndexedIterator returns an indexed iterator. An index is iterator
-// that returns another iterator, a data iterator. A data iterator is the
-// iterator that contains actual key/value pairs.
-//
-// If strict is true then error yield by data iterator will halt the indexed
-// iterator, on contrary if strict is false then the indexed iterator will
-// ignore those error and move on to the next index.
-func NewIndexedIterator(index IteratorIndexer, strict bool) *IndexedIterator {
-	return &IndexedIterator{index: index, strict: strict}
-}
-
-func (i *IndexedIterator) setData() {
+func (i *indexedIterator) setData() {
 	if i.data != nil {
 		i.data.Release()
 	}
 	i.data = i.index.Get()
 }
 
-func (i *IndexedIterator) clearData() {
+func (i *indexedIterator) clearData() {
 	if i.data != nil {
 		i.data.Release()
 	}
 	i.data = nil
 }
 
-func (i *IndexedIterator) dataErr() bool {
+func (i *indexedIterator) dataErr() bool {
 	if i.strict {
 		if err := i.data.Error(); err != nil {
 			i.err = err
@@ -64,11 +53,11 @@ func (i *IndexedIterator) dataErr() bool {
 	return false
 }
 
-func (i *IndexedIterator) Valid() bool {
+func (i *indexedIterator) Valid() bool {
 	return i.data != nil && i.data.Valid()
 }
 
-func (i *IndexedIterator) First() bool {
+func (i *indexedIterator) First() bool {
 	if i.err != nil {
 		return false
 	}
@@ -81,7 +70,7 @@ func (i *IndexedIterator) First() bool {
 	return i.Next()
 }
 
-func (i *IndexedIterator) Last() bool {
+func (i *indexedIterator) Last() bool {
 	if i.err != nil {
 		return false
 	}
@@ -101,7 +90,7 @@ func (i *IndexedIterator) Last() bool {
 	return true
 }
 
-func (i *IndexedIterator) Seek(key []byte) bool {
+func (i *indexedIterator) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	}
@@ -121,7 +110,7 @@ func (i *IndexedIterator) Seek(key []byte) bool {
 	return true
 }
 
-func (i *IndexedIterator) Next() bool {
+func (i *indexedIterator) Next() bool {
 	if i.err != nil {
 		return false
 	}
@@ -143,7 +132,7 @@ func (i *IndexedIterator) Next() bool {
 	return true
 }
 
-func (i *IndexedIterator) Prev() bool {
+func (i *indexedIterator) Prev() bool {
 	if i.err != nil {
 		return false
 	}
@@ -171,27 +160,27 @@ func (i *IndexedIterator) Prev() bool {
 	return true
 }
 
-func (i *IndexedIterator) Key() []byte {
+func (i *indexedIterator) Key() []byte {
 	if i.data == nil {
 		return nil
 	}
 	return i.data.Key()
 }
 
-func (i *IndexedIterator) Value() []byte {
+func (i *indexedIterator) Value() []byte {
 	if i.data == nil {
 		return nil
 	}
 	return i.data.Value()
 }
 
-func (i *IndexedIterator) Release() {
+func (i *indexedIterator) Release() {
 	i.clearData()
 	i.index.Release()
 	i.BasicReleaser.Release()
 }
 
-func (i *IndexedIterator) Error() error {
+func (i *indexedIterator) Error() error {
 	if i.err != nil {
 		return i.err
 	}
@@ -199,4 +188,15 @@ func (i *IndexedIterator) Error() error {
 		return err
 	}
 	return nil
+}
+
+// NewIndexedIterator returns an indexed iterator. An index is iterator
+// that returns another iterator, a data iterator. A data iterator is the
+// iterator that contains actual key/value pairs.
+//
+// If strict is true then error yield by data iterator will halt the indexed
+// iterator, on contrary if strict is false then the indexed iterator will
+// ignore those error and move on to the next index.
+func NewIndexedIterator(index IteratorIndexer, strict bool) Iterator {
+	return &indexedIterator{index: index, strict: strict}
 }

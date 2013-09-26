@@ -39,27 +39,6 @@ type mergedIterator struct {
 	releaser util.Releaser
 }
 
-// NewMergedIterator returns an iterator that merges its input. Walking the
-// resultant iterator will return all key/value pairs of all input iterators
-// in strictly increasing key order, as defined by cmp.
-//
-// The input's key ranges may overlap, but there are assumed to be no duplicate
-// keys: if iters[i] contains a key k then iters[j] will not contain that key k.
-//
-// None of the iters may be nil.
-//
-// If strict is true then error yield by any iterators will halt the merged
-// iterator, on contrary if strict is false then the merged iterator will
-// ignore those error and move on to the next iterator.
-func NewMergedIterator(iters []Iterator, cmp comparer.Comparer, strict bool) *mergedIterator {
-	return &mergedIterator{
-		iters:  iters,
-		cmp:    cmp,
-		strict: strict,
-		keys:   make([][]byte, len(iters)),
-	}
-}
-
 func (i *mergedIterator) Valid() bool {
 	return i.err == nil && i.dir > dirEOI
 }
@@ -327,4 +306,23 @@ func (i *mergedIterator) SetReleaser(releaser util.Releaser) {
 
 func (i *mergedIterator) Error() error {
 	return i.err
+}
+
+// NewMergedIterator returns an iterator that merges its input. Walking the
+// resultant iterator will return all key/value pairs of all input iterators
+// in strictly increasing key order, as defined by cmp.
+// The input's key ranges may overlap, but there are assumed to be no duplicate
+// keys: if iters[i] contains a key k then iters[j] will not contain that key k.
+// None of the iters may be nil.
+//
+// If strict is true then error yield by any iterators will halt the merged
+// iterator, on contrary if strict is false then the merged iterator will
+// ignore those error and move on to the next iterator.
+func NewMergedIterator(iters []Iterator, cmp comparer.Comparer, strict bool) Iterator {
+	return &mergedIterator{
+		iters:  iters,
+		cmp:    cmp,
+		strict: strict,
+		keys:   make([][]byte, len(iters)),
+	}
 }
