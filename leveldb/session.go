@@ -7,11 +7,11 @@
 package leveldb
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"sync/atomic"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -100,9 +100,7 @@ func (s *session) recover() error {
 		}
 
 		if rec.hasComparer && rec.comparer != cmp {
-			return errors.ErrInvalid("invalid comparer, " +
-				"want '" + cmp + "', " +
-				"got '" + rec.comparer + "'")
+			return errors.New("leveldb: invalid comparer, " + "want '" + cmp + "', " + "got '" + rec.comparer + "'")
 		}
 
 		// save compact pointers
@@ -134,11 +132,11 @@ func (s *session) recover() error {
 
 	switch false {
 	case srec.hasNextNum:
-		return errors.ErrCorrupt("manifest missing next file number")
+		return errors.New("leveldb: manifest missing next file number")
 	case srec.hasJournalNum:
-		return errors.ErrCorrupt("manifest missing journal file number")
+		return errors.New("leveldb: manifest missing journal file number")
 	case srec.hasSeq:
-		return errors.ErrCorrupt("manifest missing seq number")
+		return errors.New("leveldb: manifest missing seq number")
 	}
 
 	s.manifest = &journalWriter{file: file}

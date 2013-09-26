@@ -9,7 +9,6 @@ package leveldb
 import (
 	"sync/atomic"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
@@ -98,7 +97,7 @@ func (d *DB) isClosed() bool {
 // Check read ok status.
 func (d *DB) ok() error {
 	if d.isClosed() {
-		return errors.ErrClosed
+		return ErrClosed
 	}
 	return nil
 }

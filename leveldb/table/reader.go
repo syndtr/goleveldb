@@ -18,7 +18,6 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	ierrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -26,7 +25,8 @@ import (
 )
 
 var (
-	errIterReleased = errors.New("leveldb/table: Reader: iterator released")
+	ErrNotFound     = util.ErrNotFound
+	ErrIterReleased = errors.New("leveldb/table: iterator released")
 )
 
 type block struct {
@@ -139,7 +139,7 @@ func (i *blockIter) First() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -156,7 +156,7 @@ func (i *blockIter) Last() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -173,7 +173,7 @@ func (i *blockIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -196,7 +196,7 @@ func (i *blockIter) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -227,7 +227,7 @@ func (i *blockIter) Prev() bool {
 	if i.dir == dirSOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -541,7 +541,7 @@ func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 }
 
 // Find finds key/value pair whose key is greater than or equal to the
-// given key. It returns errors.ErrNotFound if the table doesn't contain
+// given key. It returns ErrNotFound if the table doesn't contain
 // such pair.
 //
 // The caller should not modify the contents of the returned slice, but
@@ -557,7 +557,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 	if !index.Seek(key) {
 		err = index.Error()
 		if err == nil {
-			err = ierrors.ErrNotFound
+			err = ErrNotFound
 		}
 		return
 	}
@@ -567,7 +567,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 		return
 	}
 	if r.filterBlock != nil && !r.filterBlock.contains(dataBH.offset, key) {
-		err = ierrors.ErrNotFound
+		err = ErrNotFound
 		return
 	}
 	data := r.getDataIter(dataBH, ro.HasFlag(opt.RFVerifyChecksums), !ro.HasFlag(opt.RFDontFillCache))
@@ -575,7 +575,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 	if !data.Seek(key) {
 		err = data.Error()
 		if err == nil {
-			err = ierrors.ErrNotFound
+			err = ErrNotFound
 		}
 		return
 	}
@@ -598,7 +598,7 @@ func (r *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (value []byte, err er
 	rkey, value, err := r.Find(key, ro)
 	if err == nil && r.cmp.Compare(rkey, key) != 0 {
 		value = nil
-		err = ierrors.ErrNotFound
+		err = ErrNotFound
 	}
 	return
 }

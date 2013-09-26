@@ -12,9 +12,12 @@ import (
 	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
+)
+
+var (
+	ErrNotFound = util.ErrNotFound
 )
 
 const tMaxHeight = 12
@@ -112,7 +115,7 @@ const (
 	nNext
 )
 
-// DB ia an in-memory key/value database.
+// DB is an in-memory key/value database.
 type DB struct {
 	cmp comparer.BasicComparer
 	rnd *rand.Rand
@@ -247,7 +250,7 @@ func (p *DB) Put(key []byte, value []byte) {
 	p.n++
 }
 
-// Delete deletes the value for the given key. It returns errors.ErrNotFound if
+// Delete deletes the value for the given key. It returns ErrNotFound if
 // the DB does not contain the key.
 //
 // It is safe to modify the contents of the arguments after Delete returns.
@@ -257,7 +260,7 @@ func (p *DB) Delete(key []byte) error {
 
 	node, exact := p.findGE(key, true)
 	if !exact {
-		return errors.ErrNotFound
+		return ErrNotFound
 	}
 
 	h := p.nodeData[node+nHeight]
@@ -292,14 +295,14 @@ func (p *DB) Get(key []byte) (value []byte, err error) {
 		o := p.nodeData[node] + p.nodeData[node+nKey]
 		value = p.kvData[o : o+p.nodeData[node+nVal]]
 	} else {
-		err = errors.ErrNotFound
+		err = ErrNotFound
 	}
 	p.mu.RUnlock()
 	return
 }
 
 // Find finds key/value pair whose key is greater than or equal to the
-// given key. It returns errors.ErrNotFound if the table doesn't contain
+// given key. It returns ErrNotFound if the table doesn't contain
 // such pair.
 //
 // The caller should not modify the contents of the returned slice, but
@@ -312,7 +315,7 @@ func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
 		rkey = p.kvData[n:m]
 		value = p.kvData[m : m+p.nodeData[node+nVal]]
 	} else {
-		err = errors.ErrNotFound
+		err = ErrNotFound
 	}
 	p.mu.RUnlock()
 	return

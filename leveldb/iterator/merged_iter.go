@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	errIterReleased = errors.New("leveldb/iterator: iterator released")
+	ErrIterReleased = errors.New("leveldb/iterator: iterator released")
 )
 
 type dir int
@@ -47,7 +47,7 @@ func (i *mergedIterator) First() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -77,7 +77,7 @@ func (i *mergedIterator) Last() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -107,7 +107,7 @@ func (i *mergedIterator) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -156,7 +156,7 @@ func (i *mergedIterator) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -215,7 +215,7 @@ func (i *mergedIterator) Prev() bool {
 	if i.dir == dirSOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 

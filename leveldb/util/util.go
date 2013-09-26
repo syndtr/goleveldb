@@ -7,6 +7,14 @@
 // Package util provides utilities used throughout leveldb.
 package util
 
+import (
+	"errors"
+)
+
+var (
+	ErrNotFound = errors.New("leveldb: not found")
+)
+
 // Releaser is the interface that wraps the basic Release method.
 type Releaser interface {
 	// Release releases associated resources. Release should always success

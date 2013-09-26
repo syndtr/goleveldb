@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,11 +15,18 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/util"
+)
+
+var (
+	ErrNotFound         = util.ErrNotFound
+	ErrSnapshotReleased = errors.New("leveldb: snapshot released")
+	ErrIterReleased     = errors.New("leveldb: iterator released")
+	ErrClosed           = errors.New("leveldb: closed")
 )
 
 // DB is a LevelDB database.
@@ -135,7 +143,7 @@ func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	return openDB(s)
 }
 
-// Open opens or creates a DB for the given path. OpenFile uses standard
+// OpenFile opens or creates a DB for the given path. OpenFile uses standard
 // file-system backed storage implementation as desribed in the
 // leveldb/storage package.
 // If opt.OFCreateIfMissing is set then the DB will be created if not exist,
@@ -380,7 +388,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		ukey, _, t, ok := parseIkey(rkey)
 		if !ok || ucmp.Compare(ukey, key) != 0 || t == tDel {
 			value = nil
-			err = errors.ErrNotFound
+			err = ErrNotFound
 			return false
 		}
 		return true
@@ -403,7 +411,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	return
 }
 
-// Get gets the value for the given key. It returns error.ErrNotFound if the
+// Get gets the value for the given key. It returns ErrNotFound if the
 // DB does not contain the key.
 //
 // The caller should not modify the contents of the returned slice, but
@@ -470,7 +478,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 
 	const prefix = "leveldb."
 	if !strings.HasPrefix(name, prefix) {
-		return "", errors.ErrInvalid("unknown property: " + name)
+		return "", errors.New("leveldb: GetProperty: unknown property: " + name)
 	}
 
 	p := name[len(prefix):]
@@ -485,7 +493,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 		var rest string
 		n, _ := fmt.Scanf("%d%s", &level, &rest)
 		if n != 1 || level >= kNumLevels {
-			err = errors.ErrInvalid("invalid property: " + name)
+			err = errors.New("leveldb: GetProperty: invalid property: " + name)
 		} else {
 			value = fmt.Sprint(v.tLen(int(level)))
 		}
@@ -510,7 +518,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 			}
 		}
 	default:
-		err = errors.ErrInvalid("unknown property: " + name)
+		err = errors.New("leveldb: GetProperty: unknown property: " + name)
 	}
 
 	return
@@ -579,7 +587,7 @@ func (d *DB) CompactRange(r Range) error {
 	// Push manual compaction request.
 	select {
 	case _, _ = <-d.closeCh:
-		return errors.ErrClosed
+		return ErrClosed
 	case err := <-d.compErrCh:
 		return err
 	case d.compReqCh <- req:
@@ -587,7 +595,7 @@ func (d *DB) CompactRange(r Range) error {
 	// Wait for compaction
 	select {
 	case _, _ = <-d.closeCh:
-		return errors.ErrClosed
+		return ErrClosed
 	case <-cch:
 	}
 	return nil
@@ -600,7 +608,7 @@ func (d *DB) CompactRange(r Range) error {
 // called after the DB has been closed.
 func (d *DB) Close() error {
 	if !d.setClosed() {
-		return errors.ErrClosed
+		return ErrClosed
 	}
 
 	// Clear the finalizer.

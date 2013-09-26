@@ -9,7 +9,6 @@ package leveldb
 import (
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -55,7 +54,7 @@ func (d *DB) flush() (*memdb.DB, error) {
 			select {
 			case _, _ = <-d.closeCh:
 				v.release()
-				return nil, errors.ErrClosed
+				return nil, ErrClosed
 			case d.compCh <- nil:
 			}
 		default:
@@ -63,7 +62,7 @@ func (d *DB) flush() (*memdb.DB, error) {
 			select {
 			case _, _ = <-d.closeCh:
 				v.release()
-				return nil, errors.ErrClosed
+				return nil, ErrClosed
 			case <-d.compMemAckCh:
 			case err := <-d.compErrCh:
 				v.release()
@@ -102,7 +101,7 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	// The write happen synchronously.
 	select {
 	case _, _ = <-d.closeCh:
-		return errors.ErrClosed
+		return ErrClosed
 	case d.writeCh <- b:
 		return <-d.writeAckCh
 	case d.writeLockCh <- struct{}{}:
@@ -147,7 +146,7 @@ drain:
 		// Push the write batch to the journal writer
 		select {
 		case _, _ = <-d.closeCh:
-			err = errors.ErrClosed
+			err = ErrClosed
 			return
 		case d.journalCh <- b:
 			// Write into memdb
@@ -156,7 +155,7 @@ drain:
 		// Wait for journal writer
 		select {
 		case _, _ = <-d.closeCh:
-			err = errors.ErrClosed
+			err = ErrClosed
 			return
 		case err = <-d.journalAckCh:
 			if err != nil {
@@ -188,7 +187,7 @@ func (d *DB) Put(key, value []byte, wo *opt.WriteOptions) error {
 	return d.Write(b, wo)
 }
 
-// Delete deletes the value for the given key. It returns errors.ErrNotFound if
+// Delete deletes the value for the given key. It returns ErrNotFound if
 // the DB does not contain the key.
 //
 // It is safe to modify the contents of the arguments after Delete returns.

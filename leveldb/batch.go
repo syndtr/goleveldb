@@ -8,14 +8,14 @@ package leveldb
 
 import (
 	"encoding/binary"
+	"errors"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
 var (
-	errBatchTooShort  = errors.ErrCorrupt("batch in too short")
-	errBatchBadRecord = errors.ErrCorrupt("bad record in batch")
+	errBatchTooShort  = errors.New("leveldb: batch is too short")
+	errBatchBadRecord = errors.New("leveldb: bad record in batch")
 )
 
 const kBatchHdrLen = 8 + 4
@@ -152,12 +152,12 @@ func (b *Batch) decodeRec(f func(i int, t vType, key, value []byte)) error {
 	off := kBatchHdrLen
 	for i := 0; i < b.rLen; i++ {
 		if off >= len(b.buf) {
-			return errors.ErrCorrupt("invalid batch record length")
+			return errors.New("leveldb: invalid batch record length")
 		}
 
 		t := vType(b.buf[off])
 		if t > tVal {
-			return errors.ErrCorrupt("invalid batch record type in batch")
+			return errors.New("leveldb: invalid batch record type in batch")
 		}
 		off += 1
 

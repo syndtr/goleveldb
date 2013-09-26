@@ -17,8 +17,7 @@ import (
 )
 
 var (
-	errIterReleased = errors.New("leveldb: iterator released")
-	errInvalidIkey  = errors.New("leveldb: Iterator: invalid internal key")
+	errInvalidIkey = errors.New("leveldb: Iterator: invalid internal key")
 )
 
 func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
@@ -94,7 +93,7 @@ func (i *dbIter) First() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -111,7 +110,7 @@ func (i *dbIter) Last() bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -127,7 +126,7 @@ func (i *dbIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -177,7 +176,7 @@ func (i *dbIter) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 
@@ -225,7 +224,7 @@ func (i *dbIter) Prev() bool {
 	if i.dir == dirSOI || i.err != nil {
 		return false
 	} else if i.dir == dirReleased {
-		i.err = errIterReleased
+		i.err = ErrIterReleased
 		return false
 	}
 

@@ -7,15 +7,12 @@
 package leveldb
 
 import (
-	"errors"
 	"runtime"
 	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
-
-var errSnapshotReleased = errors.New("leveldb: snapshot released")
 
 type snapshotElement struct {
 	seq uint64
@@ -95,7 +92,7 @@ func (db *DB) newSnapshot() *Snapshot {
 	return p
 }
 
-// Get gets the value for the given key. It returns errors.ErrNotFound if
+// Get gets the value for the given key. It returns ErrNotFound if
 // the DB does not contain the key.
 //
 // The caller should not modify the contents of the returned slice, but
@@ -109,7 +106,7 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.released {
-		err = errSnapshotReleased
+		err = ErrSnapshotReleased
 		return
 	}
 	return db.get(key, p.elem.seq, ro)
@@ -133,7 +130,7 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.released {
-		return iterator.NewEmptyIterator(errSnapshotReleased)
+		return iterator.NewEmptyIterator(ErrSnapshotReleased)
 	}
 	return db.newIterator(p.elem.seq, ro)
 }

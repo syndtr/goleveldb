@@ -8,14 +8,13 @@ package storage
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
-
-	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
 type fileLock interface {
@@ -190,7 +189,7 @@ func (d *FileStorage) GetManifest() (f File, err error) {
 	b := buf.Bytes()
 	p := &file{stor: d}
 	if len(b) < 1 || b[len(b)-1] != '\n' || !p.parse(string(b[:len(b)-1])) {
-		return nil, errors.ErrCorrupt("invalid CURRENT file")
+		return nil, errors.New("storage: invalid CURRENT file")
 	}
 	return p, nil
 }
@@ -217,7 +216,7 @@ func (d *FileStorage) SetManifest(f File) error {
 
 // Close closes the storage and release the lock.
 func (d *FileStorage) Close() error {
-	// not needed anymore
+	// Clear the finalizer.
 	runtime.SetFinalizer(d, nil)
 	d.log.Close()
 	return d.flock.release()

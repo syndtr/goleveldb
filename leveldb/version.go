@@ -7,10 +7,10 @@
 package leveldb
 
 import (
+	"errors"
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
@@ -144,7 +144,7 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 
 			var _rkey, rval []byte
 			_rkey, rval, err = s.tops.get(t, key, ro)
-			if err == errors.ErrNotFound {
+			if err == ErrNotFound {
 				continue
 			} else if err != nil {
 				return
@@ -157,20 +157,20 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 					case tVal:
 						value = rval
 					case tDel:
-						err = errors.ErrNotFound
+						err = ErrNotFound
 					default:
 						panic("not reached")
 					}
 					return value, cstate, err
 				}
 			} else {
-				err = errors.ErrCorrupt("internal key corrupted")
+				err = errors.New("leveldb: internal key corrupted")
 				return
 			}
 		}
 	}
 
-	err = errors.ErrNotFound
+	err = ErrNotFound
 	return
 }
 

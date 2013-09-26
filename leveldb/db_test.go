@@ -21,7 +21,6 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -177,7 +176,7 @@ func (h *dbHarness) getr(db Reader, key string, expectFound bool) (found bool, v
 	t := h.t
 	v, err := db.Get([]byte(key), h.ro)
 	switch err {
-	case errors.ErrNotFound:
+	case ErrNotFound:
 		if expectFound {
 			t.Errorf("Get: key '%s' not found, want found", key)
 		}
@@ -1600,7 +1599,7 @@ func TestDb_Concurrent(t *testing.T) {
 									t.Errorf("invalid seq number, %d > %d ", rx, tx)
 								}
 							}
-						} else if err != errors.ErrNotFound {
+						} else if err != ErrNotFound {
 							t.Error("Get: got error: ", err)
 							return
 						}

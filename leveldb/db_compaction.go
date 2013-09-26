@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	ierrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
@@ -268,7 +267,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			// Prioritize memdb compaction.
 			select {
 			case _, _ = <-d.closeCh:
-				err = ierrors.ErrClosed
+				err = ErrClosed
 				return
 			case cch := <-d.compMemCh:
 				stats.stopTimer()
