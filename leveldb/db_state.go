@@ -8,7 +8,6 @@ package leveldb
 
 import (
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
@@ -100,27 +99,6 @@ func (d *DB) isClosed() bool {
 func (d *DB) ok() error {
 	if d.isClosed() {
 		return errors.ErrClosed
-	}
-	return nil
-}
-
-type errWrap struct {
-	err error
-}
-
-// Set background error.
-func (d *DB) seterr(err error) {
-	if err == nil {
-		atomic.StorePointer(&d.err, nil)
-	} else {
-		atomic.StorePointer(&d.err, unsafe.Pointer(&errWrap{err}))
-	}
-}
-
-// Get background error.
-func (d *DB) geterr() error {
-	if p := atomic.LoadPointer(&d.err); p != nil {
-		return (*errWrap)(p).err
 	}
 	return nil
 }

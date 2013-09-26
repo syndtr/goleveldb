@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -61,7 +60,6 @@ type DB struct {
 	closeWg sync.WaitGroup
 	closeCh chan struct{}
 	closed  uint32
-	err     unsafe.Pointer
 	closer  io.Closer
 }
 
