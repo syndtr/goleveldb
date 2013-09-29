@@ -75,7 +75,7 @@ type dbBench struct {
 	keys, values [][]byte
 }
 
-func openDBBench(b *testing.B) *dbBench {
+func openDBBench(b *testing.B, noCompress bool) *dbBench {
 	_, err := os.Stat(benchDB)
 	if err == nil {
 		err = os.RemoveAll(benchDB)
@@ -92,6 +92,9 @@ func openDBBench(b *testing.B) *dbBench {
 
 	p.o = &opt.Options{
 		Flag: opt.OFCreateIfMissing,
+	}
+	if noCompress {
+		p.o.SetCompressionType(opt.NoCompression)
 	}
 	p.ro = &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
 	p.wo = &opt.WriteOptions{}
@@ -260,37 +263,35 @@ func (p *dbBench) close() {
 }
 
 func BenchmarkDBWrite(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.writes(1)
 	p.close()
 }
 
 func BenchmarkDBWriteBatch(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.writes(1000)
 	p.close()
 }
 
 func BenchmarkDBWriteUncompressed(b *testing.B) {
-	p := openDBBench(b)
-	p.o.CompressionType = opt.NoCompression
+	p := openDBBench(b, true)
 	p.populate(b.N)
 	p.writes(1)
 	p.close()
 }
 
 func BenchmarkDBWriteBatchUncompressed(b *testing.B) {
-	p := openDBBench(b)
-	p.o.CompressionType = opt.NoCompression
+	p := openDBBench(b, true)
 	p.populate(b.N)
 	p.writes(1000)
 	p.close()
 }
 
 func BenchmarkDBWriteRandom(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.randomize()
 	p.writes(1)
@@ -298,7 +299,7 @@ func BenchmarkDBWriteRandom(b *testing.B) {
 }
 
 func BenchmarkDBWriteRandomSync(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.wo.Flag = opt.WFSync
 	p.populate(b.N)
 	p.writes(1)
@@ -306,7 +307,7 @@ func BenchmarkDBWriteRandomSync(b *testing.B) {
 }
 
 func BenchmarkDBOverwrite(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.writes(1)
 	p.writes(1)
@@ -314,7 +315,7 @@ func BenchmarkDBOverwrite(b *testing.B) {
 }
 
 func BenchmarkDBOverwriteRandom(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.writes(1)
 	p.randomize()
@@ -323,14 +324,14 @@ func BenchmarkDBOverwriteRandom(b *testing.B) {
 }
 
 func BenchmarkDBPut(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.puts()
 	p.close()
 }
 
 func BenchmarkDBRead(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.drop()
@@ -346,7 +347,7 @@ func BenchmarkDBRead(b *testing.B) {
 }
 
 func BenchmarkDBReadGC(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 
@@ -361,8 +362,7 @@ func BenchmarkDBReadGC(b *testing.B) {
 }
 
 func BenchmarkDBReadUncompressed(b *testing.B) {
-	p := openDBBench(b)
-	p.o.CompressionType = opt.NoCompression
+	p := openDBBench(b, true)
 	p.populate(b.N)
 	p.fill()
 	p.drop()
@@ -378,7 +378,7 @@ func BenchmarkDBReadUncompressed(b *testing.B) {
 }
 
 func BenchmarkDBReadTable(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.reopen()
@@ -395,7 +395,7 @@ func BenchmarkDBReadTable(b *testing.B) {
 }
 
 func BenchmarkDBReadReverse(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.drop()
@@ -412,7 +412,7 @@ func BenchmarkDBReadReverse(b *testing.B) {
 }
 
 func BenchmarkDBReadReverseTable(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.reopen()
@@ -430,7 +430,7 @@ func BenchmarkDBReadReverseTable(b *testing.B) {
 }
 
 func BenchmarkDBSeek(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.seeks()
@@ -438,7 +438,7 @@ func BenchmarkDBSeek(b *testing.B) {
 }
 
 func BenchmarkDBSeekRandom(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.randomize()
@@ -447,7 +447,7 @@ func BenchmarkDBSeekRandom(b *testing.B) {
 }
 
 func BenchmarkDBGet(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.gets()
@@ -455,7 +455,7 @@ func BenchmarkDBGet(b *testing.B) {
 }
 
 func BenchmarkDBGetRandom(b *testing.B) {
-	p := openDBBench(b)
+	p := openDBBench(b, false)
 	p.populate(b.N)
 	p.fill()
 	p.randomize()
