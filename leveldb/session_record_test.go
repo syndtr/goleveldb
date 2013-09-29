@@ -13,17 +13,17 @@ import (
 
 func decodeEncode(v *sessionRecord) (res bool, err error) {
 	b := new(bytes.Buffer)
-	err = v.encodeTo(b)
+	err = v.encode(b)
 	if err != nil {
 		return
 	}
 	v2 := new(sessionRecord)
-	err = v.decodeFrom(b)
+	err = v.decode(b)
 	if err != nil {
 		return
 	}
 	b2 := new(bytes.Buffer)
-	err = v2.encodeTo(b2)
+	err = v2.encode(b2)
 	if err != nil {
 		return
 	}
@@ -50,7 +50,7 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 			newIKey([]byte("foo"), big+500+1, tVal),
 			newIKey([]byte("zoo"), big+600+1, tDel))
 		v.deleteTable(4, big+700+i)
-		v.addCompactPointer(int(i), newIKey([]byte("x"), big+900+1, tVal))
+		v.addCompactionPointer(int(i), newIKey([]byte("x"), big+900+1, tVal))
 	}
 
 	v.setComparer("foo")

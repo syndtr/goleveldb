@@ -7,37 +7,31 @@
 package leveldb
 
 import (
-	"bytes"
+	"bufio"
 	"encoding/binary"
+	"errors"
 	"io"
 )
 
+var errCorruptManifest = errors.New("leveldb: corrupt manifest")
+
+type byteReader interface {
+	io.Reader
+	io.ByteReader
+}
+
 // These numbers are written to disk and should not be changed.
 const (
-	tagComparer       = 1
-	tagJournalNum     = 2
-	tagNextNum        = 3
-	tagSeq            = 4
-	tagCompactPointer = 5
-	tagDeletedTable   = 6
-	tagNewTable       = 7
+	recComparer          = 1
+	recJournalNum        = 2
+	recNextNum           = 3
+	recSeq               = 4
+	recCompactionPointer = 5
+	recDeletedTable      = 6
+	recNewTable          = 7
 	// 8 was used for large value refs
-	tagPrevJournalNum = 9
+	recPrevJournalNum = 9
 )
-
-const tagMax = tagPrevJournalNum
-
-var tagBytesCache [tagMax + 1][]byte
-
-func init() {
-	tmp := make([]byte, binary.MaxVarintLen32)
-	for i := range tagBytesCache {
-		n := binary.PutUvarint(tmp, uint64(i))
-		b := make([]byte, n)
-		copy(b, tmp)
-		tagBytesCache[i] = b
-	}
-}
 
 type cpRecord struct {
 	level int
@@ -62,273 +56,253 @@ type dtRecord struct {
 }
 
 type sessionRecord struct {
-	hasComparer bool
-	comparer    string
+	hasRec             int
+	comparer           string
+	journalNum         uint64
+	prevJournalNum     uint64
+	nextNum            uint64
+	seq                uint64
+	compactionPointers []cpRecord
+	addedTables        []ntRecord
+	deletedTables      []dtRecord
+	scratch            [binary.MaxVarintLen64]byte
+	err                error
+}
 
-	hasJournalNum bool
-	journalNum    uint64
-
-	hasPrevJournalNum bool
-	prevJournalNum    uint64
-
-	hasNextNum bool
-	nextNum    uint64
-
-	hasSeq bool
-	seq    uint64
-
-	compactPointers []cpRecord
-	newTables       []ntRecord
-	deletedTables   []dtRecord
+func (p *sessionRecord) has(rec int) bool {
+	return p.hasRec&(1<<uint(rec)) != 0
 }
 
 func (p *sessionRecord) setComparer(name string) {
-	p.hasComparer = true
+	p.hasRec |= 1 << recComparer
 	p.comparer = name
 }
 
 func (p *sessionRecord) setJournalNum(num uint64) {
-	p.hasJournalNum = true
+	p.hasRec |= 1 << recJournalNum
 	p.journalNum = num
 }
 
 func (p *sessionRecord) setPrevJournalNum(num uint64) {
-	p.hasPrevJournalNum = true
+	p.hasRec |= 1 << recPrevJournalNum
 	p.prevJournalNum = num
 }
 
 func (p *sessionRecord) setNextNum(num uint64) {
-	p.hasNextNum = true
+	p.hasRec |= 1 << recNextNum
 	p.nextNum = num
 }
 
 func (p *sessionRecord) setSeq(seq uint64) {
-	p.hasSeq = true
+	p.hasRec |= 1 << recSeq
 	p.seq = seq
 }
 
-func (p *sessionRecord) addCompactPointer(level int, key iKey) {
-	p.compactPointers = append(p.compactPointers, cpRecord{level, key})
+func (p *sessionRecord) addCompactionPointer(level int, key iKey) {
+	p.hasRec |= 1 << recCompactionPointer
+	p.compactionPointers = append(p.compactionPointers, cpRecord{level, key})
+}
+
+func (p *sessionRecord) resetCompactionPointers() {
+	p.hasRec &= ^(1 << recCompactionPointer)
+	p.compactionPointers = p.compactionPointers[:0]
 }
 
 func (p *sessionRecord) addTable(level int, num, size uint64, min, max iKey) {
-	p.newTables = append(p.newTables, ntRecord{level, num, size, min, max})
+	p.hasRec |= 1 << recNewTable
+	p.addedTables = append(p.addedTables, ntRecord{level, num, size, min, max})
 }
 
 func (p *sessionRecord) addTableFile(level int, t *tFile) {
 	p.addTable(level, t.file.Num(), t.size, t.min, t.max)
 }
 
+func (p *sessionRecord) resetAddedTables() {
+	p.hasRec &= ^(1 << recNewTable)
+	p.addedTables = p.addedTables[:0]
+}
+
 func (p *sessionRecord) deleteTable(level int, num uint64) {
+	p.hasRec |= 1 << recDeletedTable
 	p.deletedTables = append(p.deletedTables, dtRecord{level, num})
 }
 
-func (p *sessionRecord) encodeTo(w io.Writer) error {
-	tmp := make([]byte, binary.MaxVarintLen64)
+func (p *sessionRecord) resetDeletedTables() {
+	p.hasRec &= ^(1 << recDeletedTable)
+	p.deletedTables = p.deletedTables[:0]
+}
 
-	putUvarint := func(p uint64) error {
-		n := binary.PutUvarint(tmp, p)
-		_, err := w.Write(tmp[:n])
-		return err
+func (p *sessionRecord) putUvarint(w io.Writer, x uint64) {
+	if p.err != nil {
+		return
 	}
+	n := binary.PutUvarint(p.scratch[:], x)
+	_, p.err = w.Write(p.scratch[:n])
+}
 
-	putBytes := func(p []byte) error {
-		if err := putUvarint(uint64(len(p))); err != nil {
-			return err
+func (p *sessionRecord) putBytes(w io.Writer, x []byte) {
+	if p.err != nil {
+		return
+	}
+	p.putUvarint(w, uint64(len(x)))
+	if p.err != nil {
+		return
+	}
+	_, p.err = w.Write(x)
+}
+
+func (p *sessionRecord) encode(w io.Writer) error {
+	p.err = nil
+	if p.has(recComparer) {
+		p.putUvarint(w, recComparer)
+		p.putBytes(w, []byte(p.comparer))
+	}
+	if p.has(recJournalNum) {
+		p.putUvarint(w, recJournalNum)
+		p.putUvarint(w, p.journalNum)
+	}
+	if p.has(recNextNum) {
+		p.putUvarint(w, recNextNum)
+		p.putUvarint(w, p.nextNum)
+	}
+	if p.has(recSeq) {
+		p.putUvarint(w, recSeq)
+		p.putUvarint(w, p.seq)
+	}
+	for _, cp := range p.compactionPointers {
+		p.putUvarint(w, recCompactionPointer)
+		p.putUvarint(w, uint64(cp.level))
+		p.putBytes(w, cp.key)
+	}
+	for _, t := range p.deletedTables {
+		p.putUvarint(w, recDeletedTable)
+		p.putUvarint(w, uint64(t.level))
+		p.putUvarint(w, t.num)
+	}
+	for _, t := range p.addedTables {
+		p.putUvarint(w, recNewTable)
+		p.putUvarint(w, uint64(t.level))
+		p.putUvarint(w, t.num)
+		p.putUvarint(w, t.size)
+		p.putBytes(w, t.min)
+		p.putBytes(w, t.max)
+	}
+	return p.err
+}
+
+func (p *sessionRecord) readUvarint(r io.ByteReader) uint64 {
+	if p.err != nil {
+		return 0
+	}
+	x, err := binary.ReadUvarint(r)
+	if err != nil {
+		if err == io.EOF {
+			p.err = errCorruptManifest
+		} else {
+			p.err = err
 		}
-		if _, err := w.Write(p); err != nil {
-			return err
+		return 0
+	}
+	return x
+}
+
+func (p *sessionRecord) readBytes(r byteReader) []byte {
+	if p.err != nil {
+		return nil
+	}
+	n := p.readUvarint(r)
+	if p.err != nil {
+		return nil
+	}
+	x := make([]byte, n)
+	_, p.err = io.ReadFull(r, x)
+	if p.err != nil {
+		if p.err == io.EOF {
+			p.err = errCorruptManifest
 		}
 		return nil
 	}
-
-	if p.hasComparer {
-		if _, err := w.Write(tagBytesCache[tagComparer]); err != nil {
-			return err
-		}
-		if err := putBytes([]byte(p.comparer)); err != nil {
-			return err
-		}
-	}
-
-	if p.hasJournalNum {
-		if _, err := w.Write(tagBytesCache[tagJournalNum]); err != nil {
-			return err
-		}
-		if err := putUvarint(p.journalNum); err != nil {
-			return err
-		}
-	}
-
-	if p.hasNextNum {
-		if _, err := w.Write(tagBytesCache[tagNextNum]); err != nil {
-			return err
-		}
-		if err := putUvarint(p.nextNum); err != nil {
-			return err
-		}
-	}
-
-	if p.hasSeq {
-		if _, err := w.Write(tagBytesCache[tagSeq]); err != nil {
-			return err
-		}
-		if err := putUvarint(uint64(p.seq)); err != nil {
-			return err
-		}
-	}
-
-	for _, p := range p.compactPointers {
-		if _, err := w.Write(tagBytesCache[tagCompactPointer]); err != nil {
-			return err
-		}
-		if err := putUvarint(uint64(p.level)); err != nil {
-			return err
-		}
-		if err := putBytes(p.key); err != nil {
-			return err
-		}
-	}
-
-	for _, p := range p.deletedTables {
-		if _, err := w.Write(tagBytesCache[tagDeletedTable]); err != nil {
-			return err
-		}
-		if err := putUvarint(uint64(p.level)); err != nil {
-			return err
-		}
-		if err := putUvarint(p.num); err != nil {
-			return err
-		}
-	}
-
-	for _, p := range p.newTables {
-		if _, err := w.Write(tagBytesCache[tagNewTable]); err != nil {
-			return err
-		}
-		if err := putUvarint(uint64(p.level)); err != nil {
-			return err
-		}
-		if err := putUvarint(p.num); err != nil {
-			return err
-		}
-		if err := putUvarint(p.size); err != nil {
-			return err
-		}
-		if err := putBytes(p.min); err != nil {
-			return err
-		}
-		if err := putBytes(p.max); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return x
 }
 
-func (p *sessionRecord) encode() []byte {
-	b := new(bytes.Buffer)
-	p.encodeTo(b)
-	return b.Bytes()
+func (p *sessionRecord) readLevel(r io.ByteReader) int {
+	if p.err != nil {
+		return 0
+	}
+	x := p.readUvarint(r)
+	if p.err != nil {
+		return 0
+	}
+	if x >= kNumLevels {
+		p.err = errCorruptManifest
+		return 0
+	}
+	return int(x)
 }
 
-func (p *sessionRecord) decodeFrom(r readByteReader) (err error) {
-	for err == nil {
-		var tag uint64
-		tag, err = binary.ReadUvarint(r)
+func (p *sessionRecord) decode(r io.Reader) error {
+	br, ok := r.(byteReader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+	p.err = nil
+	for p.err == nil {
+		rec, err := binary.ReadUvarint(br)
 		if err != nil {
 			if err == io.EOF {
 				err = nil
 			}
 			return err
 		}
-
-		switch tag {
-		case tagComparer:
-			var cmp []byte
-			cmp, err = readBytes(r)
-			if err == nil {
-				p.comparer = string(cmp)
-				p.hasComparer = true
+		switch rec {
+		case recComparer:
+			x := p.readBytes(br)
+			if p.err == nil {
+				p.setComparer(string(x))
 			}
-		case tagJournalNum:
-			p.journalNum, err = binary.ReadUvarint(r)
-			if err == nil {
-				p.hasJournalNum = true
+		case recJournalNum:
+			x := p.readUvarint(br)
+			if p.err == nil {
+				p.setJournalNum(x)
 			}
-		case tagPrevJournalNum:
-			p.prevJournalNum, err = binary.ReadUvarint(r)
-			if err == nil {
-				p.hasPrevJournalNum = true
+		case recPrevJournalNum:
+			x := p.readUvarint(br)
+			if p.err == nil {
+				p.setPrevJournalNum(x)
 			}
-		case tagNextNum:
-			p.nextNum, err = binary.ReadUvarint(r)
-			if err == nil {
-				p.hasNextNum = true
+		case recNextNum:
+			x := p.readUvarint(br)
+			if p.err == nil {
+				p.setNextNum(x)
 			}
-		case tagSeq:
-			var seq uint64
-			seq, err = binary.ReadUvarint(r)
-			if err == nil {
-				p.seq = seq
-				p.hasSeq = true
+		case recSeq:
+			x := p.readUvarint(br)
+			if p.err == nil {
+				p.setSeq(x)
 			}
-		case tagCompactPointer:
-			var level uint64
-			var b []byte
-			level, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
+		case recCompactionPointer:
+			level := p.readLevel(br)
+			key := p.readBytes(br)
+			if p.err == nil {
+				p.addCompactionPointer(level, iKey(key))
 			}
-			b, err = readBytes(r)
-			if err != nil {
-				break
+		case recNewTable:
+			level := p.readLevel(br)
+			num := p.readUvarint(br)
+			size := p.readUvarint(br)
+			min := p.readBytes(br)
+			max := p.readBytes(br)
+			if p.err == nil {
+				p.addTable(level, num, size, min, max)
 			}
-			p.addCompactPointer(int(level), b)
-		case tagNewTable:
-			var level, num, size uint64
-			var b []byte
-			level, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
+		case recDeletedTable:
+			level := p.readLevel(br)
+			num := p.readUvarint(br)
+			if p.err == nil {
+				p.deleteTable(level, num)
 			}
-			num, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
-			}
-			size, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
-			}
-			b, err = readBytes(r)
-			if err != nil {
-				break
-			}
-			min := iKey(b)
-			b, err = readBytes(r)
-			if err != nil {
-				break
-			}
-			max := iKey(b)
-			p.addTable(int(level), num, size, min, max)
-		case tagDeletedTable:
-			var level, num uint64
-			level, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
-			}
-			num, err = binary.ReadUvarint(r)
-			if err != nil {
-				break
-			}
-			p.deleteTable(int(level), num)
 		}
 	}
 
-	return err
-}
-
-func (p *sessionRecord) decode(buf []byte) error {
-	b := bytes.NewBuffer(buf)
-	return p.decodeFrom(b)
+	return p.err
 }

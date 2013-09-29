@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
+	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -37,12 +38,14 @@ type DB struct {
 	s *session
 
 	// MemDB
-	memMu         sync.RWMutex
-	mem           *memdb.DB
-	frozenMem     *memdb.DB
-	journal       *journalWriter
-	frozenJournal *journalWriter
-	frozenSeq     uint64
+	memMu             sync.RWMutex
+	mem               *memdb.DB
+	frozenMem         *memdb.DB
+	journal           *journal.Writer
+	journalWriter     storage.Writer
+	journalFile       storage.File
+	frozenJournalFile storage.File
+	frozenSeq         uint64
 
 	// Snapshot
 	snapsMu   sync.Mutex
@@ -172,6 +175,9 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 //
 // The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
+	if o.HasFlag(opt.OFStrict) {
+		return nil, errors.New("leveldb: cannot recovers the DB with strict flag")
+	}
 	s, err := newSession(p, o)
 	if err != nil {
 		return nil, err
@@ -272,97 +278,104 @@ func (d *DB) recoverJournal() error {
 
 	s.printf("JournalRecovery: started, min=%d", s.stJournalNum)
 
-	var mem *memdb.DB
-	batch := new(Batch)
-	cm := newCMem(s)
-
-	journals := files(s.getFiles(storage.TypeJournal))
-	journals.sort()
-	rJournals := make([]storage.File, 0, len(journals))
-	for _, journal := range journals {
-		if journal.Num() >= s.stJournalNum || journal.Num() == s.stPrevJournalNum {
-			s.markFileNum(journal.Num())
-			rJournals = append(rJournals, journal)
+	jfiles := files(s.getFiles(storage.TypeJournal))
+	jfiles.sort()
+	rJfiles := make([]storage.File, 0, len(jfiles))
+	for _, file := range jfiles {
+		if file.Num() >= s.stJournalNum || file.Num() == s.stPrevJournalNum {
+			s.markFileNum(file.Num())
+			rJfiles = append(rJfiles, file)
 		}
 	}
 
-	var fr *journalReader
-	for _, journal := range rJournals {
-		s.printf("JournalRecovery: recovering, num=%d", journal.Num())
+	var jr *journal.Reader
+	var of storage.File
+	var mem *memdb.DB
+	batch := new(Batch)
+	cm := newCMem(s)
+	buf := new(util.Buffer)
+	// Options.
+	strict := s.o.HasFlag(opt.OFStrict)
+	writeBuffer := s.o.GetWriteBuffer()
+	for _, file := range rJfiles {
+		s.printf("JournalRecovery: recovering, num=%d", file.Num())
 
-		r, err := newJournalReader(journal, true, s.journalDropFunc("journal", journal.Num()))
+		reader, err := file.Open()
 		if err != nil {
 			return err
 		}
-
+		if jr == nil {
+			jr = journal.NewReader(reader, dropper{s, file}, strict)
+		} else {
+			jr.Reset(reader, dropper{s, file}, strict)
+		}
 		if mem != nil {
 			if mem.Len() > 0 {
 				if err = cm.flush(mem, 0); err != nil {
 					return err
 				}
 			}
-
-			if err = cm.commit(r.file.Num(), d.seq); err != nil {
+			if err = cm.commit(file.Num(), d.seq); err != nil {
 				return err
 			}
-
 			cm.reset()
-
-			fr.remove()
-			fr = nil
+			of.Remove()
+			of = nil
 		}
-
 		mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
-
-		for r.journal.Next() {
-			if err = batch.decode(r.journal.Record()); err != nil {
+		for {
+			r, err := jr.Next()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
 				return err
 			}
-
+			buf.Reset()
+			if _, err := buf.ReadFrom(r); err != nil {
+				if strict {
+					return err
+				}
+				continue
+			}
+			if err = batch.decode(buf.Bytes()); err != nil {
+				return err
+			}
 			if err = batch.memReplay(mem); err != nil {
 				return err
 			}
-
 			d.seq = batch.seq + uint64(batch.len())
-
-			if mem.Size() >= s.o.GetWriteBuffer() {
-				// flush to table
+			if mem.Size() >= writeBuffer {
+				// Large enough, flush it.
 				if err = cm.flush(mem, 0); err != nil {
 					return err
 				}
-
-				// create new memdb
+				// Create new memdb.
 				mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
 			}
 		}
-
-		if err = r.journal.Error(); err != nil {
-			return err
-		}
-
-		r.close()
-		fr = r
+		reader.Close()
+		of = file
 	}
 
-	// create new journal
+	// Create a new journal.
 	if _, err := d.newMem(); err != nil {
 		return err
 	}
-
+	// Flush the last journal.
 	if mem != nil && mem.Len() > 0 {
 		if err := cm.flush(mem, 0); err != nil {
 			return err
 		}
 	}
-
-	if err := cm.commit(d.journal.file.Num(), d.seq); err != nil {
+	// Commit.
+	if err := cm.commit(d.journalFile.Num(), d.seq); err != nil {
 		return err
 	}
-
-	if fr != nil {
-		fr.remove()
+	// Remove the last journal.
+	if of != nil {
+		of.Remove()
 	}
-
 	return nil
 }
 
@@ -628,7 +641,7 @@ func (d *DB) Close() error {
 
 	// close journal
 	if d.journal != nil {
-		d.journal.close()
+		d.journal.Close()
 	}
 
 	// close session

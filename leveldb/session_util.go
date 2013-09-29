@@ -16,18 +16,25 @@ import (
 
 // logging
 
+type dropper struct {
+	s    *session
+	file storage.File
+}
+
+func (d dropper) Drop(err error) {
+	if e, ok := err.(journal.DroppedError); ok {
+		d.s.printf("%s-%d: dropped %d bytes: %s", d.file.Type(), d.file.Num(), e.Size, e.Reason)
+	} else {
+		d.s.printf("%s-%d: %v", d.file.Type(), d.file.Num, err)
+	}
+}
+
 func (s *session) print(v ...interface{}) {
 	s.stor.Print(fmt.Sprint(v...))
 }
 
 func (s *session) printf(format string, v ...interface{}) {
 	s.stor.Print(fmt.Sprintf(format, v...))
-}
-
-func (s *session) journalDropFunc(tag string, num uint64) journal.DropFunc {
-	return func(n int, reason string) {
-		s.printf("%s[%d] dropping %d bytes: %s", tag, num, n, reason)
-	}
 }
 
 // file utils
@@ -122,17 +129,17 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 	r.setNextNum(s.fileNum())
 
 	if snapshot {
-		if !r.hasJournalNum {
+		if !r.has(recJournalNum) {
 			r.setJournalNum(s.stJournalNum)
 		}
 
-		if !r.hasJournalNum {
+		if !r.has(recSeq) {
 			r.setSeq(s.stSeq)
 		}
 
 		for level, ik := range s.stCPtrs {
 			if ik != nil {
-				r.addCompactPointer(level, ik)
+				r.addCompactionPointer(level, ik)
 			}
 		}
 
@@ -143,75 +150,96 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 // Mark if record has been commited, this will update session state;
 // need external synchronization.
 func (s *session) recordCommited(r *sessionRecord) {
-	if r.hasJournalNum {
+	if r.has(recJournalNum) {
 		s.stJournalNum = r.journalNum
 	}
 
-	if r.hasPrevJournalNum {
+	if r.has(recPrevJournalNum) {
 		s.stPrevJournalNum = r.prevJournalNum
 	}
 
-	if r.hasSeq {
+	if r.has(recSeq) {
 		s.stSeq = r.seq
 	}
 
-	for _, p := range r.compactPointers {
+	for _, p := range r.compactionPointers {
 		s.stCPtrs[p.level] = iKey(p.key)
 	}
 }
 
 // Create a new manifest file; need external synchronization.
-func (s *session) createManifest(num uint64, r *sessionRecord, v *version) (err error) {
-	w, err := newJournalWriter(s.stor.GetFile(num, storage.TypeManifest))
+func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
+	num := s.allocFileNum()
+	file := s.stor.GetFile(num, storage.TypeManifest)
+	writer, err := file.Create()
 	if err != nil {
 		return
 	}
+	jw := journal.NewWriter(writer)
 
 	if v == nil {
 		v = s.version_NB()
 	}
-
-	if r == nil {
-		r = new(sessionRecord)
+	if rec == nil {
+		rec = new(sessionRecord)
 	}
-	s.fillRecord(r, true)
-	v.fillRecord(r)
+	s.fillRecord(rec, true)
+	v.fillRecord(rec)
 
 	defer func() {
 		if err == nil {
-			s.recordCommited(r)
+			s.recordCommited(rec)
 			if s.manifest != nil {
-				s.manifest.remove()
+				s.manifest.Close()
 			}
-			s.manifest = w
+			if s.manifestFile != nil {
+				s.manifestFile.Remove()
+			}
+			s.manifestFile = file
+			s.manifestWriter = writer
+			s.manifest = jw
 		} else {
-			w.remove()
+			writer.Close()
+			file.Remove()
+			s.reuseFileNum(num)
 		}
 	}()
 
-	err = w.journal.Append(r.encode())
+	w, err := jw.Next()
 	if err != nil {
 		return
 	}
-
-	err = w.writer.Sync()
+	err = rec.encode(w)
 	if err != nil {
 		return
 	}
-
-	return s.stor.SetManifest(w.file)
+	err = jw.Flush()
+	if err != nil {
+		return
+	}
+	err = s.stor.SetManifest(file)
+	return
 }
 
 // Flush record to disk.
-func (s *session) flushManifest(r *sessionRecord) error {
-	s.fillRecord(r, false)
-	if err := s.manifest.journal.Append(r.encode()); err != nil {
-		return err
+func (s *session) flushManifest(rec *sessionRecord) (err error) {
+	s.fillRecord(rec, false)
+	w, err := s.manifest.Next()
+	if err != nil {
+		return
 	}
-	if err := s.manifest.writer.Sync(); err != nil {
-		return err
+	err = rec.encode(w)
+	if err != nil {
+		return
 	}
-	s.recordCommited(r)
-
-	return nil
+	err = s.manifest.Flush()
+	if err != nil {
+		return
+	}
+	err = s.manifestWriter.Sync()
+	if err != nil {
+		return
+	}
+	s.recordCommited(rec)
+	return
 }

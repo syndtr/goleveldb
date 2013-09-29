@@ -186,7 +186,7 @@ func (d *DB) memCompaction() {
 	d.transact("mem[commit]", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
-		return c.commit(d.journal.file.Num(), d.frozenSeq)
+		return c.commit(d.journalFile.Num(), d.frozenSeq)
 	})
 
 	stats.write = c.t.size
@@ -206,7 +206,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
 
 	rec := new(sessionRecord)
-	rec.addCompactPointer(c.level, c.max)
+	rec.addCompactionPointer(c.level, c.max)
 
 	if !noTrivial && c.trivial() {
 		t := c.tables[0][0]

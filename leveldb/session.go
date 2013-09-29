@@ -8,11 +8,13 @@ package leveldb
 
 import (
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
+	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
@@ -31,7 +33,9 @@ type session struct {
 	cmp      *iComparer
 	tops     *tOps
 
-	manifest *journalWriter
+	manifest       *journal.Writer
+	manifestWriter storage.Writer
+	manifestFile   storage.File
 
 	stCPtrs   [kNumLevels]iKey // compact pointers; need external synchronization
 	stVersion *version         // current version
@@ -64,7 +68,7 @@ func (s *session) close() {
 		cache.Purge(nil)
 	}
 	if s.manifest != nil {
-		s.manifest.close()
+		s.manifest.Close()
 	}
 	s.storLock.Release()
 }
@@ -72,78 +76,72 @@ func (s *session) close() {
 // Create a new database session; need external synchronization.
 func (s *session) create() error {
 	// create manifest
-	return s.createManifest(s.allocFileNum(), nil, nil)
+	return s.newManifest(nil, nil)
 }
 
 // Recover a database session; need external synchronization.
-func (s *session) recover() error {
+func (s *session) recover() (err error) {
 	file, err := s.stor.GetManifest()
 	if err != nil {
-		return err
+		return
 	}
 
-	r, err := newJournalReader(file, true, s.journalDropFunc("manifest", file.Num()))
+	reader, err := file.Open()
 	if err != nil {
-		return err
+		return
 	}
-	defer r.close()
+	defer reader.Close()
+	strict := s.o.HasFlag(opt.OFStrict)
+	jr := journal.NewReader(reader, dropper{s, file}, strict)
 
-	cmp := s.cmp.cmp.Name()
 	staging := s.version_NB().newStaging()
-	srec := new(sessionRecord)
-
-	for r.journal.Next() {
-		rec := new(sessionRecord)
-		err = rec.decode(r.journal.Record())
+	rec := &sessionRecord{}
+	for {
+		var r io.Reader
+		r, err = jr.Next()
 		if err != nil {
-			continue
+			if err == io.EOF {
+				err = nil
+				break
+			}
+			return
 		}
 
-		if rec.hasComparer && rec.comparer != cmp {
-			return errors.New("leveldb: invalid comparer, " + "want '" + cmp + "', " + "got '" + rec.comparer + "'")
+		err = rec.decode(r)
+		if err == nil {
+			// save compact pointers
+			for _, rp := range rec.compactionPointers {
+				s.stCPtrs[rp.level] = iKey(rp.key)
+			}
+			// commit record to version staging
+			staging.commit(rec)
+		} else if strict {
+			return err
+		} else {
+			s.printf("manifest error: %v (skipped)", err)
 		}
-
-		// save compact pointers
-		for _, rp := range rec.compactPointers {
-			s.stCPtrs[rp.level] = iKey(rp.key)
-		}
-
-		// commit record to version staging
-		staging.commit(rec)
-
-		if rec.hasJournalNum {
-			srec.setJournalNum(rec.journalNum)
-		}
-		if rec.hasPrevJournalNum {
-			srec.setPrevJournalNum(rec.prevJournalNum)
-		}
-		if rec.hasNextNum {
-			srec.setNextNum(rec.nextNum)
-		}
-		if rec.hasSeq {
-			srec.setSeq(rec.seq)
-		}
+		rec.resetCompactionPointers()
+		rec.resetAddedTables()
+		rec.resetDeletedTables()
 	}
 
-	// check for error in journal reader
-	if err := r.journal.Error(); err != nil {
-		return err
-	}
-
-	switch false {
-	case srec.hasNextNum:
+	switch {
+	case !rec.has(recComparer):
+		return errors.New("leveldb: manifest missing comparer name")
+	case rec.comparer != s.cmp.cmp.Name():
+		return errors.New("leveldb: comparer mismatch, " + "want '" + s.cmp.cmp.Name() + "', " + "got '" + rec.comparer + "'")
+	case !rec.has(recNextNum):
 		return errors.New("leveldb: manifest missing next file number")
-	case srec.hasJournalNum:
+	case !rec.has(recJournalNum):
 		return errors.New("leveldb: manifest missing journal file number")
-	case srec.hasSeq:
+	case !rec.has(recSeq):
 		return errors.New("leveldb: manifest missing seq number")
 	}
 
-	s.manifest = &journalWriter{file: file}
+	s.manifestFile = file
 	s.setVersion(staging.finish())
-	s.setFileNum(srec.nextNum)
-	s.recordCommited(srec)
-
+	s.setFileNum(rec.nextNum)
+	s.recordCommited(rec)
 	return nil
 }
 
@@ -152,9 +150,9 @@ func (s *session) commit(r *sessionRecord) (err error) {
 	// spawn new version based on current version
 	nv := s.version_NB().spawn(r)
 
-	if s.manifest.closed() {
+	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
-		err = s.createManifest(s.allocFileNum(), r, nv)
+		err = s.newManifest(r, nv)
 	} else {
 		err = s.flushManifest(r)
 	}

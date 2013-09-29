@@ -14,11 +14,20 @@ import (
 )
 
 func (d *DB) doWriteJournal(b *Batch) error {
-	err := d.journal.journal.Append(b.encode())
-	if err == nil && b.sync {
-		err = d.journal.writer.Sync()
+	w, err := d.journal.Next()
+	if err != nil {
+		return err
 	}
-	return err
+	if _, err := w.Write(b.encode()); err != nil {
+		return err
+	}
+	if err := d.journal.Flush(); err != nil {
+		return err
+	}
+	if b.sync {
+		return d.journalWriter.Sync()
+	}
+	return nil
 }
 
 func (d *DB) writeJournal() {

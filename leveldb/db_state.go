@@ -9,6 +9,7 @@ package leveldb
 import (
 	"sync/atomic"
 
+	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
@@ -28,21 +29,24 @@ func (d *DB) newMem() (mem *memdb.DB, err error) {
 	s := d.s
 
 	num := s.allocFileNum()
-	newJournal, err := newJournalWriter(s.getJournalFile(num))
+	file := s.getJournalFile(num)
+	w, err := file.Create()
 	if err != nil {
 		s.reuseFileNum(num)
 		return
 	}
-
 	d.memMu.Lock()
-	if d.journal != nil {
-		d.journal.close()
-		d.frozenJournal = d.journal
+	if d.journal == nil {
+		d.journal = journal.NewWriter(w)
+	} else {
+		d.journal.Reset(w)
+		d.frozenJournalFile = d.journalFile
 	}
-	d.journal = newJournal
+	d.journalWriter = w
+	d.journalFile = file
 	d.frozenMem = d.mem
-	mem = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
-	d.mem = mem
+	d.mem = memdb.New(s.cmp, toPercent(d.s.o.GetWriteBuffer(), kWriteBufferPercent))
+	mem = d.mem
 	// The seq only incremented by the writer.
 	d.frozenSeq = d.seq
 	d.memMu.Unlock()
@@ -68,18 +72,18 @@ func (d *DB) hasFrozenMem() bool {
 	return d.frozenMem != nil
 }
 
-// Get current frozen mem; assume that mem isn't nil.
+// Get current frozen mem; assume that frozen mem isn't nil.
 func (d *DB) getFrozenMem() *memdb.DB {
 	d.memMu.RLock()
 	defer d.memMu.RUnlock()
 	return d.frozenMem
 }
 
-// Drop frozen mem; assume that mem and frozen mem isn't nil.
+// Drop frozen mem; assume that frozen mem isn't nil.
 func (d *DB) dropFrozenMem() {
 	d.memMu.Lock()
-	d.frozenJournal.remove()
-	d.frozenJournal = nil
+	d.frozenJournalFile.Remove()
+	d.frozenJournalFile = nil
 	d.frozenMem = nil
 	d.memMu.Unlock()
 }

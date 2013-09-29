@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
-	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
@@ -162,7 +161,7 @@ func TestCorruptDB_Journal(t *testing.T) {
 	h.check(100, 100)
 	h.closeDB()
 	h.corrupt(storage.TypeJournal, 19, 1)
-	h.corrupt(storage.TypeJournal, journal.BlockSize+1000, 1)
+	h.corrupt(storage.TypeJournal, 32*1024+1000, 1)
 
 	h.openDB()
 	h.check(36, 36)

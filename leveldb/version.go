@@ -340,7 +340,7 @@ func (p *versionStaging) commit(r *sessionRecord) {
 	}
 
 	// new tables
-	for _, tr := range r.newTables {
+	for _, tr := range r.addedTables {
 		tm := &(p.tables[tr.level])
 
 		if tm.added == nil {
