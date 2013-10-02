@@ -119,7 +119,7 @@ func (s *session) recover() (err error) {
 		} else if strict {
 			return err
 		} else {
-			s.printf("manifest error: %v (skipped)", err)
+			s.logf("manifest error: %v (skipped)", err)
 		}
 		rec.resetCompactionPointers()
 		rec.resetAddedTables()
@@ -270,7 +270,7 @@ func (c *compaction) expand() {
 			xmin, xmax := exp0.getRange(icmp)
 			vt1.getOverlaps(xmin.ukey(), xmax.ukey(), &exp1, true, ucmp)
 			if len(exp1) == len(t1) {
-				s.printf("Compaction: expanding, level=%d from=`%d+%d (%d+%d bytes)' to=`%d+%d (%d+%d bytes)'",
+				s.logf("Compaction: expanding, level=%d from=`%d+%d (%d+%d bytes)' to=`%d+%d (%d+%d bytes)'",
 					level, len(t0), len(t1), t0.size(), t1.size(),
 					len(exp0), len(exp1), exp0.size(), exp1.size())
 				min, max = xmin, xmax

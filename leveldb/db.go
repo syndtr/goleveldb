@@ -199,7 +199,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	ff := files(ff0)
 	ff.sort()
 
-	s.printf("Recover: started, files=%d", len(ff))
+	s.logf("Recover: started, files=%d", len(ff))
 
 	rec := new(sessionRecord)
 
@@ -292,7 +292,7 @@ func (d *DB) recoverJournal() error {
 	s := d.s
 	icmp := s.cmp
 
-	s.printf("JournalRecovery: started, min=%d", s.stJournalNum)
+	s.logf("JournalRecovery: started, min=%d", s.stJournalNum)
 
 	ff0, err := s.getFiles(storage.TypeJournal)
 	if err != nil {
@@ -318,7 +318,7 @@ func (d *DB) recoverJournal() error {
 	strict := s.o.HasFlag(opt.OFStrict)
 	writeBuffer := s.o.GetWriteBuffer()
 	for _, file := range rJfiles {
-		s.printf("JournalRecovery: recovering, num=%d", file.Num())
+		s.logf("JournalRecovery: recovering, num=%d", file.Num())
 
 		reader, err := file.Open()
 		if err != nil {

@@ -23,17 +23,17 @@ type dropper struct {
 
 func (d dropper) Drop(err error) {
 	if e, ok := err.(journal.DroppedError); ok {
-		d.s.printf("%s-%d: dropped %d bytes: %s", d.file.Type(), d.file.Num(), e.Size, e.Reason)
+		d.s.logf("%s-%d: dropped %d bytes: %s", d.file.Type(), d.file.Num(), e.Size, e.Reason)
 	} else {
-		d.s.printf("%s-%d: %v", d.file.Type(), d.file.Num, err)
+		d.s.logf("%s-%d: %v", d.file.Type(), d.file.Num, err)
 	}
 }
 
-func (s *session) print(v ...interface{}) {
+func (s *session) log(v ...interface{}) {
 	s.stor.Log(fmt.Sprint(v...))
 }
 
-func (s *session) printf(format string, v ...interface{}) {
+func (s *session) logf(format string, v ...interface{}) {
 	s.stor.Log(fmt.Sprintf(format, v...))
 }
 

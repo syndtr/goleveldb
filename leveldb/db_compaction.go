@@ -100,7 +100,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	}
 	c.rec.addTableFile(level, t)
 
-	s.printf("Compaction: table created, source=mem level=%d num=%d size=%d entries=%d min=%q max=%q",
+	s.logf("Compaction: table created, source=mem level=%d num=%d size=%d entries=%d min=%q max=%q",
 		level, t.file.Num(), t.size, n, t.min, t.max)
 
 	c.level = level
@@ -151,20 +151,20 @@ func (d *DB) transact(name string, f func() error) {
 	s := d.s
 	for {
 		if d.isClosed() {
-			s.printf("Transact: %s: exiting", name)
+			s.logf("Transact: %s: exiting", name)
 			panic(errTransactExiting)
 		}
 		err := f()
 		select {
 		case _, _ = <-d.closeCh:
-			s.printf("Transact: %s: exiting", name)
+			s.logf("Transact: %s: exiting", name)
 			panic(errTransactExiting)
 		case d.compErrSetCh <- err:
 		}
 		if err == nil {
 			return
 		}
-		s.printf("Transact: %s: err=%q", name, err)
+		s.logf("Transact: %s: err=%q", name, err)
 		time.Sleep(time.Second)
 	}
 }
@@ -175,7 +175,7 @@ func (d *DB) memCompaction() {
 	stats := new(cStatsStaging)
 	mem := d.getFrozenMem()
 
-	s.printf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
+	s.logf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
 
 	d.transact("mem[flush]", func() (err error) {
 		stats.startTimer()
@@ -202,7 +202,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	s := d.s
 	ucmp := s.cmp.cmp
 
-	s.printf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
+	s.logf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
 		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
 
 	rec := new(sessionRecord)
@@ -215,7 +215,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		d.transact("table[rename]", func() (err error) {
 			return s.commit(rec)
 		})
-		s.printf("Compaction: table level changed, num=%d from=%d to=%d",
+		s.logf("Compaction: table level changed, num=%d from=%d to=%d",
 			t.file.Num(), c.level, c.level+1)
 		return
 	}
@@ -235,7 +235,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		}
 		rec.addTableFile(c.level+1, t)
 		stats.write += t.size
-		s.printf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
+		s.logf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
 			c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
 		return nil
 	}
@@ -375,7 +375,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return
 	})
 
-	s.print("Compaction: build done")
+	s.log("Compaction: build done")
 
 	for n, tt := range c.tables {
 		for _, t := range tt {
@@ -392,7 +392,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return s.commit(rec)
 	})
 
-	s.print("Compaction: commited")
+	s.log("Compaction: commited")
 
 	// Save compaction stats
 	d.compStats[c.level+1].add(stats)
@@ -421,7 +421,7 @@ func (d *DB) compaction() {
 			if creq == nil {
 				continue
 			}
-			s.printf("CompactRange: ordered, level=%d", creq.level)
+			s.logf("CompactRange: ordered, level=%d", creq.level)
 			if creq.level >= 0 {
 				c := s.getCompactionRange(creq.level, creq.min, creq.max)
 				if c != nil {
@@ -442,7 +442,7 @@ func (d *DB) compaction() {
 					}
 				}
 			}
-			s.print("CompactRange: done")
+			s.log("CompactRange: done")
 			cch = creq.cch
 		}
 		if s.version_NB().needCompaction() {
