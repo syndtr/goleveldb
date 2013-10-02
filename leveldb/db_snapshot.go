@@ -122,6 +122,8 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 // The iterator must be released after use, by calling Release method.
 // Releasing the snapshot doesn't mean releasing the iterator too, the
 // iterator would be still valid until released.
+//
+// Also read Iterator documentation of the leveldb/iterator package.
 func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	db := p.db
 	if err := db.ok(); err != nil {

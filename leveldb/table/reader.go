@@ -547,6 +547,8 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 //
 // The returned iterator is not goroutine-safe and should be released
 // when not used.
+//
+// Also read Iterator documentation of the leveldb/iterator package.
 func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 	if r.err != nil {
 		return iterator.NewEmptyIterator(r.err)

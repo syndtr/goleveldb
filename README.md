@@ -19,6 +19,7 @@ Read or modify the database content:
 
 	ro := &opt.ReadOptions{}
 	wo := &opt.WriteOptions{}
+	// Remember that the contents of the returned slice should not be modified.
 	data, err := db.Get([]byte("key"), ro)
 	...
 	err = db.Put([]byte("key"), []byte("value"), wo)
@@ -30,6 +31,8 @@ Iterate over database content:
 
 	iter := db.NewIterator(ro)
 	for iter.Next() {
+		// Remember that the contents of the returned slice should not be modified, and
+		// only valid until the next call to Next.
 		key := iter.Key()
 		value := iter.Value()
 		...

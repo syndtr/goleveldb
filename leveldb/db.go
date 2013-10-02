@@ -467,6 +467,8 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 // consistent.
 //
 // The iterator must be released after use, by calling Release method.
+//
+// Also read Iterator documentation of the leveldb/iterator package.
 func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.ok(); err != nil {
 		return iterator.NewEmptyIterator(err)

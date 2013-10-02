@@ -329,6 +329,8 @@ func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
 // to be a consistent snapshot of the DB at a particular point in time.
 //
 // The iterator must be released after use, by calling Release method.
+//
+// Also read Iterator documentation of the leveldb/iterator package.
 func (p *DB) NewIterator() iterator.Iterator {
 	return &dbIter{p: p}
 }
