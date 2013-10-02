@@ -13,6 +13,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"code.google.com/p/snappy-go/snappy"
 
@@ -410,9 +411,12 @@ func (i *indexIter) Get() iterator.Iterator {
 
 // Reader is a table reader.
 type Reader struct {
-	reader io.ReaderAt
-	cache  cache.Namespace
-	err    error
+	mu     sync.Mutex
+	reader io.ReadSeeker
+	offset int64
+
+	cache cache.Namespace
+	err   error
 	// Options
 	cmp    comparer.Comparer
 	filter filter.Filter
@@ -423,9 +427,26 @@ type Reader struct {
 	filterBlock *filterBlock
 }
 
+func (r *Reader) readAt(b []byte, offset int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.offset != offset {
+		offset, err := r.reader.Seek(offset, 0)
+		if err != nil {
+			return err
+		}
+		r.offset = offset
+	}
+	n, err := io.ReadFull(r.reader, b)
+	if n > 0 {
+		r.offset += int64(n)
+	}
+	return err
+}
+
 func (r *Reader) readRawBlock(bh blockHandle, verifyChecksums bool) ([]byte, error) {
 	data := make([]byte, bh.length+blockTrailerLen)
-	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil {
+	if err := r.readAt(data, int64(bh.offset)); err != nil {
 		return nil, err
 	}
 	if verifyChecksums || r.strict {
@@ -632,7 +653,7 @@ func (r *Reader) GetApproximateOffset(key []byte) (offset int64, err error) {
 
 // NewReader creates a new initialized table reader for the file.
 // The cache is optional and can be nil.
-func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGetter) *Reader {
+func NewReader(f io.ReadSeeker, size int64, cache cache.Namespace, o opt.OptionsGetter) *Reader {
 	r := &Reader{
 		reader: f,
 		cache:  cache,
@@ -648,7 +669,7 @@ func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGe
 		return r
 	}
 	var footer [footerLen]byte
-	if _, err := f.ReadAt(footer[:], size-footerLen); err != nil && err != io.EOF {
+	if err := r.readAt(footer[:], size-footerLen); err != nil && err != io.EOF {
 		r.err = fmt.Errorf("leveldb/table: Reader: invalid table (could not read footer): %v", err)
 	}
 	if string(footer[footerLen-len(magic):footerLen]) != magic {

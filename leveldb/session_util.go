@@ -30,11 +30,11 @@ func (d dropper) Drop(err error) {
 }
 
 func (s *session) print(v ...interface{}) {
-	s.stor.Print(fmt.Sprint(v...))
+	s.stor.Log(fmt.Sprint(v...))
 }
 
 func (s *session) printf(format string, v ...interface{}) {
-	s.stor.Print(fmt.Sprintf(format, v...))
+	s.stor.Log(fmt.Sprintf(format, v...))
 }
 
 // file utils
@@ -47,7 +47,7 @@ func (s *session) getTableFile(num uint64) storage.File {
 	return s.stor.GetFile(num, storage.TypeTable)
 }
 
-func (s *session) getFiles(t storage.FileType) []storage.File {
+func (s *session) getFiles(t storage.FileType) ([]storage.File, error) {
 	return s.stor.GetFiles(t)
 }
 

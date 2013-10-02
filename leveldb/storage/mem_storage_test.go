@@ -12,7 +12,7 @@ import (
 )
 
 func TestMemStorage(t *testing.T) {
-	m := new(MemStorage)
+	m := NewMemStorage()
 
 	l, err := m.Lock()
 	if err != nil {
@@ -24,10 +24,7 @@ func TestMemStorage(t *testing.T) {
 	} else {
 		t.Logf("storage lock got error: %s (expected)", err)
 	}
-	err = l.Release()
-	if err != nil {
-		t.Fatal("could not release storage lock: ", err)
-	}
+	l.Release()
 	_, err = m.Lock()
 	if err != nil {
 		t.Fatal("storage lock failed(2): ", err)
@@ -40,7 +37,7 @@ func TestMemStorage(t *testing.T) {
 	w, _ := f.Create()
 	w.Write([]byte("abc"))
 	w.Close()
-	if len(m.GetFiles(TypeAll)) != 1 {
+	if ff, _ := m.GetFiles(TypeAll); len(ff) != 1 {
 		t.Fatal("invalid GetFiles len")
 	}
 	buf := new(bytes.Buffer)
@@ -53,26 +50,15 @@ func TestMemStorage(t *testing.T) {
 	if got := buf.String(); got != "abc" {
 		t.Fatalf("Read: invalid value, want=abc got=%s", got)
 	}
-	f.Rename(2, TypeJournal)
-	if f.Num() != 2 && f.Type() != TypeJournal {
-		t.Fatal("invalid file number and type")
-	}
 	if _, err := f.Open(); err != nil {
 		t.Fatal("Open: got error: ", err)
-	}
-	if ff := m.GetFiles(TypeAll); len(ff) != 1 {
-		t.Fatal("invalid GetFiles len")
-	} else {
-		if ff[0].Num() != 2 && ff[0].Type() != TypeJournal {
-			t.Fatal("invalid file number and type")
-		}
 	}
 	if _, err := m.GetFile(1, TypeTable).Open(); err == nil {
 		t.Fatal("expecting error")
 	}
 	f.Remove()
-	if len(m.GetFiles(TypeAll)) != 0 {
-		t.Fatal("invalid GetFiles len", m.GetFiles(TypeAll))
+	if ff, _ := m.GetFiles(TypeAll); len(ff) != 0 {
+		t.Fatal("invalid GetFiles len", len(ff))
 	}
 	if _, err := f.Open(); err == nil {
 		t.Fatal("expecting error")

@@ -38,7 +38,7 @@ func tval(seed, n int) []byte {
 type dbHarness struct {
 	t *testing.T
 
-	stor *testingStorage
+	stor *testStorage
 	db   *DB
 	o    *opt.Options
 	oo   opt.OptionsSetter
@@ -63,7 +63,7 @@ func newDbHarness(t *testing.T) *dbHarness {
 
 func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 	h.t = t
-	h.stor = newTestingStorage(t)
+	h.stor = newTestStorage(t)
 	h.o = o
 	h.ro = &opt.ReadOptions{}
 	h.wo = &opt.WriteOptions{}
@@ -72,6 +72,7 @@ func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 }
 
 func (h *dbHarness) openDB() {
+	h.t.Log("opening DB")
 	var err error
 	h.db, err = Open(h.stor, h.o)
 	if err != nil {
@@ -81,10 +82,12 @@ func (h *dbHarness) openDB() {
 }
 
 func (h *dbHarness) closeDB() {
+	h.t.Log("closing DB")
 	err := h.db.Close()
 	if err != nil {
 		h.t.Error("Close: got error: ", err)
 	}
+	h.stor.CheckClosed()
 	runtime.GC()
 }
 
@@ -1526,11 +1529,11 @@ func TestDb_BloomFilter(t *testing.T) {
 	h.stor.DelaySync(storage.TypeTable)
 
 	// Lookup present keys. Should rarely read from small sstable.
-	h.stor.SetReadAtCounter(storage.TypeTable)
+	h.stor.SetReadCounter(storage.TypeTable)
 	for i := 0; i < n; i++ {
 		h.getVal(key(i), key(i))
 	}
-	cnt := int(h.stor.ReadAtCounter())
+	cnt := int(h.stor.ReadCounter())
 	t.Logf("lookup of %d present keys yield %d sstable I/O reads", n, cnt)
 
 	if min, max := n, n+2*n/100; cnt < min || cnt > max {
@@ -1538,11 +1541,11 @@ func TestDb_BloomFilter(t *testing.T) {
 	}
 
 	// Lookup missing keys. Should rarely read from either sstable.
-	h.stor.ResetReadAtCounter()
+	h.stor.ResetReadCounter()
 	for i := 0; i < n; i++ {
 		h.get(key(i)+".missing", false)
 	}
-	cnt = int(h.stor.ReadAtCounter())
+	cnt = int(h.stor.ReadCounter())
 	t.Logf("lookup of %d missing keys yield %d sstable I/O reads", n, cnt)
 	if max := 3 * n / 100; cnt > max {
 		t.Errorf("num of sstable I/O reads of missing keys was more than %d, got %d", max, cnt)

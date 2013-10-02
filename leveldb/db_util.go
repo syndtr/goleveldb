@@ -39,7 +39,7 @@ func (p Sizes) Sum() (n uint64) {
 }
 
 // Remove unused files.
-func (d *DB) cleanFiles() {
+func (d *DB) cleanFiles() error {
 	s := d.s
 
 	v := s.version_NB()
@@ -50,7 +50,11 @@ func (d *DB) cleanFiles() {
 		}
 	}
 
-	for _, f := range s.getFiles(storage.TypeAll) {
+	ff, err := s.getFiles(storage.TypeAll)
+	if err != nil {
+		return err
+	}
+	for _, f := range ff {
 		keep := true
 		switch f.Type() {
 		case storage.TypeManifest:
@@ -66,7 +70,10 @@ func (d *DB) cleanFiles() {
 		}
 
 		if !keep {
-			f.Remove()
+			if err := f.Remove(); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }

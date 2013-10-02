@@ -44,7 +44,7 @@ type stConstructor_Table struct {
 func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 	p.t = t
 
-	p.file = newTestingStorage(nil).GetFile(0, storage.TypeTable)
+	p.file = newTestStorage(t).GetFile(0, storage.TypeTable)
 	p.w, _ = p.file.Create()
 
 	o := &opt.Options{
@@ -69,14 +69,23 @@ func (p *stConstructor_Table) finish() (size int, err error) {
 
 	p.t.Logf("table: contains %d entries and %d blocks", p.tw.EntriesLen(), p.tw.BlocksLen())
 
-	tsize := uint64(p.tw.BytesLen())
+	tsize := int64(p.tw.BytesLen())
 
-	fsize, _ := p.file.Size()
+	r, err := p.file.Open()
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	fsize, err := r.Seek(0, 2)
+	if err != nil {
+		p.t.Fatal(err)
+	}
 	if fsize != tsize {
 		p.t.Errorf("table: calculated size doesn't equal with actual size, calculated=%d actual=%d", tsize, fsize)
 	}
-
-	p.r, _ = p.file.Open()
+	if _, err := r.Seek(0, 0); err != nil {
+		p.t.Fatal(err)
+	}
+	p.r = r
 	o := &opt.Options{
 		BlockRestartInterval: 3,
 		Filter:               filter.NewBloomFilter(10),
@@ -177,7 +186,7 @@ func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}
 type stConstructor_DB struct {
 	t *testing.T
 
-	stor *testingStorage
+	stor *testStorage
 	ro   *opt.ReadOptions
 	wo   *opt.WriteOptions
 	db   *DB
@@ -186,7 +195,7 @@ type stConstructor_DB struct {
 func (p *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 	ho.Randomize = true
 	p.t = t
-	p.stor = newTestingStorage(nil)
+	p.stor = newTestStorage(t)
 	o := &opt.Options{
 		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,

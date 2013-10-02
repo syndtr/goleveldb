@@ -103,7 +103,9 @@ func openDB(s *session) (*DB, error) {
 	}
 
 	// Remove any obsolete files.
-	db.cleanFiles()
+	if err := db.cleanFiles(); err != nil {
+		return nil, err
+	}
 
 	// Don't include compaction error goroutine into wait group.
 	go db.compactionError()
@@ -174,13 +176,14 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 // Also Recover will ignore opt.OFCreateIfMissing and opt.OFErrorIfExist flags.
 //
 // The DB must be closed after use, by calling Close method.
-func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
+func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	if o.HasFlag(opt.OFStrict) {
-		return nil, errors.New("leveldb: cannot recovers the DB with strict flag")
+		err = errors.New("leveldb: cannot recovers the DB with strict flag")
+		return
 	}
 	s, err := newSession(p, o)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer func() {
 		if err != nil {
@@ -189,7 +192,11 @@ func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 	}()
 
 	// get all files
-	ff := files(s.getFiles(storage.TypeAll))
+	ff0, err := s.getFiles(storage.TypeAll)
+	if err != nil {
+		return
+	}
+	ff := files(ff0)
 	ff.sort()
 
 	s.printf("Recover: started, files=%d", len(ff))
@@ -204,39 +211,47 @@ func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 			continue
 		}
 
-		var size uint64
-		size, err = f.Size()
+		var r storage.Reader
+		r, err = f.Open()
 		if err != nil {
-			return nil, err
+			return
+		}
+		var size int64
+		size, err = r.Seek(0, 2)
+		r.Close()
+		if err != nil {
+			return
 		}
 
-		t := newTFile(f, size, nil, nil)
+		t := newTFile(f, uint64(size), nil, nil)
 		iter := s.tops.newIterator(t, ro)
 		// min ikey
 		if iter.First() {
 			t.min = iter.Key()
-		} else if err := iter.Error(); err != nil {
-			iter.Release()
-			return nil, err
 		} else {
+			err = iter.Error()
 			iter.Release()
-			continue
+			if err != nil {
+				return
+			} else {
+				continue
+			}
 		}
 		// max ikey
 		if iter.Last() {
 			t.max = iter.Key()
-		} else if err := iter.Error(); err != nil {
-			iter.Release()
-			return nil, err
 		} else {
+			err = iter.Error()
 			iter.Release()
-			continue
+			if err != nil {
+				return
+			} else {
+				continue
+			}
 		}
 		iter.Release()
-
 		// add table to level 0
 		rec.addTableFile(0, t)
-
 		nt = t
 	}
 
@@ -261,14 +276,15 @@ func Recover(p storage.Storage, o *opt.Options) (*DB, error) {
 	s.stFileNum = ff[len(ff)-1].Num() + 1
 
 	// create brand new manifest
-	if err = s.create(); err != nil {
-		return nil, err
+	err = s.create()
+	if err != nil {
+		return
 	}
 	// commit record
-	if err = s.commit(rec); err != nil {
-		return nil, err
+	err = s.commit(rec)
+	if err != nil {
+		return
 	}
-
 	return openDB(s)
 }
 
@@ -278,7 +294,11 @@ func (d *DB) recoverJournal() error {
 
 	s.printf("JournalRecovery: started, min=%d", s.stJournalNum)
 
-	jfiles := files(s.getFiles(storage.TypeJournal))
+	ff0, err := s.getFiles(storage.TypeJournal)
+	if err != nil {
+		return err
+	}
+	jfiles := files(ff0)
 	jfiles.sort()
 	rJfiles := make([]storage.File, 0, len(jfiles))
 	for _, file := range jfiles {

@@ -65,7 +65,7 @@ var benchDB = filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbbench-%d", os.Ge
 
 type dbBench struct {
 	b    *testing.B
-	stor *storage.FileStorage
+	stor storage.Storage
 	db   *DB
 
 	o  *opt.Options
@@ -110,8 +110,6 @@ func openDBBench(b *testing.B, noCompress bool) *dbBench {
 
 func (p *dbBench) reopen() {
 	p.db.Close()
-	p.stor.Close()
-
 	var err error
 	p.db, err = Open(p.stor, p.o)
 	if err != nil {

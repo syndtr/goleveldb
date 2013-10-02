@@ -17,6 +17,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // session represent a persistent database session.
@@ -28,7 +29,7 @@ type session struct {
 	stSeq            uint64 // last mem compacted seq; need external synchronization
 
 	stor     storage.Storage
-	storLock storage.Locker
+	storLock util.Releaser
 	o        *iOptions
 	cmp      *iComparer
 	tops     *tOps

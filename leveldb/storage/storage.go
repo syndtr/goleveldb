@@ -10,6 +10,8 @@ package storage
 import (
 	"errors"
 	"io"
+
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type FileType uint32
@@ -35,79 +37,82 @@ func (t FileType) String() string {
 }
 
 var (
-	ErrInvalidFile = errors.New("invalid file for argument")
-	ErrLocked      = errors.New("already locked")
-	ErrNotLocked   = errors.New("not locked")
-	ErrInvalidLock = errors.New("invalid lock handle")
+	ErrInvalidFile = errors.New("leveldb/storage: invalid file for argument")
+	ErrLocked      = errors.New("leveldb/storage: already locked")
+	ErrClosed      = errors.New("leveldb/storage: closed")
 )
 
+// Syncer is the interface that wraps basic Sync method.
 type Syncer interface {
+	// Sync commits the current contents of the file to stable storage.
 	Sync() error
 }
 
+// Reader is the interface that groups the basic Read, Seek and Close
+// methods.
 type Reader interface {
-	io.Reader
-	io.ReaderAt
-	io.Seeker
+	io.ReadSeeker
 	io.Closer
 }
 
+// Writer is the interface that groups the basic Write, Sync and Close
+// methods.
 type Writer interface {
-	io.Writer
-	io.Closer
+	io.WriteCloser
 	Syncer
 }
 
-type Locker interface {
-	Release() error
-}
-
+// File is the file.
 type File interface {
-	// Open file for read.
-	// Should return os.ErrNotExist if the file does not exist.
+	// Open opens the file for read. Returns os.ErrNotExist error
+	// if the file does not exist.
+	// Open returns error if the underlying storage is closed.
 	Open() (r Reader, err error)
 
-	// Create file for write. Truncate if file already exist.
+	// Create creates the file for writting. Truncate the file if
+	// already exist.
+	// Returns error if the underlying storage is closed.
 	Create() (w Writer, err error)
 
-	// Rename to given number and type.
-	Rename(number uint64, t FileType) error
-
-	// Return true if the file is exist.
-	Exist() bool
-
-	// Return file type.
+	// Type returns the file type
 	Type() FileType
 
-	// Return file number
+	// Num returns the file number.
 	Num() uint64
 
-	// Return size of the file.
-	Size() (size uint64, err error)
-
-	// Remove file.
+	// Remove removes the file.
+	// Returns error if the underlying storage is closed.
 	Remove() error
 }
 
+// Storage is the storage.
 type Storage interface {
-	// Lock the storage, so any subsequent attempt to lock the same storage
-	// will fail.
-	Lock() (l Locker, err error)
+	// Lock locks the storage. Any subsequent attempt to call Lock will fail
+	// until the last lock released.
+	// After use the caller should call the Release method.
+	Lock() (l util.Releaser, err error)
 
-	// Print a string, for logging.
-	Print(str string)
+	// Log logs a string. This is used for logging. An implementation
+	// may write to a file, stdout or simply do nothing.
+	Log(str string)
 
-	// Get file with given number and type.
-	GetFile(number uint64, t FileType) File
+	// GetFile returns a file for the given number and type. GetFile will never
+	// returns nil, even if the underlying storage is closed.
+	GetFile(num uint64, t FileType) File
 
-	// Get all files that match given file types; multiple file type
-	// may OR'ed together.
-	GetFiles(t FileType) []File
+	// GetFiles returns a slice of files that match the given file types.
+	// The file types may be OR'ed together.
+	GetFiles(t FileType) ([]File, error)
 
-	// Get manifest file.
-	// Should return os.ErrNotExist if there's no current manifest file.
-	GetManifest() (f File, err error)
+	// GetManifest returns a manifest file. Returns os.ErrNotExist if manifest
+	// file does not exist.
+	GetManifest() (File, error)
 
-	// Set manifest to given file.
+	// SetManifest sets the given file as manifest file. The given file should
+	// be a manifest file type or error will be returned.
 	SetManifest(f File) error
+
+	// Close closes the storage. It is valid to call Close multiple times.
+	// Other methods should not be called after the storage has been closed.
+	Close() error
 }

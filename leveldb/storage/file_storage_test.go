@@ -86,24 +86,24 @@ func TestFileStorage_InvalidFileName(t *testing.T) {
 }
 
 func TestFileStorage_Locking(t *testing.T) {
-	pth := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
 
-	_, err := os.Stat(pth)
+	_, err := os.Stat(path)
 	if err == nil {
-		err = os.RemoveAll(pth)
+		err = os.RemoveAll(path)
 		if err != nil {
 			t.Fatal("RemoveAll: got error: ", err)
 		}
 	}
 
-	p1, err := OpenFile(pth)
+	p1, err := OpenFile(path)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	defer os.RemoveAll(pth)
+	defer os.RemoveAll(path)
 
-	p2, err := OpenFile(pth)
+	p2, err := OpenFile(path)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -114,11 +114,11 @@ func TestFileStorage_Locking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(pth)
+	p3, err := OpenFile(path)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
-	p3.Close()
+	defer p3.Close()
 
 	l, err := p3.Lock()
 	if err != nil {
@@ -130,10 +130,7 @@ func TestFileStorage_Locking(t *testing.T) {
 	} else {
 		t.Logf("storage lock got error: %s (expected)", err)
 	}
-	err = l.Release()
-	if err != nil {
-		t.Fatal("could not release storage lock: ", err)
-	}
+	l.Release()
 	_, err = p3.Lock()
 	if err != nil {
 		t.Fatal("storage lock failed(2): ", err)

@@ -64,7 +64,8 @@ func (h *dbCorruptHarness) corrupt(ft storage.FileType, offset, n int) {
 	t := p.t
 
 	var file storage.File
-	for _, f := range p.stor.GetFiles(ft) {
+	ff, _ := p.stor.GetFiles(ft)
+	for _, f := range ff {
 		if file == nil || f.Num() > file.Num() {
 			file = f
 		}
@@ -77,11 +78,14 @@ func (h *dbCorruptHarness) corrupt(ft storage.FileType, offset, n int) {
 	if err != nil {
 		t.Fatal("cannot open file: ", err)
 	}
-	x, err := file.Size()
+	x, err := r.Seek(0, 2)
 	if err != nil {
 		t.Fatal("cannot query file size: ", err)
 	}
 	m := int(x)
+	if _, err := r.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
 
 	if offset < 0 {
 		if -offset > m {
