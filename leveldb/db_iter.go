@@ -23,7 +23,6 @@ var (
 func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 	mem, frozenMem := db.getMem()
 	v := db.s.version()
-	defer v.release()
 
 	tableIters := v.getIterators(ro)
 	iters := make([]iterator.Iterator, 0, len(tableIters)+2)
@@ -32,7 +31,9 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 		iters = append(iters, frozenMem.NewIterator())
 	}
 	iters = append(iters, tableIters...)
-	return iterator.NewMergedIterator(iters, db.s.cmp, db.s.o.HasFlag(opt.OFStrict))
+	mi := iterator.NewMergedIterator(iters, db.s.cmp, db.s.o.HasFlag(opt.OFStrict))
+	mi.SetReleaser(&versionReleaser{v: v})
+	return mi
 }
 
 func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
