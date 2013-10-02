@@ -455,11 +455,7 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 		return
 	}
 
-	value, err = d.get(key, d.getSeq(), ro)
-	if !ro.HasFlag(opt.RFDontCopyBuffer) {
-		value = append([]byte{}, value...)
-	}
-	return
+	return d.get(key, d.getSeq(), ro)
 }
 
 // NewIterator returns an iterator for the latest snapshot of the

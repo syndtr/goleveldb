@@ -522,11 +522,6 @@ const (
 	// If set iteration chaching will be disabled.
 	// Callers may wish to set this flag for bulk scans.
 	RFDontFillCache
-
-	// Should key/value buffer copied before returned. If set, the
-	// buffer will not be copied before returned, so altering the
-	// buffer will causing unexpected result.
-	RFDontCopyBuffer
 )
 
 // ReadOptions represent sets of options used by LevelDB during read

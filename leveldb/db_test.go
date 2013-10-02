@@ -1654,7 +1654,7 @@ func TestDb_Concurrent2(t *testing.T) {
 		}
 
 		cmp := comparer.DefaultComparer
-		ro := &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
+		ro := &opt.ReadOptions{}
 		for i := 0; i < n2; i++ {
 			closeWg.Add(1)
 			go func(i int) {

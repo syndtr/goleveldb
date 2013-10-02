@@ -96,7 +96,7 @@ func openDBBench(b *testing.B, noCompress bool) *dbBench {
 	if noCompress {
 		p.o.SetCompressionType(opt.NoCompression)
 	}
-	p.ro = &opt.ReadOptions{Flag: opt.RFDontCopyBuffer}
+	p.ro = &opt.ReadOptions{}
 	p.wo = &opt.WriteOptions{}
 
 	p.db, err = Open(p.stor, p.o)

@@ -39,11 +39,10 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
 	rawIter := db.newRawIterator(ro)
 	iter := &dbIter{
-		cmp:        db.s.cmp.cmp,
-		iter:       rawIter,
-		seq:        seq,
-		strict:     db.s.o.HasFlag(opt.OFStrict),
-		copyBuffer: !ro.HasFlag(opt.RFDontCopyBuffer),
+		cmp:    db.s.cmp.cmp,
+		iter:   rawIter,
+		seq:    seq,
+		strict: db.s.o.HasFlag(opt.OFStrict),
 	}
 	runtime.SetFinalizer(iter, (*dbIter).Release)
 	return iter
@@ -61,11 +60,10 @@ const (
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
-	cmp        comparer.BasicComparer
-	iter       iterator.Iterator
-	seq        uint64
-	strict     bool
-	copyBuffer bool
+	cmp    comparer.BasicComparer
+	iter   iterator.Iterator
+	seq    uint64
+	strict bool
 
 	dir      dir
 	key      []byte
@@ -256,18 +254,12 @@ func (i *dbIter) Key() []byte {
 	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	if i.copyBuffer {
-		return append([]byte{}, i.key...)
-	}
 	return i.key
 }
 
 func (i *dbIter) Value() []byte {
 	if i.err != nil || i.dir <= dirEOI {
 		return nil
-	}
-	if i.copyBuffer {
-		return append([]byte{}, i.value...)
 	}
 	return i.value
 }
