@@ -177,13 +177,13 @@ func (d *DB) memCompaction() {
 
 	s.logf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
 
-	d.transact("mem[flush]", func() (err error) {
+	d.transact("mem@flush", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.flush(mem, -1)
 	})
 
-	d.transact("mem[commit]", func() (err error) {
+	d.transact("mem@commit", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.commit(d.journalFile.Num(), d.frozenSeq)
@@ -212,7 +212,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		t := c.tables[0][0]
 		rec.deleteTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
-		d.transact("table[rename]", func() (err error) {
+		d.transact("table@rename", func() (err error) {
 			return s.commit(rec)
 		})
 		s.logf("Compaction: table level changed, num=%d from=%d to=%d",
@@ -224,32 +224,31 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	var snapHasUkey bool
 	var snapSeq uint64
 	var snapIter int
-	var tw *tWriter
 	minSeq := d.minSeq()
 	stats := new(cStatsStaging)
 
-	finish := func() error {
-		t, err := tw.finish()
-		if err != nil {
-			return err
-		}
-		rec.addTableFile(c.level+1, t)
-		stats.write += t.size
-		s.logf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
-			c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
-		return nil
-	}
-
-	d.transact("table[build]", func() (err error) {
-		tw = nil
+	d.transact("table@build", func() (err error) {
 		ukey := append([]byte{}, snapUkey...)
 		hasUkey := snapHasUkey
 		lseq := snapSeq
 		snapSched := snapIter == 0
 
+		var tw *tWriter
+		finish := func() error {
+			t, err := tw.finish()
+			if err != nil {
+				return err
+			}
+			rec.addTableFile(c.level+1, t)
+			stats.write += t.size
+			s.logf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
+				c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
+			return nil
+		}
+
 		defer func() {
 			stats.stopTimer()
-			if err != nil && tw != nil {
+			if tw != nil {
 				tw.drop()
 				tw = nil
 			}
@@ -369,9 +368,12 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 		// Finish last table
 		if tw != nil {
-			return finish()
+			err = finish()
+			if err != nil {
+				return
+			}
+			tw = nil
 		}
-
 		return
 	})
 
@@ -386,7 +388,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	}
 
 	// Commit changes
-	d.transact("table[commit]", func() (err error) {
+	d.transact("table@commit", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return s.commit(rec)
