@@ -161,7 +161,9 @@ func (fs *fileStorage) GetFiles(t FileType) ([]File, error) {
 		return nil, err
 	}
 	fnn, err := dir.Readdirnames(0)
-	dir.Close()
+	if err := dir.Close(); err != nil {
+		fs.Log(fmt.Sprintf("close dir: %v", err))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +187,16 @@ func (fs *fileStorage) GetManifest() (File, error) {
 	path := filepath.Join(fs.path, "CURRENT")
 	r, err := os.OpenFile(path, os.O_RDONLY, 0)
 	if err != nil {
-		err = err.(*os.PathError).Err
+		if e := err.(*os.PathError); e != nil {
+			err = e.Err
+		}
 		return nil, err
 	}
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			fs.Log(fmt.Sprintf("close CURRENT: %v", err))
+		}
+	}()
 	b, err := ioutil.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -200,7 +208,7 @@ func (fs *fileStorage) GetManifest() (File, error) {
 	return f, nil
 }
 
-func (fs *fileStorage) SetManifest(f File) error {
+func (fs *fileStorage) SetManifest(f File) (err error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	if fs.open < 0 {
@@ -210,16 +218,27 @@ func (fs *fileStorage) SetManifest(f File) error {
 	if !ok || f2.t != TypeManifest {
 		return ErrInvalidFile
 	}
+	defer func() {
+		if err != nil {
+			fs.Log(fmt.Sprintf("CURRENT: %v", err))
+		}
+	}()
 	path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f2.num)
 	w, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
 	}
-	defer w.Close()
-	if _, err := fmt.Fprintln(w, f2.name()); err != nil {
+	defer func() {
+		if err := w.Close(); err != nil {
+			fs.Log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
+		}
+	}()
+	_, err = fmt.Fprintln(w, f2.name())
+	if err != nil {
 		return err
 	}
-	return rename(path, filepath.Join(fs.path, "CURRENT"))
+	err = rename(path, filepath.Join(fs.path, "CURRENT"))
+	return
 }
 
 func (fs *fileStorage) Close() error {
@@ -232,12 +251,16 @@ func (fs *fileStorage) Close() error {
 	runtime.SetFinalizer(fs, nil)
 
 	if fs.open > 0 {
-		fs.Log(fmt.Sprintf("Refuse to close, %d files still open", fs.open))
+		fs.Log(fmt.Sprintf("refuse to close, %d files still open", fs.open))
 		return fmt.Errorf("leveldb/storage: cannot close, %d files still open", fs.open)
 	}
 	fs.open = -1
-	fs.log.Close()
-	return fs.flock.release()
+	e1 := fs.log.Close()
+	err := fs.flock.release()
+	if err == nil {
+		err = e1
+	}
+	return err
 }
 
 type fileWrap struct {
@@ -254,7 +277,11 @@ func (fw fileWrap) Close() error {
 	}
 	f.open = false
 	f.fs.open--
-	return fw.File.Close()
+	err := fw.File.Close()
+	if err != nil {
+		f.fs.Log(fmt.Sprint("close %s.%d: %v", f.Type(), f.Num(), err))
+	}
+	return err
 }
 
 type file struct {
@@ -317,7 +344,11 @@ func (f *file) Remove() error {
 	if f.open {
 		return errFileOpen
 	}
-	return os.Remove(f.path())
+	err := os.Remove(f.path())
+	if err != nil {
+		f.fs.Log(fmt.Sprint("remove %s.%d: %v", f.Type(), f.Num(), err))
+	}
+	return err
 }
 
 func (f *file) name() string {
