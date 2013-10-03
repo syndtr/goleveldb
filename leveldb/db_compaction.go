@@ -78,7 +78,6 @@ const (
 type cMem struct {
 	s     *session
 	level int
-	t     *tFile
 	rec   *sessionRecord
 }
 
@@ -104,7 +103,6 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 		level, t.file.Num(), t.size, n, t.min, t.max)
 
 	c.level = level
-	c.t = t
 	return nil
 }
 
@@ -147,14 +145,24 @@ haserr:
 	}
 }
 
-func (d *DB) transact(name string, f func() error) {
+func (d *DB) transact(name string, exec, rollback func() error) {
 	s := d.s
+	defer func() {
+		if x := recover(); x != nil {
+			if x == errTransactExiting && rollback != nil {
+				if err := rollback(); err != nil {
+					s.logf("Transact: %s: rollback err=%q", name, err)
+				}
+			}
+			panic(x)
+		}
+	}()
 	for {
 		if d.isClosed() {
 			s.logf("Transact: %s: exiting", name)
 			panic(errTransactExiting)
 		}
-		err := f()
+		err := exec()
 		select {
 		case _, _ = <-d.closeCh:
 			s.logf("Transact: %s: exiting", name)
@@ -181,15 +189,25 @@ func (d *DB) memCompaction() {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.flush(mem, -1)
+	}, func() error {
+		for _, r := range c.rec.addedTables {
+			f := s.getTableFile(r.num)
+			if err := f.Remove(); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
 	d.transact("mem@commit", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.commit(d.journalFile.Num(), d.frozenSeq)
-	})
+	}, nil)
 
-	stats.write = c.t.size
+	for _, r := range c.rec.addedTables {
+		stats.write += r.size
+	}
 	d.compStats[c.level].add(stats)
 
 	// drop frozen mem
@@ -214,7 +232,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		rec.addTableFile(c.level+1, t)
 		d.transact("table@rename", func() (err error) {
 			return s.commit(rec)
-		})
+		}, nil)
 		s.logf("Compaction: table level changed, num=%d from=%d to=%d",
 			t.file.Num(), c.level, c.level+1)
 		return
@@ -375,6 +393,14 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			tw = nil
 		}
 		return
+	}, func() error {
+		for _, r := range rec.addedTables {
+			f := s.getTableFile(r.num)
+			if err := f.Remove(); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 
 	s.log("Compaction: build done")
@@ -392,7 +418,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return s.commit(rec)
-	})
+	}, nil)
 
 	s.log("Compaction: commited")
 
