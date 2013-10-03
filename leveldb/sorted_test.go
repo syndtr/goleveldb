@@ -19,7 +19,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
 )
 
@@ -32,196 +31,171 @@ type stConstructor interface {
 }
 
 type stConstructor_Table struct {
-	t *testing.T
-
-	file storage.File
-	w    storage.Writer
-	r    storage.Reader
-	tw   *table.Writer
-	tr   *table.Reader
+	t      *testing.T
+	buf    bytes.Buffer
+	writer *table.Writer
+	reader *table.Reader
 }
 
-func (p *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
-	p.t = t
-
-	p.file = newTestStorage(t).GetFile(0, storage.TypeTable)
-	p.w, _ = p.file.Create()
-
-	o := &opt.Options{
+func (tc *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
+	tc.t = t
+	tc.writer = table.NewWriter(&tc.buf, &opt.Options{
 		BlockSize:            512,
 		BlockRestartInterval: 3,
-	}
-	p.tw = table.NewWriter(p.w, o)
+	})
 	return nil
 }
 
-func (p *stConstructor_Table) add(key, value string) error {
-	p.tw.Append([]byte(key), []byte(value))
-	return nil
+func (tc *stConstructor_Table) add(key, value string) error {
+	return tc.writer.Append([]byte(key), []byte(value))
 }
 
-func (p *stConstructor_Table) finish() (size int, err error) {
-	err = p.tw.Close()
+func (tc *stConstructor_Table) finish() (size int, err error) {
+	err = tc.writer.Close()
 	if err != nil {
 		return
 	}
-	p.w.Close()
-
-	p.t.Logf("table: contains %d entries and %d blocks", p.tw.EntriesLen(), p.tw.BlocksLen())
-
-	tsize := int64(p.tw.BytesLen())
-
-	r, err := p.file.Open()
-	if err != nil {
-		p.t.Fatal(err)
+	tc.t.Logf("table: contains %d entries and %d blocks", tc.writer.EntriesLen(), tc.writer.BlocksLen())
+	size = tc.buf.Len()
+	if csize := int(tc.writer.BytesLen()); csize != size {
+		tc.t.Errorf("table: invalid calculated size, calculated=%d actual=%d", csize, size)
 	}
-	fsize, err := r.Seek(0, 2)
-	if err != nil {
-		p.t.Fatal(err)
-	}
-	if fsize != tsize {
-		p.t.Errorf("table: calculated size doesn't equal with actual size, calculated=%d actual=%d", tsize, fsize)
-	}
-	if _, err := r.Seek(0, 0); err != nil {
-		p.t.Fatal(err)
-	}
-	p.r = r
-	o := &opt.Options{
+	tc.reader = table.NewReader(bytes.NewReader(tc.buf.Bytes()), int64(size), nil, &opt.Options{
 		BlockRestartInterval: 3,
 		Filter:               filter.NewBloomFilter(10),
-	}
-	p.tr = table.NewReader(p.r, int64(fsize), nil, o)
-	return int(fsize), nil
+	})
+	return
 }
 
-func (p *stConstructor_Table) newIterator() iterator.Iterator {
-	return p.tr.NewIterator(&opt.ReadOptions{})
+func (tc *stConstructor_Table) newIterator() iterator.Iterator {
+	return tc.reader.NewIterator(&opt.ReadOptions{})
 }
 
-func (p *stConstructor_Table) customTest(h *stHarness) {
+func (tc *stConstructor_Table) customTest(h *stHarness) {
 	ro := &opt.ReadOptions{}
 	for i := range h.keys {
-		rkey, rval, err := p.tr.Find([]byte(h.keys[i]), ro)
+		key, value, err := tc.reader.Find([]byte(h.keys[i]), ro)
 		if err != nil {
-			h.t.Error("table: CustomTest: Get: error: ", err)
+			h.t.Errorf("table: CustomTest: Find: %v", err)
 			continue
 		}
-		if string(rkey) != h.keys[i] {
-			h.t.Errorf("table: CustomTest: Get: key are invalid, got=%q want=%q",
-				shorten(string(rkey)), shorten(h.keys[i]))
+		if string(key) != h.keys[i] {
+			h.t.Errorf("table: CustomTest: Find: invalid key, got=%q want=%q",
+				shorten(string(key)), shorten(h.keys[i]))
 		}
-		if string(rval) != h.values[i] {
-			h.t.Errorf("table: CustomTest: Get: value are invalid, got=%q want=%q",
-				shorten(string(rval)), shorten(h.values[i]))
+		if string(value) != h.values[i] {
+			h.t.Errorf("table: CustomTest: Find: invalid value, got=%q want=%q",
+				shorten(string(value)), shorten(h.values[i]))
 		}
 	}
 }
 
 type stConstructor_MemDB struct {
-	t *testing.T
-
-	mem *memdb.DB
+	t  *testing.T
+	db *memdb.DB
 }
 
-func (p *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
+func (mc *stConstructor_MemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
-	p.t = t
-	p.mem = memdb.New(comparer.DefaultComparer, 0)
+	mc.t = t
+	mc.db = memdb.New(comparer.DefaultComparer, 0)
 	return nil
 }
 
-func (p *stConstructor_MemDB) add(key, value string) error {
-	p.mem.Put([]byte(key), []byte(value))
+func (mc *stConstructor_MemDB) add(key, value string) error {
+	mc.db.Put([]byte(key), []byte(value))
 	return nil
 }
 
-func (p *stConstructor_MemDB) finish() (size int, err error) {
-	return int(p.mem.Size()), nil
+func (mc *stConstructor_MemDB) finish() (size int, err error) {
+	return int(mc.db.Size()), nil
 }
 
-func (p *stConstructor_MemDB) newIterator() iterator.Iterator {
-	return p.mem.NewIterator()
+func (mc *stConstructor_MemDB) newIterator() iterator.Iterator {
+	return mc.db.NewIterator()
 }
 
-func (p *stConstructor_MemDB) customTest(h *stHarness) {}
+func (mc *stConstructor_MemDB) customTest(h *stHarness) {}
 
 type stConstructor_MergedMemDB struct {
-	t *testing.T
-
-	mem [3]*memdb.DB
+	t  *testing.T
+	db [3]*memdb.DB
 }
 
-func (p *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
+func (mc *stConstructor_MergedMemDB) init(t *testing.T, ho *stHarnessOpt) error {
 	ho.Randomize = true
-	p.t = t
-	for i := range p.mem {
-		p.mem[i] = memdb.New(comparer.DefaultComparer, 0)
+	mc.t = t
+	for i := range mc.db {
+		mc.db[i] = memdb.New(comparer.DefaultComparer, 0)
 	}
 	return nil
 }
 
-func (p *stConstructor_MergedMemDB) add(key, value string) error {
-	p.mem[rand.Intn(99999)%3].Put([]byte(key), []byte(value))
+func (mc *stConstructor_MergedMemDB) add(key, value string) error {
+	mc.db[rand.Intn(99999)%len(mc.db)].Put([]byte(key), []byte(value))
 	return nil
 }
 
-func (p *stConstructor_MergedMemDB) finish() (size int, err error) {
-	for i, m := range p.mem {
-		p.t.Logf("merged: memdb[%d] size: %d", i, m.Size())
-		size += m.Size()
+func (mc *stConstructor_MergedMemDB) finish() (size int, err error) {
+	for i, db := range mc.db {
+		mc.t.Logf("merged: db[%d] size: %d", i, db.Size())
+		size += db.Size()
 	}
 	return
 }
 
-func (p *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
-	var its []iterator.Iterator
-	for _, m := range p.mem {
-		its = append(its, m.NewIterator())
+func (mc *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
+	var ii []iterator.Iterator
+	for _, db := range mc.db {
+		ii = append(ii, db.NewIterator())
 	}
-	return iterator.NewMergedIterator(its, comparer.DefaultComparer, true)
+	return iterator.NewMergedIterator(ii, comparer.DefaultComparer, true)
 }
 
-func (p *stConstructor_MergedMemDB) customTest(h *stHarness) {}
+func (mc *stConstructor_MergedMemDB) customTest(h *stHarness) {}
 
 type stConstructor_DB struct {
-	t *testing.T
-
+	t    *testing.T
 	stor *testStorage
 	ro   *opt.ReadOptions
 	wo   *opt.WriteOptions
 	db   *DB
 }
 
-func (p *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
+func (dc *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 	ho.Randomize = true
-	p.t = t
-	p.stor = newTestStorage(t)
-	o := &opt.Options{
+	dc.t = t
+	dc.stor = newTestStorage(t)
+	dc.ro = &opt.ReadOptions{}
+	dc.wo = &opt.WriteOptions{}
+	dc.db, err = Open(dc.stor, &opt.Options{
 		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,
-	}
-	p.ro = &opt.ReadOptions{}
-	p.wo = &opt.WriteOptions{}
-	p.db, err = Open(p.stor, o)
+	})
 	return
 }
 
-func (p *stConstructor_DB) add(key, value string) error {
-	p.db.Put([]byte(key), []byte(value), p.wo)
-	return nil
+func (dc *stConstructor_DB) add(key, value string) error {
+	return dc.db.Put([]byte(key), []byte(value), dc.wo)
 }
 
-func (p *stConstructor_DB) finish() (size int, err error) {
-	return p.stor.Sizes(), nil
+func (dc *stConstructor_DB) finish() (size int, err error) {
+	return dc.stor.Sizes(), nil
 }
 
-func (p *stConstructor_DB) newIterator() iterator.Iterator {
-	return p.db.NewIterator(p.ro)
+func (dc *stConstructor_DB) newIterator() iterator.Iterator {
+	return dc.db.NewIterator(dc.ro)
 }
 
-func (p *stConstructor_DB) customTest(h *stHarness) {
-	p.db.Close()
-	p.db = nil
+func (dc *stConstructor_DB) customTest(h *stHarness) {
+	if err := dc.db.Close(); err != nil {
+		dc.t.Errorf("leveldb: db close: %v", err)
+	}
+	if err := dc.stor.Close(); err != nil {
+		dc.t.Errorf("leveldb: storage close: %v", err)
+	}
+	dc.db = nil
+	dc.stor = nil
 	runtime.GC()
 }
 
@@ -248,7 +222,7 @@ func (h *stHarness) testAll() {
 	h.test("table", &stConstructor_Table{})
 	h.test("memdb", &stConstructor_MemDB{})
 	h.test("merged", &stConstructor_MergedMemDB{})
-	h.test("db", &stConstructor_DB{})
+	h.test("leveldb", &stConstructor_DB{})
 }
 
 func (h *stHarness) test(name string, c stConstructor) {
