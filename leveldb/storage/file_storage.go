@@ -46,7 +46,7 @@ type fileStorage struct {
 	mu    sync.Mutex
 	flock fileLock
 	slock *fileStorageLock
-	log   *os.File
+	logw  *os.File
 	buf   []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
@@ -74,12 +74,12 @@ func OpenFile(path string) (Storage, error) {
 	}()
 
 	rename(filepath.Join(path, "LOG"), filepath.Join(path, "LOG.old"))
-	log, err := os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+	logw, err := os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	fs := &fileStorage{path: path, flock: flock, log: log}
+	fs := &fileStorage{path: path, flock: flock, logw: logw}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
 }
@@ -114,16 +114,10 @@ func itoa(buf []byte, i int, wid int) []byte {
 	return append(buf, b[bp:]...)
 }
 
-func (fs *fileStorage) Log(str string) {
-	t := time.Now()
+func (fs *fileStorage) doLog(t time.Time, str string) {
 	year, month, day := t.Date()
 	hour, min, sec := t.Clock()
 	msec := t.Nanosecond() / 1e3
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	if fs.open < 0 {
-		return
-	}
 	// date
 	fs.buf = itoa(fs.buf[:0], year, 4)
 	fs.buf = append(fs.buf, '/')
@@ -143,7 +137,21 @@ func (fs *fileStorage) Log(str string) {
 	// write
 	fs.buf = append(fs.buf, []byte(str)...)
 	fs.buf = append(fs.buf, '\n')
-	fs.log.Write(fs.buf)
+	fs.logw.Write(fs.buf)
+}
+
+func (fs *fileStorage) Log(str string) {
+	t := time.Now()
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if fs.open < 0 {
+		return
+	}
+	fs.doLog(t, str)
+}
+
+func (fs *fileStorage) log(str string) {
+	fs.doLog(time.Now(), str)
 }
 
 func (fs *fileStorage) GetFile(num uint64, t FileType) File {
@@ -162,7 +170,7 @@ func (fs *fileStorage) GetFiles(t FileType) ([]File, error) {
 	}
 	fnn, err := dir.Readdirnames(0)
 	if err := dir.Close(); err != nil {
-		fs.Log(fmt.Sprintf("close dir: %v", err))
+		fs.log(fmt.Sprintf("close dir: %v", err))
 	}
 	if err != nil {
 		return nil, err
@@ -194,7 +202,7 @@ func (fs *fileStorage) GetManifest() (File, error) {
 	}
 	defer func() {
 		if err := r.Close(); err != nil {
-			fs.Log(fmt.Sprintf("close CURRENT: %v", err))
+			fs.log(fmt.Sprintf("close CURRENT: %v", err))
 		}
 	}()
 	b, err := ioutil.ReadAll(r)
@@ -220,7 +228,7 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 	}
 	defer func() {
 		if err != nil {
-			fs.Log(fmt.Sprintf("CURRENT: %v", err))
+			fs.log(fmt.Sprintf("CURRENT: %v", err))
 		}
 	}()
 	path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f2.num)
@@ -230,7 +238,7 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 	}
 	defer func() {
 		if err := w.Close(); err != nil {
-			fs.Log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
+			fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
 		}
 	}()
 	_, err = fmt.Fprintln(w, f2.name())
@@ -251,11 +259,11 @@ func (fs *fileStorage) Close() error {
 	runtime.SetFinalizer(fs, nil)
 
 	if fs.open > 0 {
-		fs.Log(fmt.Sprintf("refuse to close, %d files still open", fs.open))
+		fs.log(fmt.Sprintf("refuse to close, %d files still open", fs.open))
 		return fmt.Errorf("leveldb/storage: cannot close, %d files still open", fs.open)
 	}
 	fs.open = -1
-	e1 := fs.log.Close()
+	e1 := fs.logw.Close()
 	err := fs.flock.release()
 	if err == nil {
 		err = e1
@@ -279,7 +287,7 @@ func (fw fileWrap) Close() error {
 	f.fs.open--
 	err := fw.File.Close()
 	if err != nil {
-		f.fs.Log(fmt.Sprint("close %s.%d: %v", f.Type(), f.Num(), err))
+		f.fs.log(fmt.Sprint("close %s.%d: %v", f.Type(), f.Num(), err))
 	}
 	return err
 }
@@ -346,7 +354,7 @@ func (f *file) Remove() error {
 	}
 	err := os.Remove(f.path())
 	if err != nil {
-		f.fs.Log(fmt.Sprint("remove %s.%d: %v", f.Type(), f.Num(), err))
+		f.fs.log(fmt.Sprint("remove %s.%d: %v", f.Type(), f.Num(), err))
 	}
 	return err
 }
