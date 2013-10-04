@@ -40,6 +40,7 @@ func (d *DB) newMem() (mem *memdb.DB, err error) {
 		d.journal = journal.NewWriter(w)
 	} else {
 		d.journal.Reset(w)
+		d.journalWriter.Close()
 		d.frozenJournalFile = d.journalFile
 	}
 	d.journalWriter = w

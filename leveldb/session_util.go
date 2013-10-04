@@ -192,6 +192,9 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 			if s.manifest != nil {
 				s.manifest.Close()
 			}
+			if s.manifestWriter != nil {
+				s.manifestWriter.Close()
+			}
 			if s.manifestFile != nil {
 				s.manifestFile.Remove()
 			}

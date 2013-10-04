@@ -320,8 +320,6 @@ type Writer struct {
 	seq int
 	// f is w as a flusher.
 	f flusher
-	// c is w as a io.Closed.
-	c io.Closer
 	// buf[i:j] is the bytes that will become the current chunk.
 	// The low bound, i, includes the chunk header.
 	i, j int
@@ -341,11 +339,9 @@ type Writer struct {
 // NewWriter returns a new Writer.
 func NewWriter(w io.Writer) *Writer {
 	f, _ := w.(flusher)
-	c, _ := w.(io.Closer)
 	return &Writer{
 		w: w,
 		f: f,
-		c: c,
 	}
 }
 
@@ -394,14 +390,10 @@ func (w *Writer) writePending() {
 	w.written = w.j
 }
 
-// Close finishes the current journal and closes the writer. Close will
-// also closes the underlying writer.
+// Close finishes the current journal and closes the writer.
 func (w *Writer) Close() error {
 	w.seq++
 	w.writePending()
-	if w.c != nil {
-		w.c.Close()
-	}
 	if w.err != nil {
 		return w.err
 	}
@@ -432,12 +424,8 @@ func (w *Writer) Reset(writer io.Writer) (err error) {
 		w.writePending()
 		err = w.err
 	}
-	if w.c != nil {
-		w.c.Close()
-	}
 	w.w = writer
 	w.f, _ = writer.(flusher)
-	w.c, _ = writer.(io.Closer)
 	w.i = 0
 	w.j = 0
 	w.written = 0

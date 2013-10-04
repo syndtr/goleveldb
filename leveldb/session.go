@@ -71,6 +71,9 @@ func (s *session) close() {
 	if s.manifest != nil {
 		s.manifest.Close()
 	}
+	if s.manifestWriter != nil {
+		s.manifestWriter.Close()
+	}
 	s.storLock.Release()
 }
 

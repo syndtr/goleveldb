@@ -666,6 +666,7 @@ func (d *DB) Close() error {
 	// close journal
 	if d.journal != nil {
 		d.journal.Close()
+		d.journalWriter.Close()
 	}
 
 	// close session
