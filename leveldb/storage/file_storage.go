@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -158,7 +160,7 @@ func (fs *fileStorage) GetFile(num uint64, t FileType) File {
 	return &file{fs: fs, num: num, t: t}
 }
 
-func (fs *fileStorage) GetFiles(t FileType) ([]File, error) {
+func (fs *fileStorage) GetFiles(t FileType) (ff []File, err error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	if fs.open < 0 {
@@ -166,16 +168,16 @@ func (fs *fileStorage) GetFiles(t FileType) ([]File, error) {
 	}
 	dir, err := os.Open(fs.path)
 	if err != nil {
-		return nil, err
+		return
 	}
 	fnn, err := dir.Readdirnames(0)
+	// Close the dir first before checking for Readdirnames error.
 	if err := dir.Close(); err != nil {
 		fs.log(fmt.Sprintf("close dir: %v", err))
 	}
 	if err != nil {
-		return nil, err
+		return
 	}
-	var ff []File
 	f := &file{fs: fs}
 	for _, fn := range fnn {
 		if f.parse(fn) && (f.t&t) != 0 {
@@ -183,37 +185,102 @@ func (fs *fileStorage) GetFiles(t FileType) ([]File, error) {
 			f = &file{fs: fs}
 		}
 	}
-	return ff, nil
+	return
 }
 
-func (fs *fileStorage) GetManifest() (File, error) {
+func (fs *fileStorage) GetManifest() (f File, err error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	if fs.open < 0 {
 		return nil, ErrClosed
 	}
-	path := filepath.Join(fs.path, "CURRENT")
-	r, err := os.OpenFile(path, os.O_RDONLY, 0)
+	dir, err := os.Open(fs.path)
 	if err != nil {
-		if e := err.(*os.PathError); e != nil {
-			err = e.Err
-		}
-		return nil, err
+		return
 	}
-	defer func() {
-		if err := r.Close(); err != nil {
-			fs.log(fmt.Sprintf("close CURRENT: %v", err))
-		}
-	}()
-	b, err := ioutil.ReadAll(r)
+	fnn, err := dir.Readdirnames(0)
+	// Close the dir first before checking for Readdirnames error.
+	if err := dir.Close(); err != nil {
+		fs.log(fmt.Sprintf("close dir: %v", err))
+	}
 	if err != nil {
-		return nil, err
+		return
 	}
-	f := &file{fs: fs}
-	if len(b) < 1 || b[len(b)-1] != '\n' || !f.parse(string(b[:len(b)-1])) {
-		return nil, errors.New("leveldb/storage: invalid CURRENT file")
+	// Find latest CURRENT file.
+	var rem []string
+	var pend bool
+	var cerr error
+	for _, fn := range fnn {
+		if strings.HasPrefix(fn, "CURRENT") {
+			pend1 := len(fn) > 7
+			// Make sure it is valid name for a CURRENT file, otherwise skip it.
+			if pend1 {
+				if fn[7] != '.' || len(fn) < 9 {
+					fs.log(fmt.Sprintf("skipping %s: invalid file name", fn))
+					continue
+				}
+				if _, e1 := strconv.ParseUint(fn[7:], 10, 0); e1 != nil {
+					fs.log(fmt.Sprintf("skipping %s: invalid file num: %v", fn, e1))
+					continue
+				}
+			}
+			path := filepath.Join(fs.path, fn)
+			r, e1 := os.OpenFile(path, os.O_RDONLY, 0)
+			if e1 != nil {
+				return nil, e1
+			}
+			b, e1 := ioutil.ReadAll(r)
+			if e1 != nil {
+				r.Close()
+				return nil, e1
+			}
+			f1 := &file{fs: fs}
+			if len(b) < 1 || b[len(b)-1] != '\n' || !f1.parse(string(b[:len(b)-1])) {
+				fs.log(fmt.Sprintf("skipping %s: corrupted or incomplete", fn))
+				if pend1 {
+					rem = append(rem, fn)
+				}
+				if !pend1 || cerr == nil {
+					cerr = fmt.Errorf("leveldb/storage: corrupted or incomplete %s file", fn)
+				}
+			} else if f != nil && f1.Num() < f.Num() {
+				fs.log(fmt.Sprintf("skipping %s: obsolete", fn))
+				if pend1 {
+					rem = append(rem, fn)
+				}
+			} else {
+				f = f1
+				pend = pend1
+			}
+			if err := r.Close(); err != nil {
+				fs.log(fmt.Sprintf("close %s: %v", fn, err))
+			}
+		}
 	}
-	return f, nil
+	// Don't remove any files if there is no valid CURRENT file.
+	if f == nil {
+		if cerr != nil {
+			err = cerr
+		} else {
+			err = os.ErrNotExist
+		}
+		return
+	}
+	// Rename pending CURRENT file to an effective CURRENT.
+	if pend {
+		path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f.Num())
+		if err := rename(path, filepath.Join(fs.path, "CURRENT")); err != nil {
+			fs.log(fmt.Sprintf("CURRENT.%d -> CURRENT: %d", f.Num(), err))
+		}
+	}
+	// Remove obsolete or incomplete pending CURRENT files.
+	for _, fn := range rem {
+		path := filepath.Join(fs.path, fn)
+		if err := os.Remove(path); err != nil {
+			fs.log(fmt.Sprintf("remove %s: %v", fn, err))
+		}
+	}
+	return
 }
 
 func (fs *fileStorage) SetManifest(f File) (err error) {
@@ -231,7 +298,7 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 			fs.log(fmt.Sprintf("CURRENT: %v", err))
 		}
 	}()
-	path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f2.num)
+	path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f2.Num())
 	w, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return err
