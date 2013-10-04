@@ -14,6 +14,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+const typeShift = 3
+
 type memStorageLock struct {
 	ms *memStorage
 }
@@ -62,11 +64,12 @@ func (ms *memStorage) GetFile(num uint64, t FileType) File {
 func (ms *memStorage) GetFiles(t FileType) ([]File, error) {
 	ms.mu.Lock()
 	var ff []File
-	for num, f := range ms.files {
-		if f.t&t == 0 {
+	for x, _ := range ms.files {
+		num, mt := x>>typeShift, FileType(x)&TypeAll
+		if mt&t == 0 {
 			continue
 		}
-		ff = append(ff, &memFilePtr{ms: ms, num: num, t: f.t})
+		ff = append(ff, &memFilePtr{ms: ms, num: num, t: mt})
 	}
 	ms.mu.Unlock()
 	return ff, nil
@@ -106,7 +109,6 @@ func (mr *memReader) Close() error {
 type memFile struct {
 	bytes.Buffer
 	ms   *memStorage
-	t    FileType
 	open bool
 }
 
@@ -124,11 +126,15 @@ type memFilePtr struct {
 	t   FileType
 }
 
+func (p *memFilePtr) x() uint64 {
+	return p.Num()<<typeShift | uint64(p.Type())
+}
+
 func (p *memFilePtr) Open() (Reader, error) {
 	ms := p.ms
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	if m, exist := ms.files[p.num]; exist && m.t == p.t {
+	if m, exist := ms.files[p.x()]; exist {
 		if m.open {
 			return nil, errFileOpen
 		}
@@ -142,15 +148,15 @@ func (p *memFilePtr) Create() (Writer, error) {
 	ms := p.ms
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	m, exist := ms.files[p.num]
-	if exist && m.t == p.t {
+	m, exist := ms.files[p.x()]
+	if exist {
 		if m.open {
 			return nil, errFileOpen
 		}
 		m.Reset()
 	} else {
-		m = &memFile{ms: ms, t: p.t}
-		ms.files[p.num] = m
+		m = &memFile{ms: ms}
+		ms.files[p.x()] = m
 	}
 	m.open = true
 	return m, nil
@@ -168,8 +174,8 @@ func (p *memFilePtr) Remove() error {
 	ms := p.ms
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
-	if m, exist := ms.files[p.num]; exist && m.t == p.t {
-		delete(ms.files, p.num)
+	if _, exist := ms.files[p.x()]; exist {
+		delete(ms.files, p.x())
 		return nil
 	}
 	return os.ErrNotExist
