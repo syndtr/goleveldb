@@ -28,6 +28,7 @@ type stConstructor interface {
 	finish() (int, error)
 	newIterator() iterator.Iterator
 	customTest(h *stHarness)
+	close()
 }
 
 type stConstructor_Table struct {
@@ -90,6 +91,8 @@ func (tc *stConstructor_Table) customTest(h *stHarness) {
 	}
 }
 
+func (tc *stConstructor_Table) close() {}
+
 type stConstructor_MemDB struct {
 	t  *testing.T
 	db *memdb.DB
@@ -116,6 +119,7 @@ func (mc *stConstructor_MemDB) newIterator() iterator.Iterator {
 }
 
 func (mc *stConstructor_MemDB) customTest(h *stHarness) {}
+func (mc *stConstructor_MemDB) close()                  {}
 
 type stConstructor_MergedMemDB struct {
 	t  *testing.T
@@ -153,6 +157,7 @@ func (mc *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
 }
 
 func (mc *stConstructor_MergedMemDB) customTest(h *stHarness) {}
+func (mc *stConstructor_MergedMemDB) close()                  {}
 
 type stConstructor_DB struct {
 	t    *testing.T
@@ -180,14 +185,31 @@ func (dc *stConstructor_DB) add(key, value string) error {
 }
 
 func (dc *stConstructor_DB) finish() (size int, err error) {
-	return dc.stor.Sizes(), nil
+	iter := dc.db.NewIterator(dc.ro)
+	defer iter.Release()
+	var r Range
+	if iter.First() {
+		r.Start = append([]byte{}, iter.Key()...)
+	}
+	if iter.Last() {
+		r.Limit = append([]byte{}, iter.Key()...)
+	}
+	err = iter.Error()
+	if err != nil {
+		return
+	}
+	sizes, err := dc.db.GetApproximateSizes([]Range{r})
+	size = int(sizes.Sum())
+	return
 }
 
 func (dc *stConstructor_DB) newIterator() iterator.Iterator {
 	return dc.db.NewIterator(dc.ro)
 }
 
-func (dc *stConstructor_DB) customTest(h *stHarness) {
+func (dc *stConstructor_DB) customTest(h *stHarness) {}
+
+func (dc *stConstructor_DB) close() {
 	if err := dc.db.Close(); err != nil {
 		dc.t.Errorf("leveldb: db close: %v", err)
 	}
@@ -233,6 +255,7 @@ func (h *stHarness) test(name string, c stConstructor) {
 		h.t.Error("error when initializing constructor:", err.Error())
 		return
 	}
+	defer c.close()
 
 	keys, values := h.keys, h.values
 	if ho.Randomize {

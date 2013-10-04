@@ -29,6 +29,7 @@ func TestIter_Empty(t *testing.T) {
 		size, err := c.finish()
 		if err != nil {
 			t.Error(name+": error when finishing constructor:", err.Error())
+			c.close()
 			continue
 		}
 		t.Logf(name+": final size is %d bytes", size)
@@ -55,5 +56,6 @@ func TestIter_Empty(t *testing.T) {
 			t.Error(name + ": Last() return true")
 		}
 		iter.Release()
+		c.close()
 	}
 }

@@ -87,7 +87,7 @@ func (h *dbHarness) closeDB() {
 	if err != nil {
 		h.t.Error("Close: got error: ", err)
 	}
-	h.stor.CheckClosed()
+	h.stor.CloseCheck()
 	runtime.GC()
 }
 
@@ -98,8 +98,7 @@ func (h *dbHarness) reopenDB() {
 
 func (h *dbHarness) close() {
 	h.closeDB()
-	h.o = nil
-	h.db = nil
+	h.stor.Close()
 	h.stor = nil
 	runtime.GC()
 }
@@ -484,6 +483,7 @@ func TestDb_Locking(t *testing.T) {
 	h.openAssert(false)
 	h.closeDB()
 	h.openAssert(true)
+	h.stor.Close()
 }
 
 func TestDb_Empty(t *testing.T) {
@@ -1371,7 +1371,7 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	// closing DB
 	iter.Release()
 	iter2.Release()
-	h.closeDB()
+	h.close()
 
 	assertErr(t, db.Put([]byte("x"), []byte("y"), h.wo), true)
 	_, err = db.Get([]byte("k"), h.ro)
