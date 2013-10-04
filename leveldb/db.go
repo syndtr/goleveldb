@@ -298,13 +298,13 @@ func (d *DB) recoverJournal() error {
 	if err != nil {
 		return err
 	}
-	jfiles := files(ff0)
-	jfiles.sort()
-	rJfiles := make([]storage.File, 0, len(jfiles))
-	for _, file := range jfiles {
+	ff1 := files(ff0)
+	ff1.sort()
+	ff2 := make([]storage.File, 0, len(ff1))
+	for _, file := range ff1 {
 		if file.Num() >= s.stJournalNum || file.Num() == s.stPrevJournalNum {
 			s.markFileNum(file.Num())
-			rJfiles = append(rJfiles, file)
+			ff2 = append(ff2, file)
 		}
 	}
 
@@ -317,13 +317,13 @@ func (d *DB) recoverJournal() error {
 	// Options.
 	strict := s.o.HasFlag(opt.OFStrict)
 	writeBuffer := s.o.GetWriteBuffer()
-	for _, file := range rJfiles {
+	recoverJournal := func(file storage.File) error {
 		s.logf("JournalRecovery: recovering, num=%d", file.Num())
-
 		reader, err := file.Open()
 		if err != nil {
 			return err
 		}
+		defer reader.Close()
 		if jr == nil {
 			jr = journal.NewReader(reader, dropper{s, file}, strict)
 		} else {
@@ -331,11 +331,11 @@ func (d *DB) recoverJournal() error {
 		}
 		if mem != nil {
 			if mem.Len() > 0 {
-				if err = cm.flush(mem, 0); err != nil {
+				if err := cm.flush(mem, 0); err != nil {
 					return err
 				}
 			}
-			if err = cm.commit(file.Num(), d.seq); err != nil {
+			if err := cm.commit(file.Num(), d.seq); err != nil {
 				return err
 			}
 			cm.reset()
@@ -358,24 +358,30 @@ func (d *DB) recoverJournal() error {
 				}
 				continue
 			}
-			if err = batch.decode(buf.Bytes()); err != nil {
+			if err := batch.decode(buf.Bytes()); err != nil {
 				return err
 			}
-			if err = batch.memReplay(mem); err != nil {
+			if err := batch.memReplay(mem); err != nil {
 				return err
 			}
 			d.seq = batch.seq + uint64(batch.len())
 			if mem.Size() >= writeBuffer {
 				// Large enough, flush it.
-				if err = cm.flush(mem, 0); err != nil {
+				if err := cm.flush(mem, 0); err != nil {
 					return err
 				}
 				// Create new memdb.
 				mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
 			}
 		}
-		reader.Close()
 		of = file
+		return nil
+	}
+	// Recover all journals.
+	for _, file := range ff2 {
+		if err := recoverJournal(file); err != nil {
+			return err
+		}
 	}
 
 	// Create a new journal.
