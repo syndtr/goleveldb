@@ -333,6 +333,7 @@ func (ts *testStorage) SetManifest(f storage.File) error {
 }
 
 func (ts *testStorage) Close() error {
+	ts.CloseCheck()
 	err := ts.Storage.Close()
 	if err != nil {
 		ts.t.Errorf("E: closing storage failed: %v", err)
