@@ -283,6 +283,26 @@ func (h *dbHarness) getKeyVal(want string) {
 	s.Release()
 }
 
+func (h *dbHarness) waitCompaction() {
+	t := h.t
+	db := h.db
+
+	cch := make(chan struct{})
+	// Schedule compaction.
+	select {
+	case db.compCh <- (chan<- struct{})(cch):
+	case err := <-db.compErrCh:
+		t.Error("compaction error: ", err)
+		return
+	}
+	// Wait.
+	select {
+	case <-cch:
+	case err := <-db.compErrCh:
+		t.Error("compaction error: ", err)
+	}
+}
+
 func (h *dbHarness) compactMem() {
 	t := h.t
 	db := h.db
@@ -308,10 +328,19 @@ func (h *dbHarness) compactMem() {
 	}
 
 	cch := make(chan struct{})
-	// schedule compaction
-	db.compMemCh <- cch
-	// wait
-	<-cch
+	// Schedule mem compaction.
+	select {
+	case db.compMemCh <- (chan<- struct{})(cch):
+	case err := <-db.compErrCh:
+		t.Error("compaction error: ", err)
+		return
+	}
+	// Wait.
+	select {
+	case <-cch:
+	case err := <-db.compErrCh:
+		t.Error("compaction error: ", err)
+	}
 
 	if h.totalTables() == 0 {
 		t.Error("zero tables after mem compaction")
@@ -700,11 +729,7 @@ func TestDb_GetEncountersEmptyLevel(t *testing.T) {
 		}
 
 		// Step 4: Wait for compaction to finish
-		select {
-		case err := <-h.db.compErrCh:
-			t.Error("compaction error: ", err)
-		case h.db.compCh <- nil:
-		}
+		h.waitCompaction()
 
 		v := h.db.s.version()
 		if v.tLen(0) > 0 {
@@ -1246,11 +1271,7 @@ func TestDb_L0_CompactionBug_Issue44_a(t *testing.T) {
 	h.reopenDB()
 	h.reopenDB()
 	h.getKeyVal("(a->v)")
-	select {
-	case err := <-h.db.compErrCh:
-		t.Error("compaction error: ", err)
-	case h.db.compCh <- nil:
-	}
+	h.waitCompaction()
 	h.getKeyVal("(a->v)")
 
 	h.close()
@@ -1270,11 +1291,7 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.put("", "")
 	h.reopenDB()
 	h.put("", "")
-	select {
-	case err := <-h.db.compErrCh:
-		t.Error("compaction error: ", err)
-	case h.db.compCh <- nil:
-	}
+	h.waitCompaction()
 	h.reopenDB()
 	h.put("d", "dv")
 	h.reopenDB()
@@ -1284,11 +1301,7 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.delete("b")
 	h.reopenDB()
 	h.getKeyVal("(->)(c->cv)")
-	select {
-	case err := <-h.db.compErrCh:
-		t.Error("compaction error: ", err)
-	case h.db.compCh <- nil:
-	}
+	h.waitCompaction()
 	h.getKeyVal("(->)(c->cv)")
 
 	h.close()
