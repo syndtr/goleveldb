@@ -52,6 +52,7 @@ type fileStorage struct {
 	buf   []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
+	day  int
 }
 
 // OpenFile returns a new filesytem-backed storage implementation with the given
@@ -116,19 +117,20 @@ func itoa(buf []byte, i int, wid int) []byte {
 	return append(buf, b[bp:]...)
 }
 
+func (fs *fileStorage) printDay(t time.Time) {
+	if fs.day == t.Day() {
+		return
+	}
+	fs.day = t.Day()
+	fs.logw.Write([]byte("=============== " + t.Format("Jan 2, 2006 (MST)") + " ===============\n"))
+}
+
 func (fs *fileStorage) doLog(t time.Time, str string) {
-	year, month, day := t.Date()
+	fs.printDay(t)
 	hour, min, sec := t.Clock()
 	msec := t.Nanosecond() / 1e3
-	// date
-	fs.buf = itoa(fs.buf[:0], year, 4)
-	fs.buf = append(fs.buf, '/')
-	fs.buf = itoa(fs.buf, int(month), 2)
-	fs.buf = append(fs.buf, '/')
-	fs.buf = itoa(fs.buf, day, 4)
-	fs.buf = append(fs.buf, ' ')
 	// time
-	fs.buf = itoa(fs.buf, hour, 2)
+	fs.buf = itoa(fs.buf[:0], hour, 2)
 	fs.buf = append(fs.buf, ':')
 	fs.buf = itoa(fs.buf, min, 2)
 	fs.buf = append(fs.buf, ':')
