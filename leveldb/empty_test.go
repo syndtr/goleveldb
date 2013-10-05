@@ -21,41 +21,42 @@ func TestIter_Empty(t *testing.T) {
 
 	for _, p := range cc {
 		c, name := p.c, p.name
-		err := c.init(t, new(stHarnessOpt))
-		if err != nil {
-			t.Error(name+": error when initializing constructor:", err.Error())
-			continue
-		}
-		size, err := c.finish()
-		if err != nil {
-			t.Error(name+": error when finishing constructor:", err.Error())
-			c.close()
-			continue
-		}
-		t.Logf(name+": final size is %d bytes", size)
-		iter := c.newIterator()
-		if iter.Valid() {
-			t.Error(name + ": Valid() return true")
-		}
-		if iter.Next() {
-			t.Error(name + ": Next() return true")
-		}
-		if iter.Prev() {
-			t.Error(name + ": Prev() return true")
-		}
-		if iter.Seek(nil) {
-			t.Error(name + ": Seek(nil) return true")
-		}
-		if iter.Seek([]byte("v")) {
-			t.Error(name + ": Seek('v') return true")
-		}
-		if iter.First() {
-			t.Error(name + ": First() return true")
-		}
-		if iter.Last() {
-			t.Error(name + ": Last() return true")
-		}
-		iter.Release()
-		c.close()
+		func() {
+			err := c.init(t, new(stHarnessOpt))
+			if err != nil {
+				t.Error(name+": error when initializing constructor:", err.Error())
+				return
+			}
+			defer c.close()
+			size, err := c.finish()
+			if err != nil {
+				t.Error(name+": error when finishing constructor:", err.Error())
+				return
+			}
+			t.Logf(name+": final size is %d bytes", size)
+			iter := c.newIterator()
+			defer iter.Release()
+			if iter.Valid() {
+				t.Error(name + ": Valid() return true")
+			}
+			if iter.Next() {
+				t.Error(name + ": Next() return true")
+			}
+			if iter.Prev() {
+				t.Error(name + ": Prev() return true")
+			}
+			if iter.Seek(nil) {
+				t.Error(name + ": Seek(nil) return true")
+			}
+			if iter.Seek([]byte("v")) {
+				t.Error(name + ": Seek('v') return true")
+			}
+			if iter.First() {
+				t.Error(name + ": First() return true")
+			}
+			if iter.Last() {
+				t.Error(name + ": Last() return true")
+			}
+		}()
 	}
 }

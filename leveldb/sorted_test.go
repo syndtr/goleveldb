@@ -177,6 +177,9 @@ func (dc *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,
 	})
+	if err != nil {
+		dc.stor.Close()
+	}
 	return
 }
 
