@@ -387,11 +387,12 @@ func newTestStorage(t *testing.T) *testStorage {
 						if log, err := ioutil.ReadAll(f); err != nil {
 							t.Logf("---------------------- %s ----------------------", name)
 							t.Logf("cannot read log: %v", err)
-						} else {
+							t.Logf("---------------------- %s ----------------------", name)
+						} else if len(log) > 0 {
 							t.Logf("---------------------- %s ----------------------\n%s", name, string(log))
+							t.Logf("---------------------- %s ----------------------", name)
 						}
 						f.Close()
-						t.Logf("---------------------- %s ----------------------", name)
 					}
 					if tsKeepFS {
 						return nil
