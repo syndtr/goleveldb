@@ -303,12 +303,11 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := w.Close(); err != nil {
-			fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
-		}
-	}()
 	_, err = fmt.Fprintln(w, f2.name())
+	// Close the file first.
+	if err := w.Close(); err != nil {
+		fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
+	}
 	if err != nil {
 		return err
 	}
