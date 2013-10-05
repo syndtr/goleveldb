@@ -309,10 +309,21 @@ func (fs *fileStorage) SetManifest(f File) (err error) {
 		fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
 	}
 	if err != nil {
+		if cerr := w.Close(); cerr != nil {
+			fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, cerr))
+		}
 		return err
 	}
-	err = rename(path, filepath.Join(fs.path, "CURRENT"))
-	return
+	err = w.Close()
+	if err != nil {
+		fs.log(fmt.Sprintf("close CURRENT.%d: %v", f2.num, err))
+
+		// Return if we cannot Close(), since rename will fail on Windows
+		// if the file is still open.
+		return err
+	}
+
+	return rename(path, filepath.Join(fs.path, "CURRENT"))
 }
 
 func (fs *fileStorage) Close() error {
