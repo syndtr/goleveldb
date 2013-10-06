@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/journal"
@@ -75,6 +76,8 @@ type DB struct {
 }
 
 func openDB(s *session) (*DB, error) {
+	s.log("db@open opening")
+	start := time.Now()
 	db := &DB{
 		s: s,
 		// Initial sequence
@@ -114,6 +117,8 @@ func openDB(s *session) (*DB, error) {
 	go db.compaction()
 	go db.writeJournal()
 
+	s.logf("db@open done T·%v", time.Since(start))
+
 	runtime.SetFinalizer(db, (*DB).Close)
 	return db, nil
 }
@@ -132,6 +137,7 @@ func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	defer func() {
 		if err != nil {
 			s.close()
+			s.release()
 		}
 	}()
 
@@ -173,7 +179,7 @@ func OpenFile(path string, o *opt.Options) (*DB, error) {
 // Recover recovers and opens a DB with missing or corrupted manifest files
 // for the given storage. It will ignore any manifest files, valid or not.
 // The DB must already exist or it will returns an error.
-// Also Recover will ignore opt.OFCreateIfMissing and opt.OFErrorIfExist flags.
+// Also, Recover will ignore opt.OFCreateIfMissing and opt.OFErrorIfExist flags.
 //
 // The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
@@ -188,6 +194,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	defer func() {
 		if err != nil {
 			s.close()
+			s.release()
 		}
 	}()
 
@@ -199,7 +206,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	ff := files(ff0)
 	ff.sort()
 
-	s.logf("Recover: started, files=%d", len(ff))
+	s.logf("db@recovery F·%d", len(ff))
 
 	rec := new(sessionRecord)
 
@@ -250,6 +257,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 			}
 		}
 		iter.Release()
+		s.logf("db@recovery found table @%d S·%s %q:%q", t.file.Num(), shortenb(int(t.size)), t.min, t.max)
 		// add table to level 0
 		rec.addTableFile(0, t)
 		nt = t
@@ -292,8 +300,6 @@ func (d *DB) recoverJournal() error {
 	s := d.s
 	icmp := s.cmp
 
-	s.logf("JournalRecovery: started, min=%d", s.stJournalNum)
-
 	ff0, err := s.getFiles(storage.TypeJournal)
 	if err != nil {
 		return err
@@ -318,7 +324,7 @@ func (d *DB) recoverJournal() error {
 	strict := s.o.HasFlag(opt.OFStrict)
 	writeBuffer := s.o.GetWriteBuffer()
 	recoverJournal := func(file storage.File) error {
-		s.logf("JournalRecovery: recovering, num=%d", file.Num())
+		s.logf("journal@recovery recovering @%d", file.Num())
 		reader, err := file.Open()
 		if err != nil {
 			return err
@@ -378,9 +384,12 @@ func (d *DB) recoverJournal() error {
 		return nil
 	}
 	// Recover all journals.
-	for _, file := range ff2 {
-		if err := recoverJournal(file); err != nil {
-			return err
+	if len(ff2) > 0 {
+		s.logf("journal@recovery F·%d", len(ff2))
+		for _, file := range ff2 {
+			if err := recoverJournal(file); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -438,14 +447,11 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	}
 
 	v := s.version()
-	value, cState, err := v.get(ikey, ro)
+	value, cSched, err := v.get(ikey, ro)
 	v.release()
-	if cState {
-		// Schedule compaction.
-		select {
-		case d.compCh <- nil:
-		default:
-		}
+	if cSched {
+		// Wake compaction.
+		d.wakeCompaction(0)
 	}
 	return
 }
@@ -648,6 +654,10 @@ func (d *DB) Close() error {
 		return ErrClosed
 	}
 
+	s := d.s
+	start := time.Now()
+	s.log("db@close closing")
+
 	// Clear the finalizer.
 	runtime.SetFinalizer(d, nil)
 
@@ -670,7 +680,9 @@ func (d *DB) Close() error {
 	}
 
 	// close session
-	d.s.close()
+	s.close()
+	s.logf("db@close done T·%v", time.Since(start))
+	s.release()
 
 	if d.closer != nil {
 		if err1 := d.closer.Close(); err == nil {

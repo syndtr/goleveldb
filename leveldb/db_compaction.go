@@ -42,22 +42,22 @@ func (p *cStats) get() (duration time.Duration, read, write uint64) {
 type cStatsStaging struct {
 	start    time.Time
 	duration time.Duration
-	timerOn  bool
+	on       bool
 	read     uint64
 	write    uint64
 }
 
 func (p *cStatsStaging) startTimer() {
-	if !p.timerOn {
+	if !p.on {
 		p.start = time.Now()
-		p.timerOn = true
+		p.on = true
 	}
 }
 
 func (p *cStatsStaging) stopTimer() {
-	if p.timerOn {
-		p.duration += time.Now().Sub(p.start)
-		p.timerOn = false
+	if p.on {
+		p.duration += time.Since(p.start)
+		p.on = false
 	}
 }
 
@@ -66,14 +66,6 @@ type cReq struct {
 	min, max iKey
 	cch      chan<- struct{}
 }
-
-type cSignal int
-
-const (
-	cWait cSignal = iota
-	cSched
-	cClose
-)
 
 type cMem struct {
 	s     *session
@@ -99,8 +91,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	}
 	c.rec.addTableFile(level, t)
 
-	s.logf("Compaction: table created, source=mem level=%d num=%d size=%d entries=%d min=%q max=%q",
-		level, t.file.Num(), t.size, n, t.min, t.max)
+	s.logf("mem@flush created L%d@%d N·%d S·%s %q:%q", level, t.file.Num(), n, shortenb(int(t.size)), t.min, t.max)
 
 	c.level = level
 	return nil
@@ -113,7 +104,6 @@ func (c *cMem) reset() {
 func (c *cMem) commit(journal, seq uint64) error {
 	c.rec.setJournalNum(journal)
 	c.rec.setSeq(seq)
-
 	// Commit changes
 	return c.s.commit(c.rec)
 }
@@ -151,7 +141,7 @@ func (d *DB) transact(name string, exec, rollback func() error) {
 		if x := recover(); x != nil {
 			if x == errTransactExiting && rollback != nil {
 				if err := rollback(); err != nil {
-					s.logf("Transact: %s: rollback err=%q", name, err)
+					s.logf("%s rollback error %q", name, err)
 				}
 			}
 			panic(x)
@@ -159,20 +149,20 @@ func (d *DB) transact(name string, exec, rollback func() error) {
 	}()
 	for {
 		if d.isClosed() {
-			s.logf("Transact: %s: exiting", name)
+			s.logf("%s exiting", name)
 			panic(errTransactExiting)
 		}
 		err := exec()
 		select {
 		case _, _ = <-d.closeCh:
-			s.logf("Transact: %s: exiting", name)
+			s.logf("%s exiting", name)
 			panic(errTransactExiting)
 		case d.compErrSetCh <- err:
 		}
 		if err == nil {
 			return
 		}
-		s.logf("Transact: %s: err=%q", name, err)
+		s.logf("%s error %q", name, err)
 		time.Sleep(time.Second)
 	}
 }
@@ -183,7 +173,7 @@ func (d *DB) memCompaction() {
 	stats := new(cStatsStaging)
 	mem := d.getFrozenMem()
 
-	s.logf("MemCompaction: started, size=%d entries=%d", mem.Size(), mem.Len())
+	s.logf("mem@flush N·%d S·%s", mem.Len(), shortenb(mem.Size()))
 
 	d.transact("mem@flush", func() (err error) {
 		stats.startTimer()
@@ -191,6 +181,7 @@ func (d *DB) memCompaction() {
 		return c.flush(mem, -1)
 	}, func() error {
 		for _, r := range c.rec.addedTables {
+			s.logf("mem@flush rollback @%d", r.num)
 			f := s.getTableFile(r.num)
 			if err := f.Remove(); err != nil {
 				return err
@@ -204,6 +195,8 @@ func (d *DB) memCompaction() {
 		defer stats.stopTimer()
 		return c.commit(d.journalFile.Num(), d.frozenSeq)
 	}, nil)
+
+	s.logf("mem@flush commited F·%d T·%v", len(c.rec.addedTables), stats.duration)
 
 	for _, r := range c.rec.addedTables {
 		stats.write += r.size
@@ -220,35 +213,43 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 	s := d.s
 	ucmp := s.cmp.cmp
 
-	s.logf("Compaction: compacting, level=%d tables=%d, level=%d tables=%d",
-		c.level, len(c.tables[0]), c.level+1, len(c.tables[1]))
-
 	rec := new(sessionRecord)
 	rec.addCompactionPointer(c.level, c.max)
 
 	if !noTrivial && c.trivial() {
 		t := c.tables[0][0]
+		s.logf("table@move L%d@%d -> L%d", c.level, t.file.Num(), c.level+1)
 		rec.deleteTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
-		d.transact("table@rename", func() (err error) {
+		d.transact("table@move", func() (err error) {
 			return s.commit(rec)
 		}, nil)
-		s.logf("Compaction: table level changed, num=%d from=%d to=%d",
-			t.file.Num(), c.level, c.level+1)
 		return
 	}
+
+	var stats [2]cStatsStaging
+	for i, tt := range c.tables {
+		for _, t := range tt {
+			stats[i].read += t.size
+			// Insert deleted tables into record
+			rec.deleteTable(c.level+i, t.file.Num())
+		}
+	}
+	sourceSize := int(stats[0].read + stats[1].read)
+	minSeq := d.minSeq()
+	s.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.level, len(c.tables[0]), c.level+1, len(c.tables[1]), shortenb(sourceSize), minSeq)
 
 	var snapUkey []byte
 	var snapHasUkey bool
 	var snapSeq uint64
 	var snapIter int
-	minSeq := d.minSeq()
-	stats := new(cStatsStaging)
-
+	var snapDropCnt int
+	var dropCnt int
 	d.transact("table@build", func() (err error) {
 		ukey := append([]byte{}, snapUkey...)
 		hasUkey := snapHasUkey
 		lseq := snapSeq
+		dropCnt = snapDropCnt
 		snapSched := snapIter == 0
 
 		var tw *tWriter
@@ -258,21 +259,20 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				return err
 			}
 			rec.addTableFile(c.level+1, t)
-			stats.write += t.size
-			s.logf("Compaction: table created, source=table level=%d num=%d size=%d entries=%d min=%q max=%q",
-				c.level+1, t.file.Num(), t.size, tw.tw.EntriesLen(), t.min, t.max)
+			stats[1].write += t.size
+			s.logf("table@compaction created L%d@%d N·%d S·%s %q:%q", c.level+1, t.file.Num(), tw.tw.EntriesLen(), shortenb(int(t.size)), t.min, t.max)
 			return nil
 		}
 
 		defer func() {
-			stats.stopTimer()
+			stats[1].stopTimer()
 			if tw != nil {
 				tw.drop()
 				tw = nil
 			}
 		}()
 
-		stats.startTimer()
+		stats[1].startTimer()
 		iter := c.newIterator()
 		defer iter.Release()
 		for i := 0; iter.Next(); i++ {
@@ -287,13 +287,13 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				err = ErrClosed
 				return
 			case cch := <-d.compMemCh:
-				stats.stopTimer()
+				stats[1].stopTimer()
 				d.memCompaction()
 				d.compMemAckCh <- struct{}{}
 				if cch != nil {
 					cch <- struct{}{}
 				}
-				stats.startTimer()
+				stats[1].startTimer()
 			default:
 			}
 
@@ -317,6 +317,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				snapHasUkey = hasUkey
 				snapSeq = lseq
 				snapIter = i
+				snapDropCnt = dropCnt
 				snapSched = false
 			}
 
@@ -355,6 +356,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 
 				lseq = seq
 				if drop {
+					dropCnt++
 					continue
 				}
 			}
@@ -395,6 +397,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return
 	}, func() error {
 		for _, r := range rec.addedTables {
+			s.logf("table@compaction rollback @%d", r.num)
 			f := s.getTableFile(r.num)
 			if err := f.Remove(); err != nil {
 				return err
@@ -403,27 +406,20 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return nil
 	})
 
-	s.log("Compaction: build done")
-
-	for n, tt := range c.tables {
-		for _, t := range tt {
-			stats.read += t.size
-			// Insert deleted tables into record
-			rec.deleteTable(c.level+n, t.file.Num())
-		}
-	}
-
 	// Commit changes
 	d.transact("table@commit", func() (err error) {
-		stats.startTimer()
-		defer stats.stopTimer()
+		stats[1].startTimer()
+		defer stats[1].stopTimer()
 		return s.commit(rec)
 	}, nil)
 
-	s.log("Compaction: commited")
+	resultSize := int(int(stats[1].write))
+	s.logf("table@compaction commited F%s S%s D·%d T·%v", sint(len(rec.addedTables)-len(rec.deletedTables)), sshortenb(resultSize-sourceSize), dropCnt, stats[1].duration)
 
 	// Save compaction stats
-	d.compStats[c.level+1].add(stats)
+	for i := range stats {
+		d.compStats[c.level+1].add(&stats[i])
+	}
 }
 
 func (d *DB) compaction() {
@@ -449,7 +445,7 @@ func (d *DB) compaction() {
 			if creq == nil {
 				continue
 			}
-			s.logf("CompactRange: ordered, level=%d", creq.level)
+			s.logf("range compaction L%d %v:%v", creq.level, creq.min, creq.max)
 			if creq.level >= 0 {
 				c := s.getCompactionRange(creq.level, creq.min, creq.max)
 				if c != nil {
@@ -470,7 +466,6 @@ func (d *DB) compaction() {
 					}
 				}
 			}
-			s.log("CompactRange: done")
 			cch = creq.cch
 		}
 		if s.version_NB().needCompaction() {
@@ -481,7 +476,48 @@ func (d *DB) compaction() {
 			}
 		}
 		if cch != nil {
-			cch <- struct{}{}
+			func() {
+				defer func() {
+					recover()
+				}()
+				cch <- struct{}{}
+			}()
 		}
 	}
+}
+
+func (d *DB) wakeCompaction(wait int) error {
+	switch wait {
+	case 0:
+		select {
+		case d.compCh <- nil:
+		default:
+		}
+	case 1:
+		select {
+		case _, _ = <-d.closeCh:
+			return ErrClosed
+		case err := <-d.compErrCh:
+			return err
+		case d.compCh <- nil:
+		}
+	case 2:
+		cch := make(chan struct{})
+		defer close(cch)
+		select {
+		case _, _ = <-d.closeCh:
+			return ErrClosed
+		case err := <-d.compErrCh:
+			return err
+		case d.compCh <- (chan<- struct{})(cch):
+		}
+		select {
+		case _, _ = <-d.closeCh:
+			return ErrClosed
+		case err := <-d.compErrCh:
+			return err
+		case <-cch:
+		}
+	}
+	return nil
 }

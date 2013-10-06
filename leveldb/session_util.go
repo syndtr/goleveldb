@@ -23,9 +23,9 @@ type dropper struct {
 
 func (d dropper) Drop(err error) {
 	if e, ok := err.(journal.DroppedError); ok {
-		d.s.logf("%s-%d: dropped %d bytes: %s", d.file.Type(), d.file.Num(), e.Size, e.Reason)
+		d.s.logf("journal@drop %s-%d S·%s %q", d.file.Type(), d.file.Num(), shortenb(e.Size), e.Reason)
 	} else {
-		d.s.logf("%s-%d: %v", d.file.Type(), d.file.Num, err)
+		d.s.logf("journal@drop %s-%d %q", d.file.Type(), d.file.Num, err)
 	}
 }
 

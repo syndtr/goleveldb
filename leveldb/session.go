@@ -74,6 +74,9 @@ func (s *session) close() {
 	if s.manifestWriter != nil {
 		s.manifestWriter.Close()
 	}
+}
+
+func (s *session) release() {
 	s.storLock.Release()
 }
 
@@ -273,9 +276,9 @@ func (c *compaction) expand() {
 			xmin, xmax := exp0.getRange(icmp)
 			vt1.getOverlaps(xmin.ukey(), xmax.ukey(), &exp1, true, ucmp)
 			if len(exp1) == len(t1) {
-				s.logf("Compaction: expanding, level=%d from=`%d+%d (%d+%d bytes)' to=`%d+%d (%d+%d bytes)'",
-					level, len(t0), len(t1), t0.size(), t1.size(),
-					len(exp0), len(exp1), exp0.size(), exp1.size())
+				s.logf("table@compaction expanding L%d+L%d (F·%d S·%s)+(F·%d S·%s) -> (F·%d S·%s)+(F·%d S·%s)",
+					level, level+1, len(t0), shortenb(int(t0.size())), len(t1), shortenb(int(t1.size())),
+					len(exp0), shortenb(int(exp0.size())), len(exp1), shortenb(int(exp1.size())))
 				min, max = xmin, xmax
 				t0, t1 = exp0, exp1
 				amin, amax = append(t0, t1...).getRange(icmp)

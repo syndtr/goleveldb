@@ -7,16 +7,55 @@
 package leveldb
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 func shorten(str string) string {
-	if len(str) <= 13 {
+	if len(str) <= 4 {
 		return str
 	}
-	return str[:5] + "..." + str[len(str)-5:]
+	return str[:1] + ".." + str[len(str)-1:]
+}
+
+var bunits = [...]string{"", "Ki", "Mi", "Gi"}
+
+func shortenb(bytes int) string {
+	i := 0
+	for ; bytes > 1024 && i < 4; i++ {
+		bytes /= 1024
+	}
+	return fmt.Sprintf("%d%sB", bytes, bunits[i])
+}
+
+func sshortenb(bytes int) string {
+	if bytes == 0 {
+		return "~"
+	}
+	sign := "+"
+	if bytes < 0 {
+		sign = "-"
+		bytes *= -1
+	}
+	i := 0
+	for ; bytes > 1024 && i < 4; i++ {
+		bytes /= 1024
+	}
+	return fmt.Sprintf("%s%d%sB", sign, bytes, bunits[i])
+}
+
+func sint(x int) string {
+	if x == 0 {
+		return "~"
+	}
+	sign := "+"
+	if x < 0 {
+		sign = "-"
+		x *= -1
+	}
+	return fmt.Sprintf("%s%d", sign, x)
 }
 
 func toPercent(n, percent int) int {

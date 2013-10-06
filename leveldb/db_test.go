@@ -301,19 +301,7 @@ func (h *dbHarness) getKeyVal(want string) {
 func (h *dbHarness) waitCompaction() {
 	t := h.t
 	db := h.db
-
-	cch := make(chan struct{})
-	// Schedule compaction.
-	select {
-	case db.compCh <- (chan<- struct{})(cch):
-	case err := <-db.compErrCh:
-		t.Error("compaction error: ", err)
-		return
-	}
-	// Wait.
-	select {
-	case <-cch:
-	case err := <-db.compErrCh:
+	if err := db.wakeCompaction(2); err != nil {
 		t.Error("compaction error: ", err)
 	}
 }
@@ -322,7 +310,10 @@ func (h *dbHarness) compactMem() {
 	t := h.t
 	db := h.db
 
-	db.compCh <- nil
+	if err := db.wakeCompaction(1); err != nil {
+		t.Error("compaction error: ", err)
+		return
+	}
 
 	if mem, _ := db.getMem(); mem.Len() == 0 {
 		return

@@ -44,55 +44,55 @@ func (d *DB) writeJournal() {
 	}
 }
 
-func (d *DB) flush() (*memdb.DB, error) {
+func (d *DB) flush() (mem *memdb.DB, err error) {
 	s := d.s
 
 	delayed := false
-	for {
+	flush := func() bool {
 		v := s.version()
-		mem, _ := d.getMem()
+		defer v.release()
+		mem, _ = d.getMem()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
 		case mem.Size() < s.o.GetWriteBuffer():
-			// still room
-			v.release()
-			return mem, nil
+			return false
 		case v.tLen(0) >= kL0_StopWritesTrigger:
-			select {
-			case _, _ = <-d.closeCh:
-				v.release()
-				return nil, ErrClosed
-			case d.compCh <- nil:
+			delayed = true
+			err = d.wakeCompaction(2)
+			if err != nil {
+				return false
 			}
 		default:
 			// Wait for pending memdb compaction.
 			select {
 			case _, _ = <-d.closeCh:
-				v.release()
-				return nil, ErrClosed
+				err = ErrClosed
+				return false
 			case <-d.compMemAckCh:
-			case err := <-d.compErrCh:
-				v.release()
-				return nil, err
+			case err = <-d.compErrCh:
+				return false
 			}
-
 			// Create new memdb and journal.
-			mem, err := d.newMem()
+			mem, err = d.newMem()
 			if err != nil {
-				v.release()
-				return nil, err
+				return false
 			}
 
 			// Schedule memdb compaction.
 			d.compMemCh <- nil
-			v.release()
-			return mem, nil
+			return false
 		}
-		v.release()
+		return true
 	}
-	return nil, nil
+	start := time.Now()
+	for flush() {
+	}
+	if delayed {
+		s.logf("db@write delayed T·%v", time.Since(start))
+	}
+	return
 }
 
 // Write apply the given batch to the DB. The batch will be applied

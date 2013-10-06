@@ -54,6 +54,7 @@ func (d *DB) cleanFiles() error {
 	if err != nil {
 		return err
 	}
+	var rem []storage.File
 	for _, f := range ff {
 		keep := true
 		switch f.Type() {
@@ -70,9 +71,14 @@ func (d *DB) cleanFiles() error {
 		}
 
 		if !keep {
-			if err := f.Remove(); err != nil {
-				return err
-			}
+			rem = append(rem, f)
+		}
+	}
+	s.logf("db@janitor F·%d G·%d", len(ff), len(rem))
+	for _, f := range rem {
+		s.logf("db@janitor removing %s-%d", f.Type(), f.Num())
+		if err := f.Remove(); err != nil {
+			return err
 		}
 	}
 	return nil
