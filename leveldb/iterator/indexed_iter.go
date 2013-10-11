@@ -10,10 +10,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-// IteratorIndexer is the interface that wraps IteratorSeeker and basic Get
+// IteratorIndexer is the interface that wraps CommonIterator and basic Get
 // method. IteratorIndexer provides index for indexed iterator.
 type IteratorIndexer interface {
-	IteratorSeeker
+	CommonIterator
 
 	// Get returns a new data iterator for the current position, or nil if
 	// done.

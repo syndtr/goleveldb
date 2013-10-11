@@ -14,46 +14,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-// Iterator iterates over a DB's key/value pairs in key order.
-//
-// When encouter an error any 'seeks method' will return false and will
-// yield no key/value pairs. The error can be queried by calling
-// IteratorSeeker.Error method. Calling Release is still necessary.
-//
-// An iterator must be released after use, but it is not necessary to read
-// an iterator until exhaustion.
-// Also, an iterator is not necessarily goroutine-safe, but it is safe to use
-// multiple iterators concurrently, with each in a dedicated goroutine.
-type Iterator interface {
-	IteratorSeeker
-
-	// Key returns the key of the current key/value pair, or nil if done.
-	// The caller should not modify the contents of the returned slice, and
-	// its contents may change on the next call to any method of IteratorSeeker.
-	Key() []byte
-
-	// Value returns the key of the current key/value pair, or nil if done.
-	// The caller should not modify the contents of the returned slice, and
-	// its contents may change on the next call to any method of IteratorSeeker.
-	Value() []byte
-}
-
-// IteratorSeeker is the interface that wraps 'iterator seeker methods'.
-// Iterator seeker provides functionality to manipulate an iterator and
-// query its status.
+// IteratorSeeker is the interface that wraps the 'seeks method'.
 type IteratorSeeker interface {
-	// util.Releaser is the interface that wraps basic Release method.
-	// When called Release will releases any resources associated with the
-	// iterator.
-	util.Releaser
-
-	// util.ReleaseSetter is the interface that wraps the basic SetReleaser
-	// method.
-	util.ReleaseSetter
-
-	// TODO: Remove this when ready.
-	Valid() bool
-
 	// First moves the iterator to the first key/value pair. If the iterator
 	// only contains one key/value pair then First and Last whould moves
 	// to the same key/value pair.
@@ -80,10 +42,51 @@ type IteratorSeeker interface {
 	// Prev moves the iterator to the previous key/value pair.
 	// It returns whether the iterator is exhausted.
 	Prev() bool
+}
+
+// CommonIterator is the interface that wraps common interator methods.
+type CommonIterator interface {
+	IteratorSeeker
+
+	// util.Releaser is the interface that wraps basic Release method.
+	// When called Release will releases any resources associated with the
+	// iterator.
+	util.Releaser
+
+	// util.ReleaseSetter is the interface that wraps the basic SetReleaser
+	// method.
+	util.ReleaseSetter
+
+	// TODO: Remove this when ready.
+	Valid() bool
 
 	// Error returns any accumulated error. Exhausting all the key/value pairs
 	// is not considered to be an error.
 	Error() error
+}
+
+// Iterator iterates over a DB's key/value pairs in key order.
+//
+// When encouter an error any 'seeks method' will return false and will
+// yield no key/value pairs. The error can be queried by calling the Error
+// method. Calling Release is still necessary.
+//
+// An iterator must be released after use, but it is not necessary to read
+// an iterator until exhaustion.
+// Also, an iterator is not necessarily goroutine-safe, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
+type Iterator interface {
+	CommonIterator
+
+	// Key returns the key of the current key/value pair, or nil if done.
+	// The caller should not modify the contents of the returned slice, and
+	// its contents may change on the next call to any 'seeks method'.
+	Key() []byte
+
+	// Value returns the key of the current key/value pair, or nil if done.
+	// The caller should not modify the contents of the returned slice, and
+	// its contents may change on the next call to any 'seeks method'.
+	Value() []byte
 }
 
 type emptyIterator struct {
