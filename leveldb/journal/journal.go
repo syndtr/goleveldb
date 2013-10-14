@@ -135,8 +135,6 @@ type Reader struct {
 	// n is the number of bytes of buf that are valid. Once reading has started,
 	// only the final block can have n < blockSize.
 	n int
-	// started is whether Next has been called at all.
-	started bool
 	// last is whether the current chunk is the last chunk of the journal.
 	last bool
 	// err is any accumulated error.
@@ -153,6 +151,7 @@ func NewReader(r io.Reader, dropper Dropper, strict bool) *Reader {
 		r:       r,
 		dropper: dropper,
 		strict:  strict,
+		last:    true,
 	}
 }
 
@@ -167,6 +166,7 @@ func (r *Reader) nextChunk(wantFirst, skip bool) error {
 
 			var err error
 			if checksum == 0 && length == 0 && chunkType == 0 {
+				// Drop entire block.
 				err = DroppedError{r.n - r.j, "zero header"}
 				r.i = r.n
 				r.j = r.n
@@ -175,34 +175,43 @@ func (r *Reader) nextChunk(wantFirst, skip bool) error {
 				r.i = r.j + headerSize
 				r.j = r.j + headerSize + int(length)
 				if r.j > r.n {
-					err = DroppedError{m, "length overflows block"}
+					// Drop entire block.
+					err = DroppedError{m, "chunk length overflows block"}
+					r.i = r.n
+					r.j = r.n
 				} else if checksum != util.NewCRC(r.buf[r.i-1:r.j]).Value() {
+					// Drop entire block.
 					err = DroppedError{m, "checksum mismatch"}
 					r.i = r.n
 					r.j = r.n
 				}
 			}
-			if wantFirst && chunkType != fullChunkType && chunkType != firstChunkType {
+			if wantFirst && err == nil && chunkType != fullChunkType && chunkType != firstChunkType {
 				if skip {
+					// The chunk are intentionally skipped.
 					if chunkType == lastChunkType {
 						skip = false
 					}
 					continue
 				} else {
+					// Drop the chunk.
 					err = DroppedError{r.j - r.i + headerSize, "orphan chunk"}
 				}
 			}
 			if err == nil {
 				r.last = chunkType == fullChunkType || chunkType == lastChunkType
-			} else if r.dropper != nil {
-				r.dropper.Drop(err)
-			}
-			if r.strict {
-				r.err = err
+			} else {
+				if r.dropper != nil {
+					r.dropper.Drop(err)
+				}
+				if r.strict {
+					r.err = err
+				}
 			}
 			return err
 		}
-		if r.n < blockSize && r.started {
+		if r.n < blockSize && r.n > 0 {
+			// This is the last block.
 			if r.j != r.n {
 				r.err = io.ErrUnexpectedEOF
 			} else {
@@ -213,6 +222,10 @@ func (r *Reader) nextChunk(wantFirst, skip bool) error {
 		n, err := io.ReadFull(r.r, r.buf[:])
 		if err != nil && err != io.ErrUnexpectedEOF {
 			r.err = err
+			return r.err
+		}
+		if n == 0 {
+			r.err = io.EOF
 			return r.err
 		}
 		r.i, r.j, r.n = 0, 0, n
@@ -231,15 +244,17 @@ func (r *Reader) Next() (io.Reader, error) {
 	skip := !r.last
 	for {
 		r.i = r.j
-		if r.nextChunk(true, skip) == nil {
+		if r.nextChunk(true, skip) != nil {
+			// So that 'orphan chunk' drop will be reported.
+			skip = false
+		} else {
 			break
 		}
 		if r.err != nil {
 			return nil, r.err
 		}
 	}
-	r.started = true
-	return singleReader{r, r.seq, nil}, nil
+	return &singleReader{r, r.seq, nil}, nil
 }
 
 // Reset resets the journal reader, allows reuse of the journal reader.
@@ -252,8 +267,7 @@ func (r *Reader) Reset(reader io.Reader, dropper Dropper, strict bool) error {
 	r.i = 0
 	r.j = 0
 	r.n = 0
-	r.started = false
-	r.last = false
+	r.last = true
 	r.err = nil
 	return err
 }
@@ -264,7 +278,7 @@ type singleReader struct {
 	err error
 }
 
-func (x singleReader) Read(p []byte) (int, error) {
+func (x *singleReader) Read(p []byte) (int, error) {
 	r := x.r
 	if r.seq != x.seq {
 		return 0, errors.New("leveldb/journal: stale reader")
@@ -288,7 +302,7 @@ func (x singleReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func (x singleReader) ReadByte() (byte, error) {
+func (x *singleReader) ReadByte() (byte, error) {
 	r := x.r
 	if r.seq != x.seq {
 		return 0, errors.New("leveldb/journal: stale reader")
