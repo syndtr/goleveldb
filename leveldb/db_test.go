@@ -113,6 +113,7 @@ func (h *dbHarness) reopenDB() {
 
 func (h *dbHarness) close() {
 	h.closeDB0()
+	h.db = nil
 	h.stor.Close()
 	h.stor = nil
 	runtime.GC()
@@ -1299,6 +1300,23 @@ func TestDb_L0_CompactionBug_Issue44_b(t *testing.T) {
 	h.getKeyVal("(->)(c->cv)")
 	h.waitCompaction()
 	h.getKeyVal("(->)(c->cv)")
+}
+
+func TestDb_SingleEntryMemCompaction(t *testing.T) {
+	trun(t, func(h *dbHarness) {
+		for i := 0; i < 10; i++ {
+			h.put("big", strings.Repeat("v", opt.DefaultWriteBuffer))
+			h.compactMem()
+			h.put("key", strings.Repeat("v", opt.DefaultBlockSize))
+			h.compactMem()
+			h.put("k", "v")
+			h.compactMem()
+			h.put("", "")
+			h.compactMem()
+			h.put("verybig", strings.Repeat("v", opt.DefaultWriteBuffer*2))
+			h.compactMem()
+		}
+	})
 }
 
 func TestDb_ManifestWriteError(t *testing.T) {
