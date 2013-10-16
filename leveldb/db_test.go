@@ -905,7 +905,7 @@ func TestDb_RecoverWithLargeJournal(t *testing.T) {
 
 func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		WriteBuffer:     100000000,
+		WriteBuffer:     10000000,
 		CompressionType: opt.NoCompression,
 	})
 	defer h.close()
@@ -1012,7 +1012,7 @@ func TestDb_SparseMerge(t *testing.T) {
 func TestDb_ApproximateSizes(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
 		CompressionType: opt.NoCompression,
-		WriteBuffer:     100000000,
+		WriteBuffer:     10000000,
 	})
 	defer h.close()
 
