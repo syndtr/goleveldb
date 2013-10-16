@@ -28,8 +28,9 @@ var (
 )
 
 var (
-	tsKeepFS = os.Getenv("GOLEVELDB_USEFS") == "2"
-	tsFS     = tsKeepFS || os.Getenv("GOLEVELDB_USEFS") == "1"
+	tsFSEnv  = os.Getenv("GOLEVELDB_USEFS")
+	tsKeepFS = tsFSEnv == "2"
+	tsFS     = tsKeepFS || tsFSEnv == "" || tsFSEnv == "1"
 	tsMU     = &sync.Mutex{}
 	tsNum    = 0
 )
