@@ -1727,33 +1727,6 @@ func TestDb_Concurrent2(t *testing.T) {
 	runtime.GOMAXPROCS(1)
 }
 
-func TestDb_ModifyingBuffer(t *testing.T) {
-	h := newDbHarness(t)
-	defer h.close()
-
-	h.put("foo", "hello")
-
-	modifyBuffer := func() {
-		iter := h.db.NewIterator(&opt.ReadOptions{})
-		if !iter.First() {
-			t.Fatal("iter.First failed: ", iter.Error())
-		}
-		key, value := iter.Key(), iter.Value()
-		copy(key, []byte("bar"))
-		copy(value, []byte("olleh"))
-		iter.Release()
-	}
-
-	modifyBuffer()
-	h.getKeyVal("(foo->hello)")
-	h.compactMem()
-	if h.totalTables() == 0 {
-		t.Fatal("expecting more than zero table")
-	}
-	modifyBuffer()
-	h.getKeyVal("(foo->hello)")
-}
-
 func TestDb_CreateReopenDbOnFile(t *testing.T) {
 	dbpath := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestCreateReopenDbOnFile-%d", os.Getuid()))
 	if err := os.RemoveAll(dbpath); err != nil {
