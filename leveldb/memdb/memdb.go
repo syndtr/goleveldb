@@ -349,6 +349,24 @@ func (p *DB) Len() int {
 	return p.n
 }
 
+// Reset resets the DB to initial empty state. Allows reuse the buffer.
+func (p *DB) Reset() {
+	p.rnd = rand.New(rand.NewSource(0xdeadbeef))
+	p.maxHeight = 1
+	p.n = 0
+	p.kvSize = 0
+	p.kvData = p.kvData[:0]
+	p.nodeData = p.nodeData[:4+tMaxHeight]
+	p.nodeData[nKV] = 0
+	p.nodeData[nKey] = 0
+	p.nodeData[nVal] = 0
+	p.nodeData[nHeight] = tMaxHeight
+	for n := 0; n < tMaxHeight; n++ {
+		p.nodeData[4+n] = 0
+		p.prevNode[n] = 0
+	}
+}
+
 // New creates a new initalized in-memory key/value DB. The capacity
 // is the initial key/value buffer capacity. The capacity is advisory,
 // not enforced.
