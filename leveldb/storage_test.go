@@ -60,6 +60,16 @@ func (tr tsReader) Read(b []byte) (n int, err error) {
 	return
 }
 
+func (tr tsReader) ReadAt(b []byte, off int64) (n int, err error) {
+	ts := tr.tf.ts
+	ts.countRead(tr.tf.Type())
+	n, err = tr.Reader.ReadAt(b, off)
+	if err != nil && err != io.EOF {
+		ts.t.Errorf("E: readAt error, num=%d type=%v off=%d n=%d: %v", tr.tf.Num(), tr.tf.Type(), off, n, err)
+	}
+	return
+}
+
 func (tr tsReader) Close() (err error) {
 	err = tr.Reader.Close()
 	tr.tf.close("reader", err)

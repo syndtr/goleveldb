@@ -48,10 +48,11 @@ type Syncer interface {
 	Sync() error
 }
 
-// Reader is the interface that groups the basic Read, Seek and Close
+// Reader is the interface that groups the basic Read, Seek, ReadAt and Close
 // methods.
 type Reader interface {
 	io.ReadSeeker
+	io.ReaderAt
 	io.Closer
 }
 
