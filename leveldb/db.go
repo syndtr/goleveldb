@@ -335,7 +335,7 @@ func (d *DB) recoverJournal() error {
 		} else {
 			jr.Reset(reader, dropper{s, file}, strict)
 		}
-		if mem != nil {
+		if of != nil {
 			if mem.Len() > 0 {
 				if err := cm.flush(mem, 0); err != nil {
 					return err
@@ -348,7 +348,8 @@ func (d *DB) recoverJournal() error {
 			of.Remove()
 			of = nil
 		}
-		mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
+		// Reset memdb.
+		mem.Reset()
 		for {
 			r, err := jr.Next()
 			if err != nil {
@@ -376,8 +377,8 @@ func (d *DB) recoverJournal() error {
 				if err := cm.flush(mem, 0); err != nil {
 					return err
 				}
-				// Create new memdb.
-				mem = memdb.New(icmp, toPercent(s.o.GetWriteBuffer(), kWriteBufferPercent))
+				// Reset memdb.
+				mem.Reset()
 			}
 		}
 		of = file
@@ -386,22 +387,22 @@ func (d *DB) recoverJournal() error {
 	// Recover all journals.
 	if len(ff2) > 0 {
 		s.logf("journal@recovery F·%d", len(ff2))
+		mem = memdb.New(icmp, toPercent(writeBuffer, kWriteBufferPercent))
 		for _, file := range ff2 {
 			if err := recoverJournal(file); err != nil {
 				return err
 			}
 		}
+		// Flush the last journal.
+		if mem.Len() > 0 {
+			if err := cm.flush(mem, 0); err != nil {
+				return err
+			}
+		}
 	}
-
 	// Create a new journal.
 	if _, err := d.newMem(); err != nil {
 		return err
-	}
-	// Flush the last journal.
-	if mem != nil && mem.Len() > 0 {
-		if err := cm.flush(mem, 0); err != nil {
-			return err
-		}
 	}
 	// Commit.
 	if err := cm.commit(d.journalFile.Num(), d.seq); err != nil {
