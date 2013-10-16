@@ -211,9 +211,12 @@ func (w *Writer) flushPendingBH(key []byte) {
 	} else {
 		w.comparerScratch = separator
 	}
-	n := encodeBlockHandle(w.scratch[:], w.pendingBH)
+	n := encodeBlockHandle(w.scratch[:20], w.pendingBH)
 	// Append the block handle to the index block.
 	w.indexBlock.append(separator, w.scratch[:n])
+	// Reset prev key of the data block.
+	w.dataBlock.prevKey = w.dataBlock.prevKey[:0]
+	// Clear pending block handle.
 	w.pendingBH = blockHandle{}
 }
 
@@ -223,8 +226,9 @@ func (w *Writer) finishBlock() error {
 	if err != nil {
 		return err
 	}
-	w.dataBlock.reset()
 	w.pendingBH = bh
+	// Reset the data block.
+	w.dataBlock.reset()
 	// Flush the filter block.
 	w.filterBlock.flush(w.offset)
 	return nil
@@ -309,10 +313,9 @@ func (w *Writer) Close() error {
 	}
 
 	// Write the metaindex block.
-	w.dataBlock.prevKey = w.dataBlock.prevKey[:0]
 	if filterBH.length > 0 {
 		key := []byte("filter." + w.filter.Name())
-		n := encodeBlockHandle(w.scratch[:], filterBH)
+		n := encodeBlockHandle(w.scratch[:20], filterBH)
 		w.dataBlock.append(key, w.scratch[:n])
 	}
 	w.dataBlock.finish()
