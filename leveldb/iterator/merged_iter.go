@@ -39,6 +39,13 @@ type mergedIterator struct {
 	releaser util.Releaser
 }
 
+func assertKey(key []byte) []byte {
+	if key == nil {
+		panic("leveldb/iterator: nil valid key")
+	}
+	return key
+}
+
 func (i *mergedIterator) Valid() bool {
 	return i.err == nil && i.dir > dirEOI
 }
@@ -54,11 +61,7 @@ func (i *mergedIterator) First() bool {
 	for x, iter := range i.iters {
 		switch {
 		case iter.First():
-			key := iter.Key()
-			if key == nil {
-				key = []byte{}
-			}
-			i.keys[x] = key
+			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
 			if err := i.Error(); err != nil {
 				i.err = err
@@ -84,11 +87,7 @@ func (i *mergedIterator) Last() bool {
 	for x, iter := range i.iters {
 		switch {
 		case iter.Last():
-			key := iter.Key()
-			if key == nil {
-				key = []byte{}
-			}
-			i.keys[x] = key
+			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
 			if err := i.Error(); err != nil {
 				i.err = err
@@ -114,11 +113,7 @@ func (i *mergedIterator) Seek(key []byte) bool {
 	for x, iter := range i.iters {
 		switch {
 		case iter.Seek(key):
-			k := iter.Key()
-			if k == nil {
-				k = []byte{}
-			}
-			i.keys[x] = k
+			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
 			if err := i.Error(); err != nil {
 				i.err = err
@@ -175,11 +170,7 @@ func (i *mergedIterator) Next() bool {
 	iter := i.iters[x]
 	switch {
 	case iter.Next():
-		key := iter.Key()
-		if key == nil {
-			key = []byte{}
-		}
-		i.keys[x] = key
+		i.keys[x] = assertKey(iter.Key())
 	case i.strict:
 		if err := iter.Error(); err != nil {
 			i.err = err
@@ -231,11 +222,7 @@ func (i *mergedIterator) Prev() bool {
 			seek := iter.Seek(key)
 			switch {
 			case seek && iter.Prev(), !seek && iter.Last():
-				key := iter.Key()
-				if key == nil {
-					key = []byte{}
-				}
-				i.keys[x] = key
+				i.keys[x] = assertKey(iter.Key())
 			case i.strict:
 				if err := i.Error(); err != nil {
 					i.err = err
@@ -252,11 +239,7 @@ func (i *mergedIterator) Prev() bool {
 	iter := i.iters[x]
 	switch {
 	case iter.Prev():
-		key := iter.Key()
-		if key == nil {
-			key = []byte{}
-		}
-		i.keys[x] = key
+		i.keys[x] = assertKey(iter.Key())
 	case i.strict:
 		if err := i.Error(); err != nil {
 			i.err = err
