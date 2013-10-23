@@ -59,6 +59,39 @@ const (
 	nCompression
 )
 
+// Strict is the DB strict level.
+type Strict uint
+
+const (
+	// If present then a corrupted or invalid chunk or block in manifest
+	// journal will cause an error istead of being dropped.
+	StrictManifest Strict = 1 << iota
+
+	// If present then a corrupted or invalid chunk or block in journal
+	// will cause an error istead of being dropped.
+	StrictJournal
+
+	// If present then journal chunk checksum will be verified.
+	StrictJournalChecksum
+
+	// If present then an invalid key/value pair will cause an error
+	// instead of being skipped.
+	StrictIterator
+
+	// If present then 'sorted table' block checksum will be verified.
+	StrictBlockChecksum
+
+	// StrictAll enables all strict flags.
+	StrictAll = StrictManifest | StrictJournal | StrictJournalChecksum | StrictIterator | StrictBlockChecksum
+
+	// DefaultStrict is the default strict flags. Specify any strict flags
+	// will override default strict flags as whole (i.e. not OR'ed).
+	DefaultStrict = StrictJournalChecksum | StrictBlockChecksum
+
+	// NoStrict disables all strict flags. Override default strict flags.
+	NoStrict = ^StrictAll
+)
+
 // Options holds the optional parameters for the DB at large.
 type Options struct {
 	// AltFilters defines one or more 'alternative filters'.
@@ -131,12 +164,8 @@ type Options struct {
 	// The default value is 1000.
 	MaxOpenFiles int
 
-	// If set, the implementation will do aggressive checking of the
-	// data it is processing and will stop early if it detects any
-	// errors.  This may have unforeseen ramifications: for example, a
-	// corruption of one DB entry may cause a large number of entries to
-	// become unreadable or for the entire DB to become unopenable.
-	Strict bool
+	// Strict defines the DB strict level.
+	Strict Strict
 
 	// WriteBuffer defines maximum size of a 'memdb' before flushed to
 	// 'sorted table'. 'memdb' is an in-memory DB backed by an on-disk
@@ -218,11 +247,11 @@ func (o *Options) GetMaxOpenFiles() int {
 	return o.MaxOpenFiles
 }
 
-func (o *Options) GetStrict() bool {
-	if o == nil {
-		return false
+func (o *Options) GetStrict(strict Strict) bool {
+	if o == nil || o.Strict == 0 {
+		return DefaultStrict&strict != 0
 	}
-	return o.Strict
+	return o.Strict&strict != 0
 }
 
 func (o *Options) GetWriteBuffer() int {
@@ -242,9 +271,9 @@ type ReadOptions struct {
 	// The default value is false.
 	DontFillCache bool
 
-	// If true, all data read from underlying storage will be
-	// verified against corresponding checksums.
-	VerifyChecksums bool
+	// Strict overrides global DB strict level. Only StrictIterator and
+	// StrictBlockChecksum that does have effects here.
+	Strict Strict
 }
 
 func (ro *ReadOptions) GetDontFillCache() bool {
@@ -254,11 +283,11 @@ func (ro *ReadOptions) GetDontFillCache() bool {
 	return ro.DontFillCache
 }
 
-func (ro *ReadOptions) GetVerifyChecksums() bool {
+func (ro *ReadOptions) GetStrict(strict Strict) bool {
 	if ro == nil {
 		return false
 	}
-	return ro.VerifyChecksums
+	return ro.Strict&strict != 0
 }
 
 // WriteOptions holds the optional parameters for 'write operation'. The

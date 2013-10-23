@@ -27,7 +27,7 @@
 // Example code:
 //	func read(r io.Reader) ([]string, error) {
 //		var ss []string
-//		journals := journal.NewReader(r)
+//		journals := journal.NewReader(r, nil, true, true)
 //		for {
 //			j, err := journals.Next()
 //			if err == io.EOF {
@@ -127,6 +127,8 @@ type Reader struct {
 	dropper Dropper
 	// strict flag.
 	strict bool
+	// checksum flag.
+	checksum bool
 	// seq is the sequence number of the current journal.
 	seq int
 	// buf[i:j] is the unread portion of the current chunk's payload.
@@ -146,12 +148,13 @@ type Reader struct {
 // NewReader returns a new reader. The dropper may be nil, and if
 // strict is true then corrupted or invalid chunk will halt the journal
 // reader entirely.
-func NewReader(r io.Reader, dropper Dropper, strict bool) *Reader {
+func NewReader(r io.Reader, dropper Dropper, strict, checksum bool) *Reader {
 	return &Reader{
-		r:       r,
-		dropper: dropper,
-		strict:  strict,
-		last:    true,
+		r:        r,
+		dropper:  dropper,
+		strict:   strict,
+		checksum: checksum,
+		last:     true,
 	}
 }
 
@@ -179,7 +182,7 @@ func (r *Reader) nextChunk(wantFirst, skip bool) error {
 					err = DroppedError{m, "chunk length overflows block"}
 					r.i = r.n
 					r.j = r.n
-				} else if checksum != util.NewCRC(r.buf[r.i-1:r.j]).Value() {
+				} else if r.checksum && checksum != util.NewCRC(r.buf[r.i-1:r.j]).Value() {
 					// Drop entire block.
 					err = DroppedError{m, "checksum mismatch"}
 					r.i = r.n
@@ -258,12 +261,13 @@ func (r *Reader) Next() (io.Reader, error) {
 }
 
 // Reset resets the journal reader, allows reuse of the journal reader.
-func (r *Reader) Reset(reader io.Reader, dropper Dropper, strict bool) error {
+func (r *Reader) Reset(reader io.Reader, dropper Dropper, strict, checksum bool) error {
 	r.seq++
 	err := r.err
 	r.r = reader
 	r.dropper = dropper
 	r.strict = strict
+	r.checksum = checksum
 	r.i = 0
 	r.j = 0
 	r.n = 0

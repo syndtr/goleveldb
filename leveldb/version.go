@@ -184,7 +184,7 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 		its = append(its, it)
 	}
 
-	strict := s.o.GetStrict()
+	strict := s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator)
 	for _, tt := range v.tables[1:] {
 		if len(tt) == 0 {
 			continue

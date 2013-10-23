@@ -42,7 +42,7 @@ func big(partial string, n int) string {
 
 func TestEmpty(t *testing.T) {
 	buf := new(bytes.Buffer)
-	r := NewReader(buf, dropper{t}, true)
+	r := NewReader(buf, dropper{t}, true, true)
 	if _, err := r.Next(); err != io.EOF {
 		t.Fatalf("got %v, want %v", err, io.EOF)
 	}
@@ -71,7 +71,7 @@ func testGenerator(t *testing.T, reset func(), gen func() (string, bool)) {
 	}
 
 	reset()
-	r := NewReader(buf, dropper{t}, true)
+	r := NewReader(buf, dropper{t}, true, true)
 	for {
 		s, ok := gen()
 		if !ok {
@@ -217,7 +217,7 @@ func TestFlush(t *testing.T) {
 		t.Fatalf("buffer length #5: got %d want %d", got, want)
 	}
 	// Check that reading those records give the right lengths.
-	r := NewReader(buf, dropper{t}, true)
+	r := NewReader(buf, dropper{t}, true, true)
 	wants := []int64{1, 2, 10000, 40000}
 	for i, want := range wants {
 		rr, _ := r.Next()
@@ -248,7 +248,7 @@ func TestNonExhaustiveRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := NewReader(buf, dropper{t}, true)
+	r := NewReader(buf, dropper{t}, true, true)
 	for i := 0; i < n; i++ {
 		rr, _ := r.Next()
 		_, err := io.ReadFull(rr, p)
@@ -280,7 +280,7 @@ func TestStaleReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r := NewReader(buf, dropper{t}, true)
+	r := NewReader(buf, dropper{t}, true, true)
 	r0, err := r.Next()
 	if err != nil {
 		t.Fatal(err)

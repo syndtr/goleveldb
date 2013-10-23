@@ -187,10 +187,6 @@ func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 //
 // The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
-	if o.GetStrict() {
-		err = errors.New("leveldb: cannot recovers the DB with strict flag")
-		return
-	}
 	s, err := newSession(p, o)
 	if err != nil {
 		return
@@ -324,7 +320,8 @@ func (d *DB) recoverJournal() error {
 	cm := newCMem(s)
 	buf := new(util.Buffer)
 	// Options.
-	strict := s.o.GetStrict()
+	strict := s.o.GetStrict(opt.StrictJournal)
+	checksum := s.o.GetStrict(opt.StrictJournalChecksum)
 	writeBuffer := s.o.GetWriteBuffer()
 	recoverJournal := func(file storage.File) error {
 		s.logf("journal@recovery recovering @%d", file.Num())
@@ -334,9 +331,9 @@ func (d *DB) recoverJournal() error {
 		}
 		defer reader.Close()
 		if jr == nil {
-			jr = journal.NewReader(reader, dropper{s, file}, strict)
+			jr = journal.NewReader(reader, dropper{s, file}, strict, checksum)
 		} else {
-			jr.Reset(reader, dropper{s, file}, strict)
+			jr.Reset(reader, dropper{s, file}, strict, checksum)
 		}
 		if of != nil {
 			if mem.Len() > 0 {

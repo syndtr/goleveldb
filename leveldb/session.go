@@ -97,8 +97,8 @@ func (s *session) recover() (err error) {
 		return
 	}
 	defer reader.Close()
-	strict := s.o.GetStrict()
-	jr := journal.NewReader(reader, dropper{s, file}, strict)
+	strict := s.o.GetStrict(opt.StrictManifest)
+	jr := journal.NewReader(reader, dropper{s, file}, strict, true)
 
 	staging := s.version_NB().newStaging()
 	rec := &sessionRecord{}
@@ -356,7 +356,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 	ro := &opt.ReadOptions{
 		DontFillCache: true,
 	}
-	strict := s.o.GetStrict()
+	strict := s.o.GetStrict(opt.StrictIterator)
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {
