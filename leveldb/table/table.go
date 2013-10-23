@@ -31,6 +31,17 @@ Table data structure:
     | data block 1 |      ...     | data block n | filter block | metaindex block | index block | footer |
     +--------------+--------------+--------------+--------------+-----------------+-------------+--------+
 
+    Each block followed by a 5-bytes trailer contains compression type and checksum.
+
+Table block trailer:
+
+    +---------------------------+-------------------+
+    | compression type (1-byte) | checksum (4-byte) |
+    +---------------------------+-------------------+
+
+    The checksum is a CRC-32 computed using Castagnoli's polynomial. Compression
+    type also included in the checksum.
+
 Table footer:
 
       +------------------- 40-bytes -------------------+
