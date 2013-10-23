@@ -354,12 +354,12 @@ func (w *Writer) Close() error {
 // NewWriter creates a new initialized table writer for the file.
 //
 // Table writer is not goroutine-safe.
-func NewWriter(f io.Writer, o opt.OptionsGetter) *Writer {
+func NewWriter(f io.Writer, o *opt.Options) *Writer {
 	w := &Writer{
 		writer:          f,
 		cmp:             o.GetComparer(),
 		filter:          o.GetFilter(),
-		compression:     o.GetCompressionType(),
+		compression:     o.GetCompression(),
 		blockSize:       o.GetBlockSize(),
 		comparerScratch: make([]byte, 0),
 	}

@@ -90,14 +90,12 @@ func openDBBench(b *testing.B, noCompress bool) *dbBench {
 		b.Fatal("cannot open stor: ", err)
 	}
 
-	p.o = &opt.Options{
-		Flag: opt.OFCreateIfMissing,
-	}
+	p.o = &opt.Options{}
 	if noCompress {
-		p.o.SetCompressionType(opt.NoCompression)
+		p.o.Compression = opt.NoCompression
 	}
-	p.ro = &opt.ReadOptions{}
-	p.wo = &opt.WriteOptions{}
+	p.ro = nil
+	p.wo = nil
 
 	p.db, err = Open(p.stor, p.o)
 	if err != nil {
@@ -298,7 +296,7 @@ func BenchmarkDBWriteRandom(b *testing.B) {
 
 func BenchmarkDBWriteRandomSync(b *testing.B) {
 	p := openDBBench(b, false)
-	p.wo.Flag = opt.WFSync
+	p.wo.Sync = true
 	p.populate(b.N)
 	p.writes(1)
 	p.close()

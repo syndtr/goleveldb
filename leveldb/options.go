@@ -7,84 +7,35 @@
 package leveldb
 
 import (
-	"sync"
-
 	"github.com/syndtr/goleveldb/leveldb/cache"
-	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-type iOptions struct {
-	opt.Options
-	s  *session
-	mu sync.Mutex
-}
-
-func newIOptions(s *session, o opt.Options) *iOptions {
-	p := &iOptions{Options: o, s: s}
-	p.sanitize()
-	return p
-}
-
-func (o *iOptions) sanitize() {
-	if p := o.GetBlockCache(); p == nil {
-		o.Options.SetBlockCache(cache.NewLRUCache(opt.DefaultBlockCacheSize))
+func (s *session) setOptions(o *opt.Options) {
+	s.o = &opt.Options{}
+	if o != nil {
+		*s.o = *o
 	}
-
-	for _, p := range o.GetAltFilters() {
-		o.InsertAltFilter(p)
+	// Alternative filters.
+	if filters := o.GetAltFilters(); len(filters) > 0 {
+		s.o.AltFilters = make([]filter.Filter, len(filters))
+		for i, filter := range filters {
+			s.o.AltFilters[i] = &iFilter{filter}
+		}
 	}
-
-	if p := o.GetFilter(); p != nil {
-		o.SetFilter(p)
+	// Block cache.
+	switch o.GetBlockCache() {
+	case nil:
+		s.o.BlockCache = cache.NewLRUCache(opt.DefaultBlockCacheSize)
+	case opt.NoCache:
+		s.o.BlockCache = nil
 	}
-}
-
-func (o *iOptions) GetComparer() comparer.Comparer {
-	return o.s.cmp
-}
-
-func (o *iOptions) SetComparer(cmp comparer.Comparer) error {
-	return opt.ErrNotAllowed
-}
-
-func (o *iOptions) SetMaxOpenFiles(max int) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	err := o.Options.SetMaxOpenFiles(max)
-	if err != nil {
-		return err
+	// Comparer.
+	s.cmp = &iComparer{o.GetComparer()}
+	s.o.Comparer = s.cmp
+	// Filter.
+	if filter := o.GetFilter(); filter != nil {
+		s.o.Filter = &iFilter{filter}
 	}
-	o.s.tops.cache.SetCapacity(max)
-	return nil
-}
-
-func (o *iOptions) SetBlockCache(cache cache.Cache) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	oldcache := o.Options.GetBlockCache()
-	err := o.Options.SetBlockCache(cache)
-	if err != nil {
-		return err
-	}
-	if oldcache != nil {
-		oldcache.Purge(nil)
-	}
-	o.s.tops.cache.Purge(nil)
-	return nil
-}
-
-func (o *iOptions) SetFilter(f filter.Filter) error {
-	if f != nil {
-		f = iFilter{f}
-	}
-	return o.Options.SetFilter(f)
-}
-
-func (o *iOptions) InsertAltFilter(f filter.Filter) error {
-	if f == nil {
-		return opt.ErrInvalid
-	}
-	return o.Options.InsertAltFilter(iFilter{f})
 }

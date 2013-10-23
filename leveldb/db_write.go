@@ -105,7 +105,7 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 		return
 	}
 
-	b.init(wo.HasFlag(opt.WFSync))
+	b.init(wo.GetSync())
 
 	// The write happen synchronously.
 	select {

@@ -30,7 +30,7 @@ type session struct {
 
 	stor     storage.Storage
 	storLock util.Releaser
-	o        *iOptions
+	o        *opt.Options
 	cmp      *iComparer
 	tops     *tOps
 
@@ -44,18 +44,18 @@ type session struct {
 }
 
 func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
-	if stor == nil || o == nil {
+	if stor == nil {
 		return nil, os.ErrInvalid
 	}
 	storLock, err := stor.Lock()
 	if err != nil {
 		return
 	}
-	s = new(session)
-	s.stor = stor
-	s.storLock = storLock
-	s.cmp = &iComparer{o.GetComparer()}
-	s.o = newIOptions(s, *o)
+	s = &session{
+		stor:     stor,
+		storLock: storLock,
+	}
+	s.setOptions(o)
 	s.tops = newTableOps(s, s.o.GetMaxOpenFiles())
 	s.setVersion(&version{s: s})
 	return
@@ -64,9 +64,8 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 // Close session.
 func (s *session) close() {
 	s.tops.close()
-	cache := s.o.GetBlockCache()
-	if cache != nil {
-		cache.Purge(nil)
+	if bc := s.o.GetBlockCache(); bc != nil {
+		bc.Purge(nil)
 	}
 	if s.manifest != nil {
 		s.manifest.Close()
@@ -98,7 +97,7 @@ func (s *session) recover() (err error) {
 		return
 	}
 	defer reader.Close()
-	strict := s.o.HasFlag(opt.OFStrict)
+	strict := s.o.GetStrict()
 	jr := journal.NewReader(reader, dropper{s, file}, strict)
 
 	staging := s.version_NB().newStaging()
@@ -355,9 +354,9 @@ func (c *compaction) newIterator() iterator.Iterator {
 	its := make([]iterator.Iterator, 0, icap)
 
 	ro := &opt.ReadOptions{
-		Flag: opt.RFDontFillCache,
+		DontFillCache: true,
 	}
-	strict := s.o.HasFlag(opt.OFStrict)
+	strict := s.o.GetStrict()
 
 	for i, tt := range c.tables {
 		if len(tt) == 0 {

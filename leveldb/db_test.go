@@ -19,7 +19,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -42,20 +41,14 @@ type dbHarness struct {
 	stor *testStorage
 	db   *DB
 	o    *opt.Options
-	oo   opt.OptionsSetter
 	ro   *opt.ReadOptions
 	wo   *opt.WriteOptions
 }
 
-func newDbHarnessWoptRaw(t *testing.T, o *opt.Options) *dbHarness {
+func newDbHarnessWopt(t *testing.T, o *opt.Options) *dbHarness {
 	h := new(dbHarness)
 	h.init(t, o)
 	return h
-}
-
-func newDbHarnessWopt(t *testing.T, o *opt.Options) *dbHarness {
-	o.Flag |= opt.OFCreateIfMissing
-	return newDbHarnessWoptRaw(t, o)
 }
 
 func newDbHarness(t *testing.T) *dbHarness {
@@ -66,8 +59,8 @@ func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 	h.t = t
 	h.stor = newTestStorage(t)
 	h.o = o
-	h.ro = &opt.ReadOptions{}
-	h.wo = &opt.WriteOptions{}
+	h.ro = nil
+	h.wo = nil
 
 	if err := h.openDB0(); err != nil {
 		// So that it will come after fatal message.
@@ -82,7 +75,6 @@ func (h *dbHarness) openDB0() (err error) {
 	if err != nil {
 		return
 	}
-	h.oo = h.db.GetOptionsSetter()
 	return
 }
 
@@ -481,23 +473,43 @@ func numKey(num int) string {
 
 var _bloom_filter = filter.NewBloomFilter(10)
 
-func trun(t *testing.T, f func(h *dbHarness)) {
+func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 	for i := 0; i < 4; i++ {
 		func() {
-			h := newDbHarness(t)
-			defer h.close()
 			switch i {
 			case 0:
 			case 1:
-				h.oo.SetFilter(_bloom_filter)
+				if o == nil {
+					o = &opt.Options{Filter: _bloom_filter}
+				} else {
+					old := o
+					o = &opt.Options{}
+					*o = *old
+					o.Filter = _bloom_filter
+				}
 			case 2:
-				h.oo.SetCompressionType(opt.NoCompression)
+				if o == nil {
+					o = &opt.Options{Compression: opt.NoCompression}
+				} else {
+					old := o
+					o = &opt.Options{}
+					*o = *old
+					o.Compression = opt.NoCompression
+				}
+			}
+			h := newDbHarnessWopt(t, o)
+			defer h.close()
+			switch i {
 			case 3:
 				h.reopenDB()
 			}
 			f(h)
 		}()
 	}
+}
+
+func trun(t *testing.T, f func(h *dbHarness)) {
+	truno(t, nil, f)
 }
 
 func testAligned(t *testing.T, name string, offset uintptr) {
@@ -836,8 +848,7 @@ func TestDb_RecoverWithEmptyJournal(t *testing.T) {
 }
 
 func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
-	trun(t, func(h *dbHarness) {
-		h.oo.SetWriteBuffer(1000000)
+	truno(t, &opt.Options{WriteBuffer: 1000000}, func(h *dbHarness) {
 
 		h.stor.DelaySync(storage.TypeTable)
 		h.put("foo", "v1")
@@ -905,8 +916,8 @@ func TestDb_RecoverWithLargeJournal(t *testing.T) {
 
 func TestDb_CompactionsGenerateMultipleFiles(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		WriteBuffer:     10000000,
-		CompressionType: opt.NoCompression,
+		WriteBuffer: 10000000,
+		Compression: opt.NoCompression,
 	})
 	defer h.close()
 
@@ -947,7 +958,7 @@ func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 
 	maxTables := kNumLevels + kL0_StopWritesTrigger
 
-	value := strings.Repeat("v", 2*h.o.WriteBuffer)
+	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
 		h.put("key", value)
 		n := h.totalTables()
@@ -965,7 +976,7 @@ func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
 
 	maxTables := kNumLevels + kL0_StopWritesTrigger
 
-	value := strings.Repeat("v", 2*h.o.WriteBuffer)
+	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
 		h.put("key", value)
 		n := h.totalTables()
@@ -976,7 +987,7 @@ func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
 }
 
 func TestDb_SparseMerge(t *testing.T) {
-	h := newDbHarnessWopt(t, &opt.Options{CompressionType: opt.NoCompression})
+	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
 	defer h.close()
 
 	h.putMulti(kNumLevels, "A", "Z")
@@ -1011,8 +1022,8 @@ func TestDb_SparseMerge(t *testing.T) {
 
 func TestDb_ApproximateSizes(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		CompressionType: opt.NoCompression,
-		WriteBuffer:     10000000,
+		Compression: opt.NoCompression,
+		WriteBuffer: 10000000,
 	})
 	defer h.close()
 
@@ -1060,7 +1071,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 }
 
 func TestDb_ApproximateSizes_MixOfSmallAndLarge(t *testing.T) {
-	h := newDbHarnessWopt(t, &opt.Options{CompressionType: opt.NoCompression})
+	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
 	defer h.close()
 
 	sizes := []uint64{
@@ -1534,7 +1545,7 @@ func TestDb_ManualCompaction(t *testing.T) {
 
 func TestDb_BloomFilter(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
-		BlockCache: cache.NewEmptyCache(),
+		BlockCache: opt.NoCache,
 		Filter:     filter.NewBloomFilter(10),
 	})
 	defer h.close()
@@ -1642,10 +1653,7 @@ func TestDb_Concurrent(t *testing.T) {
 			}(i)
 		}
 
-		for i := 0; i < secs; i++ {
-			h.oo.SetBlockCache(cache.NewLRUCache(rand.Int() % (opt.DefaultBlockCacheSize * 2)))
-			time.Sleep(time.Second)
-		}
+		time.Sleep(secs * time.Second)
 		atomic.StoreUint32(&stop, 1)
 		closeWg.Wait()
 	})
@@ -1657,11 +1665,9 @@ func TestDb_Concurrent2(t *testing.T) {
 	const n, n2 = 4, 4000
 
 	runtime.GOMAXPROCS(n*2 + 2)
-	trun(t, func(h *dbHarness) {
+	truno(t, &opt.Options{WriteBuffer: 30}, func(h *dbHarness) {
 		var closeWg sync.WaitGroup
 		var stop uint32
-
-		h.oo.SetWriteBuffer(30)
 
 		for i := 0; i < n; i++ {
 			closeWg.Add(1)
@@ -1684,11 +1690,10 @@ func TestDb_Concurrent2(t *testing.T) {
 		}
 
 		cmp := comparer.DefaultComparer
-		ro := &opt.ReadOptions{}
 		for i := 0; i < n2; i++ {
 			closeWg.Add(1)
 			go func(i int) {
-				it := h.db.NewIterator(ro)
+				it := h.db.NewIterator(nil)
 				var pk []byte
 				for it.Next() {
 					kk := it.Key()
@@ -1739,11 +1744,11 @@ func TestDb_CreateReopenDbOnFile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("(%d) cannot open storage: %s", i, err)
 		}
-		db, err := Open(stor, &opt.Options{Flag: opt.OFCreateIfMissing})
+		db, err := Open(stor, nil)
 		if err != nil {
 			t.Fatalf("(%d) cannot open db: %s", i, err)
 		}
-		if err := db.Put([]byte("foo"), []byte("bar"), &opt.WriteOptions{}); err != nil {
+		if err := db.Put([]byte("foo"), []byte("bar"), nil); err != nil {
 			t.Fatalf("(%d) cannot write to db: %s", i, err)
 		}
 		if err := db.Close(); err != nil {
@@ -1763,11 +1768,11 @@ func TestDb_CreateReopenDbOnFile2(t *testing.T) {
 	defer os.RemoveAll(dbpath)
 
 	for i := 0; i < 3; i++ {
-		db, err := OpenFile(dbpath, &opt.Options{Flag: opt.OFCreateIfMissing})
+		db, err := OpenFile(dbpath, nil)
 		if err != nil {
 			t.Fatalf("(%d) cannot open db: %s", i, err)
 		}
-		if err := db.Put([]byte("foo"), []byte("bar"), &opt.WriteOptions{}); err != nil {
+		if err := db.Put([]byte("foo"), []byte("bar"), nil); err != nil {
 			t.Fatalf("(%d) cannot write to db: %s", i, err)
 		}
 		if err := db.Close(); err != nil {

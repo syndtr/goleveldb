@@ -528,7 +528,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, verifyChecksums, fillCache bool
 // when not used.
 //
 // Also read Iterator documentation of the leveldb/iterator package.
-func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
+func (r *Reader) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if r.err != nil {
 		return iterator.NewEmptyIterator(r.err)
 	}
@@ -536,8 +536,8 @@ func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 	index := &indexIter{
 		blockIter:       *r.indexBlock.newIterator(nil),
 		tableReader:     r,
-		verifyChecksums: ro.HasFlag(opt.RFVerifyChecksums),
-		fillCache:       !ro.HasFlag(opt.RFDontFillCache),
+		verifyChecksums: ro.GetVerifyChecksums(),
+		fillCache:       !ro.GetDontFillCache(),
 	}
 	return iterator.NewIndexedIterator(index, r.strict)
 }
@@ -548,7 +548,7 @@ func (r *Reader) NewIterator(ro opt.ReadOptionsGetter) iterator.Iterator {
 //
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Find returns.
-func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte, err error) {
+func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err error) {
 	if r.err != nil {
 		err = r.err
 		return
@@ -572,7 +572,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 		err = ErrNotFound
 		return
 	}
-	data := r.getDataIter(dataBH, ro.HasFlag(opt.RFVerifyChecksums), !ro.HasFlag(opt.RFDontFillCache))
+	data := r.getDataIter(dataBH, ro.GetVerifyChecksums(), !ro.GetDontFillCache())
 	defer data.Release()
 	if !data.Seek(key) {
 		err = data.Error()
@@ -591,7 +591,7 @@ func (r *Reader) Find(key []byte, ro opt.ReadOptionsGetter) (rkey, value []byte,
 //
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Get returns.
-func (r *Reader) Get(key []byte, ro opt.ReadOptionsGetter) (value []byte, err error) {
+func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	if r.err != nil {
 		err = r.err
 		return
@@ -634,12 +634,12 @@ func (r *Reader) GetApproximateOffset(key []byte) (offset int64, err error) {
 
 // NewReader creates a new initialized table reader for the file.
 // The cache is optional and can be nil.
-func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGetter) *Reader {
+func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o *opt.Options) *Reader {
 	r := &Reader{
 		reader: f,
 		cache:  cache,
 		cmp:    o.GetComparer(),
-		strict: o.HasFlag(opt.OFStrict),
+		strict: o.GetStrict(),
 	}
 	if f == nil {
 		r.err = errors.New("leveldb/table: Reader: nil file")
@@ -688,7 +688,19 @@ func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, o opt.OptionsGe
 		if !strings.HasPrefix(key, "filter.") {
 			continue
 		}
-		if filter := o.GetAltFilter(key[7:]); filter != nil {
+		fn := key[7:]
+		var filter filter.Filter
+		if f0 := o.GetFilter(); f0 != nil && f0.Name() == fn {
+			filter = f0
+		} else {
+			for _, f0 := range o.GetAltFilters() {
+				if f0.Name() == fn {
+					filter = f0
+					break
+				}
+			}
+		}
+		if filter != nil {
 			filterBH, n := decodeBlockHandle(metaIter.Value())
 			if n == 0 {
 				continue

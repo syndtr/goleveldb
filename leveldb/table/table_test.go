@@ -43,8 +43,8 @@ func offsetBetween(t *testing.T, tr *Reader, key []byte, low, hi int64) {
 func TestGetApproximateOffsetPlain(t *testing.T) {
 	w := new(writer)
 	o := &opt.Options{
-		BlockSize:       1024,
-		CompressionType: opt.NoCompression,
+		BlockSize:   1024,
+		Compression: opt.NoCompression,
 	}
 	tw := NewWriter(w, o)
 	tw.Append([]byte("k01"), []byte("hello"))

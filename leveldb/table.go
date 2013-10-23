@@ -358,8 +358,8 @@ func (t *tOps) lookup(f *tFile) (c cache.Object, err error) {
 		o := t.s.o
 
 		var cacheNS cache.Namespace
-		if blockCache := o.GetBlockCache(); blockCache != nil {
-			cacheNS = blockCache.GetNamespace(num)
+		if bc := o.GetBlockCache(); bc != nil {
+			cacheNS = bc.GetNamespace(num)
 		}
 
 		ok = true
@@ -408,14 +408,10 @@ func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 
 func (t *tOps) remove(f *tFile) {
 	num := f.file.Num()
-	var bCacheNS cache.Namespace
-	if blockCache := t.s.o.GetBlockCache(); blockCache != nil {
-		bCacheNS = blockCache.GetNamespace(num)
-	}
 	t.cacheNS.Delete(num, func(exist bool) {
 		f.file.Remove()
-		if bCacheNS != nil {
-			bCacheNS.Zap(false)
+		if bc := t.s.o.GetBlockCache(); bc != nil {
+			bc.GetNamespace(num).Zap(false)
 		}
 	})
 }

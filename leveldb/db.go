@@ -124,15 +124,15 @@ func openDB(s *session) (*DB, error) {
 }
 
 // Open opens or creates a DB for the given storage.
-// If opt.OFCreateIfMissing is set then the DB will be created if not exist,
-// otherwise it will returns an error. If opt.OFErrorIfExist is set and the DB
-// exist Open will returns os.ErrExist error.
+// The DB will be created if not exist, unless ErrorIfMissing is true.
+// Also, if ErrorIfExist is true and the DB exist Open will returns
+// os.ErrExist error.
 //
 // The DB must be closed after use, by calling Close method.
-func Open(p storage.Storage, o *opt.Options) (*DB, error) {
+func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(p, o)
 	if err != nil {
-		return nil, err
+		return
 	}
 	defer func() {
 		if err != nil {
@@ -142,48 +142,52 @@ func Open(p storage.Storage, o *opt.Options) (*DB, error) {
 	}()
 
 	err = s.recover()
-	if os.IsNotExist(err) && s.o.HasFlag(opt.OFCreateIfMissing) {
-		err = s.create()
-	} else if err == nil && s.o.HasFlag(opt.OFErrorIfExist) {
-		err = os.ErrExist
-	}
 	if err != nil {
-		return nil, err
+		if !os.IsNotExist(err) || s.o.GetErrorIfMissing() {
+			return
+		}
+		err = s.create()
+		if err != nil {
+			return
+		}
+	} else if s.o.GetErrorIfExist() {
+		err = os.ErrExist
+		return
 	}
 
 	return openDB(s)
 }
 
 // OpenFile opens or creates a DB for the given path. OpenFile uses standard
-// file-system backed storage implementation as desribed in the
-// leveldb/storage package.
-// If opt.OFCreateIfMissing is set then the DB will be created if not exist,
-// otherwise it will returns error. If opt.OFErrorIfExist is set and the DB
-// exist OpenFile will returns os.ErrExist error.
+// file-system backed storage implementation as desribed in the leveldb/storage
+// package.
+// The DB will be created if not exist, unless ErrorIfMissing is true.
+// Also, if ErrorIfExist is true and the DB exist OpenFile will returns
+// os.ErrExist error.
 //
 // The DB must be closed after use, by calling Close method.
-func OpenFile(path string, o *opt.Options) (*DB, error) {
+func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path)
 	if err != nil {
-		return nil, err
+		return
 	}
-	db, err := Open(stor, o)
+	db, err = Open(stor, o)
 	if err != nil {
 		stor.Close()
 	} else {
 		db.closer = stor
 	}
-	return db, err
+	return
 }
 
 // Recover recovers and opens a DB with missing or corrupted manifest files
 // for the given storage. It will ignore any manifest files, valid or not.
 // The DB must already exist or it will returns an error.
-// Also, Recover will ignore opt.OFCreateIfMissing and opt.OFErrorIfExist flags.
+// Also, Recover will ignore ErrorIfMissing and ErrorIfExist options.
 //
 // The DB must be closed after use, by calling Close method.
 func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
-	if o.HasFlag(opt.OFStrict) {
+	if o.GetStrict() {
 		err = errors.New("leveldb: cannot recovers the DB with strict flag")
 		return
 	}
@@ -211,7 +215,6 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	rec := new(sessionRecord)
 
 	// recover tables
-	ro := &opt.ReadOptions{}
 	var nt *tFile
 	for _, f := range ff {
 		if f.Type() != storage.TypeTable {
@@ -231,7 +234,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		}
 
 		t := newTFile(f, uint64(size), nil, nil)
-		iter := s.tops.newIterator(t, ro)
+		iter := s.tops.newIterator(t, nil)
 		// min ikey
 		if iter.First() {
 			t.min = iter.Key()
@@ -266,7 +269,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	// extract largest seq number from newest table
 	if nt != nil {
 		var lseq uint64
-		iter := s.tops.newIterator(nt, ro)
+		iter := s.tops.newIterator(nt, nil)
 		for iter.Next() {
 			seq, _, ok := iKey(iter.Key()).parseNum()
 			if !ok {
@@ -321,7 +324,7 @@ func (d *DB) recoverJournal() error {
 	cm := newCMem(s)
 	buf := new(util.Buffer)
 	// Options.
-	strict := s.o.HasFlag(opt.OFStrict)
+	strict := s.o.GetStrict()
 	writeBuffer := s.o.GetWriteBuffer()
 	recoverJournal := func(file storage.File) error {
 		s.logf("journal@recovery recovering @%d", file.Num())
@@ -413,13 +416,6 @@ func (d *DB) recoverJournal() error {
 		of.Remove()
 	}
 	return nil
-}
-
-// GetOptionsSetter returns and opt.OptionsSetter for the DB.
-// The opt.OptionsSetter allows modify options of an opened DB safely,
-// as documented in the leveldb/opt package.
-func (d *DB) GetOptionsSetter() opt.OptionsSetter {
-	return d.s.o
 }
 
 func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {

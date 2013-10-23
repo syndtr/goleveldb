@@ -8,26 +8,24 @@
 //
 // Create or open a database:
 //
-//	db, err := leveldb.OpenFile("path/to/db", &opt.Options{Flag: opt.OFCreateIfMissing})
+//	db, err := leveldb.OpenFile("path/to/db", nil)
 //	...
 //	defer db.Close()
 //	...
 //
 // Read or modify the database content:
 //
-//	ro := &opt.ReadOptions{}
-//	wo := &opt.WriteOptions{}
 //	// Remember that the contents of the returned slice should not be modified.
-//	data, err := db.Get([]byte("key"), ro)
+//	data, err := db.Get([]byte("key"), nil)
 //	...
-//	err = db.Put([]byte("key"), []byte("value"), wo)
+//	err = db.Put([]byte("key"), []byte("value"), nil)
 //	...
-//	err = db.Delete([]byte("key"), wo)
+//	err = db.Delete([]byte("key"), nil)
 //	...
 //
 // Iterate over database content:
 //
-//	iter := db.NewIterator(ro)
+//	iter := db.NewIterator(nil)
 //	for iter.Next() {
 //		// Remember that the contents of the returned slice should not be modified, and
 //		// only valid until the next call to Next.
@@ -45,13 +43,12 @@
 //	batch.Put([]byte("foo"), []byte("value"))
 //	batch.Put([]byte("bar"), []byte("another value"))
 //	batch.Delete([]byte("baz"))
-//	err = db.Write(batch, wo)
+//	err = db.Write(batch, nil)
 //	...
 //
 // Use bloom filter:
 //
 //	o := &opt.Options{
-//		Flag:   opt.OFCreateIfMissing,
 //		Filter: filter.NewBloomFilter(10),
 //	}
 //	db, err := leveldb.OpenFile("path/to/db", o)

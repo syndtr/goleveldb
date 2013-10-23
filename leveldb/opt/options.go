@@ -8,47 +8,36 @@
 package opt
 
 import (
-	"errors"
-	"sync"
-
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 )
 
-var (
-	ErrInvalid    = errors.New("invalid value")
-	ErrNotSet     = errors.New("not set")
-	ErrNotAllowed = errors.New("not allowed")
+const (
+	KiB = 1024
+	MiB = KiB * 1024
+	GiB = MiB * 1024
 )
 
 const (
-	DefaultWriteBuffer          = 4 << 20
-	DefaultMaxOpenFiles         = 1000
-	DefaultBlockCacheSize       = 8 << 20
-	DefaultBlockSize            = 4096
+	DefaultBlockCacheSize       = 8 * MiB
 	DefaultBlockRestartInterval = 16
+	DefaultBlockSize            = 4 * KiB
 	DefaultCompressionType      = SnappyCompression
+	DefaultMaxOpenFiles         = 1000
+	DefaultWriteBuffer          = 4 * MiB
 )
 
-type OptionsFlag uint
+type noCache struct{}
 
-const (
-	// If set, the database will be created if it is missing.
-	OFCreateIfMissing OptionsFlag = 1 << iota
+func (noCache) SetCapacity(capacity int)               {}
+func (noCache) GetNamespace(id uint64) cache.Namespace { return nil }
+func (noCache) Purge(fin cache.PurgeFin)               {}
+func (noCache) Zap(closed bool)                        {}
 
-	// If set, an error is raised if the database already exists.
-	OFErrorIfExist
+var NoCache cache.Cache = noCache{}
 
-	// If set, the implementation will do aggressive checking of the
-	// data it is processing and will stop early if it detects any
-	// errors.  This may have unforeseen ramifications: for example, a
-	// corruption of one DB entry may cause a large number of entries to
-	// become unreadable or for the entire DB to become unopenable.
-	OFStrict
-)
-
-// Database compression type
+// Compression is the per-block compression algorithm to use.
 type Compression uint
 
 func (c Compression) String() string {
@@ -60,7 +49,7 @@ func (c Compression) String() string {
 	case SnappyCompression:
 		return "snappy"
 	}
-	return "unknown"
+	return "invalid"
 }
 
 const (
@@ -70,512 +59,229 @@ const (
 	nCompression
 )
 
-// Options represent sets of LevelDB options.
+// Options holds the optional parameters for the DB at large.
 type Options struct {
-	// Comparer used to define the order of keys in the table.
-	// Default: a comparer that uses lexicographic byte-wise
-	// ordering.
+	// AltFilters defines one or more 'alternative filters'.
+	// 'alternative filters' will be used during reads if a filter block
+	// does not match with the 'effective filter'.
 	//
-	// REQUIRES: The client must ensure that the comparer supplied
-	// here has the same name and orders keys *exactly* the same as the
-	// comparer provided to previous open calls on the same DB.
-	// Additionally, the client must also make sure that the
-	// supplied comparer retains the same name. Otherwise, an error
-	// will be returned on reopening the database.
-	Comparer comparer.Comparer
-
-	// Specify the database flag.
-	Flag OptionsFlag
-
-	// Amount of data to build up in memory (backed by an unsorted journal
-	// on disk) before converting to a sorted on-disk file.
-	//
-	// Larger values increase performance, especially during bulk loads.
-	// Up to two write buffers may be held in memory at the same time,
-	// so you may wish to adjust this parameter to control memory usage.
-	// Also, a larger write buffer will result in a longer recovery time
-	// the next time the database is opened.
-	//
-	// Default: 4MB
-	WriteBuffer int
-
-	// Number of open files that can be used by the DB.  You may need to
-	// increase this if your database has a large working set (budget
-	// one open file per 2MB of working set).
-	//
-	// Default: 1000
-	MaxOpenFiles int
-
-	// Control over blocks (user data is stored in a set of blocks, and
-	// a block is the unit of reading from disk).
-
-	// If non-NULL, use the specified cache for blocks.
-	// If NULL, leveldb will automatically create and use an 8MB internal cache.
-	// Default: NULL
-	BlockCache cache.Cache
-
-	// Approximate size of user data packed per block.  Note that the
-	// block size specified here corresponds to uncompressed data.  The
-	// actual size of the unit read from disk may be smaller if
-	// compression is enabled.  This parameter can be changed dynamically.
-	//
-	// Default: 4K
-	BlockSize int
-
-	// Number of keys between restart points for delta encoding of keys.
-	// This parameter can be changed dynamically.  Most clients should
-	// leave this parameter alone.
-	//
-	// Default: 16
-	BlockRestartInterval int
-
-	// Compress blocks using the specified compression algorithm.  This
-	// parameter can be changed dynamically.
-	//
-	// Default: kSnappyCompression, which gives lightweight but fast
-	// compression.
-	//
-	// Typical speeds of kSnappyCompression on an Intel(R) Core(TM)2 2.4GHz:
-	//    ~200-500MB/s compression
-	//    ~400-800MB/s decompression
-	// Note that these speeds are significantly faster than most
-	// persistent storage speeds, and therefore it is typically never
-	// worth switching to kNoCompression.  Even if the input data is
-	// incompressible, the kSnappyCompression implementation will
-	// efficiently detect that and will switch to uncompressed mode.
-	CompressionType Compression
-
-	// If non-NULL, use the specified filter policy to reduce disk reads.
-	// Many applications will benefit from passing the result of
-	// NewBloomFilter() here.
-	//
-	// As long as the same filter (name) was used as last time the
-	// database was opened, the previous filter is reused. That is,
-	// the filter does not need to be rebuilt. This is made possible
-	// since each filter is persisted to disk on a per sstable
-	// basis.
-	//
-	// As opposed to the comparer, a filter can be replaced after a
-	// database has been created. If this is done, the previous
-	// persisted filter will be ignored for every old sstable.
-	// Every new table will use the newly introduced filter. This
-	// means that all/some sstables will lack a filter during a
-	// transition period. Note that this might have an impact on
-	// performance. This problem can be mitigated by inserting old
-	// filter into AltFilters. Also, rewriting every single key/value
-	// will force introduction of the new filter.
-	//
-	// Default: NULL
-	Filter filter.Filter
-
-	// Define one or more alternative filters. This alternative filters
-	// will be used as fallback (if respective filter present) during
-	// read operation if a sstable contains filter block generated by
-	// different filter than currently active filter.
+	// The default value is nil
 	AltFilters []filter.Filter
 
-	mu      sync.RWMutex
-	filters map[string]filter.Filter
-}
+	// BlockCache provides per-block caching for LevelDB. Specify NoCache to
+	// disable block caching.
+	//
+	// By default LevelDB will create LRU-cache with capacity of 8MiB.
+	BlockCache cache.Cache
 
-// OptionsGetter wraps methods used to get sanitized options.
-type OptionsGetter interface {
-	GetComparer() comparer.Comparer
-	HasFlag(flag OptionsFlag) bool
-	GetWriteBuffer() int
-	GetMaxOpenFiles() int
-	GetBlockCache() cache.Cache
-	GetBlockSize() int
-	GetBlockRestartInterval() int
-	GetCompressionType() Compression
-	GetFilter() filter.Filter
-	GetAltFilter(name string) filter.Filter
-	GetAltFilters() []filter.Filter
-}
+	// BlockRestartInterval is the number of keys between restart points for
+	// delta encoding of keys.
+	//
+	// The default value is 16.
+	BlockRestartInterval int
 
-// OptionsSetter wraps methods used to set options.
-type OptionsSetter interface {
-	SetComparer(cmp comparer.Comparer) error
-	SetFlag(flag OptionsFlag) error
-	ClearFlag(flag OptionsFlag) error
-	SetWriteBuffer(size int) error
-	SetMaxOpenFiles(max int) error
-	SetBlockCache(cache cache.Cache) error
-	SetBlockCacheCapacity(capacity int) error
-	SetBlockSize(size int) error
-	SetBlockRestartInterval(interval int) error
-	SetCompressionType(compression Compression) error
-	SetFilter(p filter.Filter) error
-	InsertAltFilter(p filter.Filter) error
-	RemoveAltFilter(name string) error
-}
+	// BlockSize is the minimum uncompressed size in bytes of each 'sorted table'
+	// block.
+	//
+	// The default value is 4KiB.
+	BlockSize int
 
-// Getter
+	// Comparer defines a total ordering over the space of []byte keys: a 'less
+	// than' relationship. The same comparison algorithm must be used for reads
+	// and writes over the lifetime of the DB.
+	//
+	// The default value uses the same ordering as bytes.Compare.
+	Comparer comparer.Comparer
 
-func (o *Options) GetComparer() comparer.Comparer {
-	if o == nil {
-		return comparer.DefaultComparer
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.Comparer == nil {
-		return comparer.DefaultComparer
-	}
-	return o.Comparer
-}
+	// Compression defines the per-block compression to use.
+	//
+	// The default value (DefaultCompression) uses snappy compression.
+	Compression Compression
 
-func (o *Options) HasFlag(flag OptionsFlag) bool {
-	if o == nil {
-		return false
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return (o.Flag & flag) != 0
-}
+	// ErrorIfExist defines whether an error should returned if the DB already
+	// exist.
+	//
+	// The default value is false.
+	ErrorIfExist bool
 
-func (o *Options) GetWriteBuffer() int {
-	if o == nil {
-		return DefaultWriteBuffer
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.WriteBuffer <= 0 {
-		return DefaultWriteBuffer
-	}
-	return o.WriteBuffer
-}
+	// ErrorIfMissing defines whether an error should returned if the DB is
+	// missing.
+	//
+	// The default value is false.
+	ErrorIfMissing bool
 
-func (o *Options) GetMaxOpenFiles() int {
-	if o == nil {
-		return DefaultMaxOpenFiles
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.MaxOpenFiles <= 0 {
-		return DefaultMaxOpenFiles
-	}
-	return o.MaxOpenFiles
-}
+	// Filter defines an 'effective filter' to use. An 'effective filter'
+	// if defined will be used to generate per-table filter block.
+	// The filter name will be stored on disk.
+	// During reads LevelDB will try to find matching filter from
+	// 'effective filter' and 'alternative filters'.
+	//
+	// Filter can be changed after a DB has been created. It is recommended
+	// to put old filter to the 'alternative filters' to mitigate lack of
+	// filter during transition period.
+	//
+	// A filter is used to reduce disk reads when looking for a specific key.
+	//
+	// The default value is nil.
+	Filter filter.Filter
 
-func (o *Options) GetBlockCache() cache.Cache {
-	if o == nil {
-		return nil
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.BlockCache
-}
+	// MaxOpenFiles defines maximum number of open files to kept around
+	// (cached).
+	//
+	// The default value is 1000.
+	MaxOpenFiles int
 
-func (o *Options) GetBlockSize() int {
-	if o == nil {
-		return DefaultBlockSize
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.BlockSize <= 0 {
-		return DefaultBlockSize
-	}
-	return o.BlockSize
-}
+	// If set, the implementation will do aggressive checking of the
+	// data it is processing and will stop early if it detects any
+	// errors.  This may have unforeseen ramifications: for example, a
+	// corruption of one DB entry may cause a large number of entries to
+	// become unreadable or for the entire DB to become unopenable.
+	Strict bool
 
-func (o *Options) GetBlockRestartInterval() int {
-	if o == nil {
-		return DefaultBlockRestartInterval
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.BlockRestartInterval <= 0 {
-		return DefaultBlockRestartInterval
-	}
-	return o.BlockRestartInterval
-}
-
-func (o *Options) GetCompressionType() Compression {
-	if o == nil {
-		return DefaultCompressionType
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	if o.CompressionType <= DefaultCompression || o.CompressionType >= nCompression {
-		return DefaultCompressionType
-	}
-	return o.CompressionType
-}
-
-func (o *Options) GetFilter() filter.Filter {
-	if o == nil {
-		return nil
-	}
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	return o.Filter
-}
-
-func (o *Options) GetAltFilter(name string) filter.Filter {
-	if o == nil {
-		return nil
-	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.initFilters()
-	return o.filters[name]
+	// WriteBuffer defines maximum size of a 'memdb' before flushed to
+	// 'sorted table'. 'memdb' is an in-memory DB backed by an on-disk
+	// unsorted journal.
+	//
+	// LevelDB may held up to two 'memdb' at the same time.
+	//
+	// The default value is 4MiB.
+	WriteBuffer int
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
 	if o == nil {
 		return nil
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.initFilters()
-	filters := make([]filter.Filter, 0, len(o.filters))
-	for _, p := range o.filters {
-		filters = append(filters, p)
-	}
-	return filters
+	return o.AltFilters
 }
 
-// Setter
-
-func (o *Options) SetComparer(cmp comparer.Comparer) error {
+func (o *Options) GetBlockCache() cache.Cache {
 	if o == nil {
-		return ErrNotSet
+		return nil
 	}
-	if cmp == nil {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.Comparer = cmp
-	o.mu.Unlock()
-	return nil
+	return o.BlockCache
 }
 
-func (o *Options) SetFlag(flag OptionsFlag) error {
+func (o *Options) GetBlockRestartInterval() int {
+	if o == nil || o.BlockRestartInterval <= 0 {
+		return DefaultBlockRestartInterval
+	}
+	return o.BlockRestartInterval
+}
+
+func (o *Options) GetBlockSize() int {
+	if o == nil || o.BlockSize <= 0 {
+		return DefaultBlockSize
+	}
+	return o.BlockSize
+}
+
+func (o *Options) GetComparer() comparer.Comparer {
+	if o == nil || o.Comparer == nil {
+		return comparer.DefaultComparer
+	}
+	return o.Comparer
+}
+
+func (o *Options) GetCompression() Compression {
+	if o == nil || o.Compression <= DefaultCompression || o.Compression >= nCompression {
+		return DefaultCompressionType
+	}
+	return o.Compression
+}
+
+func (o *Options) GetErrorIfExist() bool {
 	if o == nil {
-		return ErrNotSet
+		return false
 	}
-	o.mu.Lock()
-	o.Flag |= flag
-	o.mu.Unlock()
-	return nil
+	return o.ErrorIfExist
 }
 
-func (o *Options) ClearFlag(flag OptionsFlag) error {
+func (o *Options) GetErrorIfMissing() bool {
 	if o == nil {
-		return ErrNotSet
+		return false
 	}
-	o.mu.Lock()
-	o.Flag &= ^flag
-	o.mu.Unlock()
-	return nil
+	return o.ErrorIfMissing
 }
 
-func (o *Options) SetWriteBuffer(size int) error {
+func (o *Options) GetFilter() filter.Filter {
 	if o == nil {
-		return ErrNotSet
+		return nil
 	}
-	if size <= 0 {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.WriteBuffer = size
-	o.mu.Unlock()
-	return nil
+	return o.Filter
 }
 
-func (o *Options) SetMaxOpenFiles(max int) error {
+func (o *Options) GetMaxOpenFiles() int {
+	if o == nil || o.MaxOpenFiles <= 0 {
+		return DefaultMaxOpenFiles
+	}
+	return o.MaxOpenFiles
+}
+
+func (o *Options) GetStrict() bool {
 	if o == nil {
-		return ErrNotSet
+		return false
 	}
-	if max <= 0 {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.MaxOpenFiles = max
-	o.mu.Unlock()
-	return nil
+	return o.Strict
 }
 
-func (o *Options) SetBlockCache(cache cache.Cache) error {
-	if o == nil {
-		return ErrNotSet
+func (o *Options) GetWriteBuffer() int {
+	if o == nil || o.WriteBuffer <= 0 {
+		return DefaultWriteBuffer
 	}
-	o.mu.Lock()
-	o.BlockCache = cache
-	o.mu.Unlock()
-	return nil
+	return o.WriteBuffer
 }
 
-func (o *Options) SetBlockCacheCapacity(capacity int) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	o.mu.Lock()
-	if o.BlockCache == nil {
-		return ErrNotSet
-	}
-	o.BlockCache.SetCapacity(capacity)
-	o.mu.Unlock()
-	return nil
-}
+// ReadOptions holds the optional parameters for 'read operation'. The
+// 'read operation' includes Get, Find and NewIterator.
+type ReadOptions struct {
+	// DontFillCache defines whether block reads for this 'read operation'
+	// should be cached. If false then the block will be cached. This does
+	// not affects already cached block.
+	//
+	// The default value is false.
+	DontFillCache bool
 
-func (o *Options) SetBlockSize(size int) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	if size <= 0 {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.BlockSize = size
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) SetBlockRestartInterval(interval int) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	if interval <= 0 {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.BlockRestartInterval = interval
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) SetCompressionType(compression Compression) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	if o.CompressionType >= nCompression {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.CompressionType = compression
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) SetFilter(p filter.Filter) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	o.mu.Lock()
-	o.Filter = p
-	if p != nil {
-		o.initFilters()
-		o.filters[p.Name()] = p
-	}
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) InsertAltFilter(p filter.Filter) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	if p == nil {
-		return ErrInvalid
-	}
-	o.mu.Lock()
-	o.initFilters()
-	o.filters[p.Name()] = p
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) RemoveAltFilter(name string) error {
-	if o == nil {
-		return ErrNotSet
-	}
-	o.mu.Lock()
-	o.initFilters()
-	delete(o.filters, name)
-	o.mu.Unlock()
-	return nil
-}
-
-func (o *Options) initFilters() {
-	if o.filters == nil {
-		o.filters = make(map[string]filter.Filter)
-		for _, p := range o.AltFilters {
-			if p != nil {
-				o.filters[p.Name()] = p
-			}
-		}
-		if o.Filter != nil {
-			o.filters[o.Filter.Name()] = o.Filter
-		}
-	}
-}
-
-type ReadOptionsFlag uint
-
-const (
 	// If true, all data read from underlying storage will be
 	// verified against corresponding checksums.
-	RFVerifyChecksums ReadOptionsFlag = 1 << iota
-
-	// Should the data read for this iteration be cached in memory?
-	// If set iteration chaching will be disabled.
-	// Callers may wish to set this flag for bulk scans.
-	RFDontFillCache
-)
-
-// ReadOptions represent sets of options used by LevelDB during read
-// operations.
-type ReadOptions struct {
-	// Specify the read flag.
-	Flag ReadOptionsFlag
+	VerifyChecksums bool
 }
 
-type ReadOptionsGetter interface {
-	HasFlag(flag ReadOptionsFlag) bool
-}
-
-func (o *ReadOptions) HasFlag(flag ReadOptionsFlag) bool {
-	if o == nil {
+func (ro *ReadOptions) GetDontFillCache() bool {
+	if ro == nil {
 		return false
 	}
-	return (o.Flag & flag) != 0
+	return ro.DontFillCache
 }
 
-type WriteOptionsFlag uint
+func (ro *ReadOptions) GetVerifyChecksums() bool {
+	if ro == nil {
+		return false
+	}
+	return ro.VerifyChecksums
+}
 
-const (
-	// If set, the write will be flushed from the operating system
-	// buffer cache (by calling WritableFile::Sync()) before the write
-	// is considered complete.  If this flag is true, writes will be
-	// slower.
-	//
-	// If this flag is false, and the machine crashes, some recent
-	// writes may be lost.  Note that if it is just the process that
-	// crashes (i.e., the machine does not reboot), no writes will be
-	// lost even if sync==false.
-	//
-	// In other words, a DB write with sync==false has similar
-	// crash semantics as the "write()" system call.  A DB write
-	// with sync==true has similar crash semantics to a "write()"
-	// system call followed by "fsync()".
-	WFSync WriteOptionsFlag = 1 << iota
-)
-
-// WriteOptions represent sets of options used by LevelDB during write
-// operations.
+// WriteOptions holds the optional parameters for 'write operation'. The
+// 'write operation' includes Write, Put and Delete.
 type WriteOptions struct {
-	// Specify the write flag.
-	Flag WriteOptionsFlag
+	// Sync is whether to sync underlying writes from the OS buffer cache
+	// through to actual disk, if applicable. Setting Sync can result in
+	// slower writes.
+	//
+	// If false, and the machine crashes, then some recent writes may be lost.
+	// Note that if it is just the process that crashes (and the machine does
+	// not) then no writes will be lost.
+	//
+	// In other words, Sync being false has the same semantics as a write
+	// system call. Sync being true means write followed by fsync.
+	//
+	// The default value is false.
+	Sync bool
 }
 
-type WriteOptionsGetter interface {
-	HasFlag(flag WriteOptionsFlag) bool
-}
-
-func (o *WriteOptions) HasFlag(flag WriteOptionsFlag) bool {
-	if o == nil {
+func (wo *WriteOptions) GetSync() bool {
+	if wo == nil {
 		return false
 	}
-	return (o.Flag & flag) != 0
+	return wo.Sync
 }

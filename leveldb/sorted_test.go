@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -34,16 +33,18 @@ type stConstructor interface {
 type stConstructor_Table struct {
 	t      *testing.T
 	buf    bytes.Buffer
+	o      *opt.Options
 	writer *table.Writer
 	reader *table.Reader
 }
 
 func (tc *stConstructor_Table) init(t *testing.T, ho *stHarnessOpt) error {
 	tc.t = t
-	tc.writer = table.NewWriter(&tc.buf, &opt.Options{
+	tc.o = &opt.Options{
 		BlockSize:            512,
 		BlockRestartInterval: 3,
-	})
+	}
+	tc.writer = table.NewWriter(&tc.buf, tc.o)
 	return nil
 }
 
@@ -61,21 +62,17 @@ func (tc *stConstructor_Table) finish() (size int, err error) {
 	if csize := int(tc.writer.BytesLen()); csize != size {
 		tc.t.Errorf("table: invalid calculated size, calculated=%d actual=%d", csize, size)
 	}
-	tc.reader = table.NewReader(bytes.NewReader(tc.buf.Bytes()), int64(size), nil, &opt.Options{
-		BlockRestartInterval: 3,
-		Filter:               filter.NewBloomFilter(10),
-	})
+	tc.reader = table.NewReader(bytes.NewReader(tc.buf.Bytes()), int64(size), nil, tc.o)
 	return
 }
 
 func (tc *stConstructor_Table) newIterator() iterator.Iterator {
-	return tc.reader.NewIterator(&opt.ReadOptions{})
+	return tc.reader.NewIterator(nil)
 }
 
 func (tc *stConstructor_Table) customTest(h *stHarness) {
-	ro := &opt.ReadOptions{}
 	for i := range h.keys {
-		key, value, err := tc.reader.Find([]byte(h.keys[i]), ro)
+		key, value, err := tc.reader.Find([]byte(h.keys[i]), nil)
 		if err != nil {
 			h.t.Errorf("table: CustomTest: Find: %v", err)
 			continue
@@ -171,10 +168,9 @@ func (dc *stConstructor_DB) init(t *testing.T, ho *stHarnessOpt) (err error) {
 	ho.Randomize = true
 	dc.t = t
 	dc.stor = newTestStorage(t)
-	dc.ro = &opt.ReadOptions{}
-	dc.wo = &opt.WriteOptions{}
+	dc.ro = nil
+	dc.wo = nil
 	dc.db, err = Open(dc.stor, &opt.Options{
-		Flag:        opt.OFCreateIfMissing,
 		WriteBuffer: 2800,
 	})
 	if err != nil {
