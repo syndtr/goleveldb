@@ -305,9 +305,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 					return
 				}
 				snapSched = true
-
-				// create new table but don't check for error now
-				tw, err = s.tops.create()
+				tw = nil
 			}
 
 			// Scheduled for snapshot, snapshot will used to retry compaction
@@ -319,11 +317,6 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 				snapIter = i
 				snapDropCnt = dropCnt
 				snapSched = false
-			}
-
-			// defered error checking from above new table creation
-			if err != nil {
-				return
 			}
 
 			if seq, t, ok := key.parseNum(); !ok {
