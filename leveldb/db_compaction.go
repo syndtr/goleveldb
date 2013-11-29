@@ -387,7 +387,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		}
 
 		// Finish last table
-		if tw != nil {
+		if tw != nil && !tw.empty() {
 			err = finish()
 			if err != nil {
 				return

@@ -442,6 +442,10 @@ func (w *tWriter) add(key, value []byte) error {
 	return w.tw.Append(key, value)
 }
 
+func (w *tWriter) empty() bool {
+	return !w.notFirst
+}
+
 func (w *tWriter) finish() (f *tFile, err error) {
 	err = w.tw.Close()
 	if err != nil {
