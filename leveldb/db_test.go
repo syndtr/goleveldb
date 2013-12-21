@@ -72,9 +72,6 @@ func (h *dbHarness) init(t *testing.T, o *opt.Options) {
 func (h *dbHarness) openDB0() (err error) {
 	h.t.Log("opening DB")
 	h.db, err = Open(h.stor, h.o)
-	if err != nil {
-		return
-	}
 	return
 }
 
@@ -84,16 +81,15 @@ func (h *dbHarness) openDB() {
 	}
 }
 
-func (h *dbHarness) closeDB0() {
+func (h *dbHarness) closeDB0() error {
 	h.t.Log("closing DB")
-	err := h.db.Close()
-	if err != nil {
-		h.t.Error("Close: got error: ", err)
-	}
+	return h.db.Close()
 }
 
 func (h *dbHarness) closeDB() {
-	h.closeDB0()
+	if err := h.closeDB0(); err != nil {
+		h.t.Error("Close: got error: ", err)
+	}
 	h.stor.CloseCheck()
 	runtime.GC()
 }
@@ -1219,6 +1215,41 @@ func TestDb_DeletionMarkers2(t *testing.T) {
 	// Merging last-1 w/ last, so we are the base level for "foo", so
 	// DEL is removed.  (as is v1).
 	h.allEntriesFor("foo", "[ ]")
+}
+
+func TestDb_CompactionTableOpenError(t *testing.T) {
+	h := newDbHarnessWopt(t, &opt.Options{MaxOpenFiles: 0})
+	defer h.close()
+
+	im := 10
+	jm := 10
+	for r := 0; r < 2; r++ {
+		for i := 0; i < im; i++ {
+			for j := 0; j < jm; j++ {
+				h.put(fmt.Sprintf("k%d,%d", i, j), fmt.Sprintf("v%d,%d", i, j))
+			}
+			h.compactMem()
+		}
+	}
+
+	if n := h.totalTables(); n != im*2 {
+		t.Errorf("total tables is %d, want %d", n, im)
+	}
+
+	h.stor.SetOpenErr(storage.TypeTable)
+	go h.db.CompactRange(Range{})
+	if err := h.db.wakeCompaction(2); err != nil {
+		t.Log("compaction error: ", err)
+	}
+	h.closeDB0()
+	h.openDB()
+	h.stor.SetOpenErr(0)
+
+	for i := 0; i < im; i++ {
+		for j := 0; j < jm; j++ {
+			h.getVal(fmt.Sprintf("k%d,%d", i, j), fmt.Sprintf("v%d,%d", i, j))
+		}
+	}
 }
 
 func TestDb_OverlapInLevel0(t *testing.T) {

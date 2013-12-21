@@ -33,8 +33,7 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 		iters = append(iters, frozenMem.NewIterator())
 	}
 	iters = append(iters, tableIters...)
-	strict := s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator)
-	mi := iterator.NewMergedIterator(iters, s.cmp, strict)
+	mi := iterator.NewMergedIterator(iters, s.cmp, true)
 	mi.SetReleaser(&versionReleaser{v: v})
 	return mi
 }

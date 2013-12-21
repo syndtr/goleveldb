@@ -368,10 +368,10 @@ func (c *compaction) newIterator() iterator.Iterator {
 				its = append(its, s.tops.newIterator(t, ro))
 			}
 		} else {
-			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict)
+			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict, true)
 			its = append(its, it)
 		}
 	}
 
-	return iterator.NewMergedIterator(its, icmp, strict)
+	return iterator.NewMergedIterator(its, icmp, true)
 }

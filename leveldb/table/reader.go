@@ -555,7 +555,7 @@ func (r *Reader) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 		checksum:    ro.GetStrict(opt.StrictBlockChecksum),
 		fillCache:   !ro.GetDontFillCache(),
 	}
-	return iterator.NewIndexedIterator(index, r.strictIter || ro.GetStrict(opt.StrictIterator))
+	return iterator.NewIndexedIterator(index, r.strictIter || ro.GetStrict(opt.StrictIterator), false)
 }
 
 // Find finds key/value pair whose key is greater than or equal to the
