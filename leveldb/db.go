@@ -603,7 +603,6 @@ func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
 // needed to access the data. This operation should typically only
 // be invoked by users who understand the underlying implementation.
 //
-//
 // A nil Range.Start is treated as a key before all keys in the DB.
 // And a nil Range.Limit is treated as a key after all keys in the DB.
 // Therefore if both is nil then it will compact entire DB.

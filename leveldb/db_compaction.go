@@ -147,10 +147,12 @@ func (d *DB) transact(name string, exec, rollback func() error) {
 			panic(x)
 		}
 	}()
-	for {
+	for n := 0; ; n++ {
 		if d.isClosed() {
 			s.logf("%s exiting", name)
 			panic(errTransactExiting)
+		} else if n > 0 {
+			s.logf("%s retrying N·%d", name, n)
 		}
 		err := exec()
 		select {
@@ -260,7 +262,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			}
 			rec.addTableFile(c.level+1, t)
 			stats[1].write += t.size
-			s.logf("table@compaction created L%d@%d N·%d S·%s %q:%q", c.level+1, t.file.Num(), tw.tw.EntriesLen(), shortenb(int(t.size)), t.min, t.max)
+			s.logf("table@build created L%d@%d N·%d S·%s %q:%q", c.level+1, t.file.Num(), tw.tw.EntriesLen(), shortenb(int(t.size)), t.min, t.max)
 			return nil
 		}
 
@@ -379,6 +381,11 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 			}
 		}
 
+		err = iter.Error()
+		if err != nil {
+			return
+		}
+
 		// Finish last table
 		if tw != nil && !tw.empty() {
 			err = finish()
@@ -390,7 +397,7 @@ func (d *DB) doCompaction(c *compaction, noTrivial bool) {
 		return
 	}, func() error {
 		for _, r := range rec.addedTables {
-			s.logf("table@compaction rollback @%d", r.num)
+			s.logf("table@build rollback @%d", r.num)
 			f := s.getTableFile(r.num)
 			if err := f.Remove(); err != nil {
 				return err
