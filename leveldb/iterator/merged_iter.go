@@ -63,7 +63,7 @@ func (i *mergedIterator) First() bool {
 		case iter.First():
 			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
-			if err := i.Error(); err != nil {
+			if err := iter.Error(); err != nil {
 				i.err = err
 				return false
 			}
@@ -89,7 +89,7 @@ func (i *mergedIterator) Last() bool {
 		case iter.Last():
 			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
-			if err := i.Error(); err != nil {
+			if err := iter.Error(); err != nil {
 				i.err = err
 				return false
 			}
@@ -115,7 +115,7 @@ func (i *mergedIterator) Seek(key []byte) bool {
 		case iter.Seek(key):
 			i.keys[x] = assertKey(iter.Key())
 		case i.strict:
-			if err := i.Error(); err != nil {
+			if err := iter.Error(); err != nil {
 				i.err = err
 				return false
 			}
@@ -224,7 +224,7 @@ func (i *mergedIterator) Prev() bool {
 			case seek && iter.Prev(), !seek && iter.Last():
 				i.keys[x] = assertKey(iter.Key())
 			case i.strict:
-				if err := i.Error(); err != nil {
+				if err := iter.Error(); err != nil {
 					i.err = err
 					return false
 				}
@@ -241,7 +241,7 @@ func (i *mergedIterator) Prev() bool {
 	case iter.Prev():
 		i.keys[x] = assertKey(iter.Key())
 	case i.strict:
-		if err := i.Error(); err != nil {
+		if err := iter.Error(); err != nil {
 			i.err = err
 			return false
 		}
