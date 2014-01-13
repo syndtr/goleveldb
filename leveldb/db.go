@@ -436,7 +436,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		return true
 	}
 
-	if mem, frozenMem := d.getMem(); memGet(mem) || (frozenMem != nil && memGet(frozenMem)) {
+	if mem, frozenMem := d.getMems(); memGet(mem) || (frozenMem != nil && memGet(frozenMem)) {
 		return
 	}
 

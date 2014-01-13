@@ -304,7 +304,7 @@ func (h *dbHarness) compactMem() {
 		return
 	}
 
-	if mem, _ := db.getMem(); mem.Len() == 0 {
+	if mem := db.getEffectiveMem(); mem.Len() == 0 {
 		return
 	}
 
