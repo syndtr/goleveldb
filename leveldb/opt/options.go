@@ -159,7 +159,8 @@ type Options struct {
 	Filter filter.Filter
 
 	// MaxOpenFiles defines maximum number of open files to kept around
-	// (cached).
+	// (cached). This is not an hard limit, actual open files may exceed
+	// the defined value.
 	//
 	// The default value is 1000.
 	MaxOpenFiles int
