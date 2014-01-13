@@ -421,23 +421,23 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 	ucmp := s.cmp.cmp
 	ikey := newIKey(key, seq, tSeek)
 
-	memGet := func(m *memdb.DB) bool {
-		var rkey []byte
-		rkey, value, err = m.Find(ikey)
-		if err != nil {
-			return false
+	em, fm := d.getMems()
+	for _, m := range [...]*memdb.DB{em, fm} {
+		if m == nil {
+			continue
 		}
-		ukey, _, t, ok := parseIkey(rkey)
-		if !ok || ucmp.Compare(ukey, key) != 0 || t == tDel {
-			value = nil
-			err = ErrNotFound
-			return false
+		mk, mv, me := m.Find(ikey)
+		if me == nil {
+			ukey, _, t, ok := parseIkey(mk)
+			if ok && ucmp.Compare(ukey, key) == 0 {
+				if t == tDel {
+					return nil, ErrNotFound
+				}
+				return mv, nil
+			}
+		} else if me != ErrNotFound {
+			return nil, me
 		}
-		return true
-	}
-
-	if mem, frozenMem := d.getMems(); memGet(mem) || (frozenMem != nil && memGet(frozenMem)) {
-		return
 	}
 
 	v := s.version()

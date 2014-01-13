@@ -1811,3 +1811,14 @@ func TestDb_CreateReopenDbOnFile2(t *testing.T) {
 		}
 	}
 }
+
+func TestDb_DeletionMarkersOnMemdb(t *testing.T) {
+	h := newDbHarness(t)
+	defer h.close()
+
+	h.put("foo", "v1")
+	h.compactMem()
+	h.delete("foo")
+	h.get("foo", false)
+	h.getKeyVal("")
+}
