@@ -116,6 +116,7 @@ func openDB(s *session) (*DB, error) {
 	db.closeWg.Add(2)
 	go db.compaction()
 	go db.writeJournal()
+	db.wakeCompaction(0)
 
 	s.logf("db@open done T·%v", time.Since(start))
 
