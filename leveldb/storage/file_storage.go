@@ -355,7 +355,7 @@ func (fw fileWrap) Close() error {
 	f.fs.open--
 	err := fw.File.Close()
 	if err != nil {
-		f.fs.log(fmt.Sprint("close %s.%d: %v", f.Type(), f.Num(), err))
+		f.fs.log(fmt.Sprintf("close %s.%d: %v", f.Type(), f.Num(), err))
 	}
 	return err
 }
