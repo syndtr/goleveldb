@@ -5,6 +5,11 @@ Installation
 
 	go get github.com/syndtr/goleveldb/leveldb
 
+Requirements
+-----------
+
+* Need at least `go1.1` or newer.
+
 Usage
 -----------
 
