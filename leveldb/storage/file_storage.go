@@ -272,7 +272,7 @@ func (fs *fileStorage) GetManifest() (f File, err error) {
 	if pend {
 		path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), f.Num())
 		if err := rename(path, filepath.Join(fs.path, "CURRENT")); err != nil {
-			fs.log(fmt.Sprintf("CURRENT.%d -> CURRENT: %d", f.Num(), err))
+			fs.log(fmt.Sprintf("CURRENT.%d -> CURRENT: %v", f.Num(), err))
 		}
 	}
 	// Remove obsolete or incomplete pending CURRENT files.
@@ -422,7 +422,7 @@ func (f *file) Remove() error {
 	}
 	err := os.Remove(f.path())
 	if err != nil {
-		f.fs.log(fmt.Sprint("remove %s.%d: %v", f.Type(), f.Num(), err))
+		f.fs.log(fmt.Sprintf("remove %s.%d: %v", f.Type(), f.Num(), err))
 	}
 	return err
 }
