@@ -24,6 +24,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 func tkey(i int) []byte {
@@ -386,7 +387,7 @@ func (h *dbHarness) compactRange(min, max string) {
 	t := h.t
 	db := h.db
 
-	var r Range
+	var r util.Range
 	if min != "" {
 		r.Start = []byte(min)
 	}
@@ -403,7 +404,7 @@ func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	t := h.t
 	db := h.db
 
-	s, err := db.GetApproximateSizes([]Range{
+	s, err := db.GetApproximateSizes([]util.Range{
 		{[]byte(start), []byte(limit)},
 	})
 	if err != nil {
@@ -1237,7 +1238,7 @@ func TestDb_CompactionTableOpenError(t *testing.T) {
 	}
 
 	h.stor.SetOpenErr(storage.TypeTable)
-	go h.db.CompactRange(Range{})
+	go h.db.CompactRange(util.Range{})
 	if err := h.db.wakeCompaction(2); err != nil {
 		t.Log("compaction error: ", err)
 	}
@@ -1480,10 +1481,10 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	_, err = db.GetProperty("leveldb.stats")
 	assertErr(t, err, true)
 
-	_, err = db.GetApproximateSizes([]Range{{[]byte("a"), []byte("z")}})
+	_, err = db.GetApproximateSizes([]util.Range{{[]byte("a"), []byte("z")}})
 	assertErr(t, err, true)
 
-	assertErr(t, db.CompactRange(Range{}), true)
+	assertErr(t, db.CompactRange(util.Range{}), true)
 
 	assertErr(t, db.Close(), true)
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/table"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type stConstructor interface {
@@ -67,7 +68,7 @@ func (tc *stConstructor_Table) finish() (size int, err error) {
 }
 
 func (tc *stConstructor_Table) newIterator() iterator.Iterator {
-	return tc.reader.NewIterator(nil)
+	return tc.reader.NewIterator(nil, nil)
 }
 
 func (tc *stConstructor_Table) customTest(h *stHarness) {
@@ -186,7 +187,7 @@ func (dc *stConstructor_DB) add(key, value string) error {
 func (dc *stConstructor_DB) finish() (size int, err error) {
 	iter := dc.db.NewIterator(dc.ro)
 	defer iter.Release()
-	var r Range
+	var r util.Range
 	if iter.First() {
 		r.Start = append([]byte{}, iter.Key()...)
 	}
@@ -197,7 +198,7 @@ func (dc *stConstructor_DB) finish() (size int, err error) {
 	if err != nil {
 		return
 	}
-	sizes, err := dc.db.GetApproximateSizes([]Range{r})
+	sizes, err := dc.db.GetApproximateSizes([]util.Range{r})
 	size = int(sizes.Sum())
 	return
 }

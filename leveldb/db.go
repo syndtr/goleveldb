@@ -568,7 +568,7 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 // data compresses by a factor of ten, the returned sizes will be one-tenth
 // the size of the corresponding user data size.
 // The results may not include the sizes of recently written data.
-func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
+func (d *DB) GetApproximateSizes(ranges []util.Range) (Sizes, error) {
 	if err := d.ok(); err != nil {
 		return nil, err
 	}
@@ -607,7 +607,7 @@ func (d *DB) GetApproximateSizes(ranges []Range) (Sizes, error) {
 // A nil Range.Start is treated as a key before all keys in the DB.
 // And a nil Range.Limit is treated as a key after all keys in the DB.
 // Therefore if both is nil then it will compact entire DB.
-func (d *DB) CompactRange(r Range) error {
+func (d *DB) CompactRange(r util.Range) error {
 	err := d.ok()
 	if err != nil {
 		return err

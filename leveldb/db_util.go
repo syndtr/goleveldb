@@ -19,15 +19,6 @@ type Reader interface {
 	NewIterator(ro *opt.ReadOptions) iterator.Iterator
 }
 
-// Range is a key range.
-type Range struct {
-	// Start of the key range, include in the range.
-	Start []byte
-
-	// Limit of the key range, not include in the range.
-	Limit []byte
-}
-
 type Sizes []uint64
 
 // Sum returns sum of the sizes.

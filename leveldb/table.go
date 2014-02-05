@@ -401,7 +401,7 @@ func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
 	if err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
-	iter := c.Value().(*table.Reader).NewIterator(ro)
+	iter := c.Value().(*table.Reader).NewIterator(nil, ro)
 	iter.SetReleaser(c)
 	return iter
 }
