@@ -329,8 +329,6 @@ first:
 		}
 	}
 
-	return
-
 	if !first {
 		first = true
 		if !it.First() {
@@ -348,9 +346,9 @@ first:
 				shorten(rval), shorten(h.values[0]))
 		}
 		if it.Prev() {
-			h.t.Error(name + ": SortedTest: Scan: ToFirst: expecting eof")
+			h.t.Error(name + ": SortedTest: Scan: ToFirst: Prev: expecting eof")
 		} else if it.Valid() {
-			h.t.Error(name + ": SortedTest: Scan: ToFirst: Valid != false")
+			h.t.Error(name + ": SortedTest: Scan: ToFirst: Prev: Valid != false")
 		}
 		goto first
 	}

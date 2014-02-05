@@ -78,6 +78,7 @@ func (i *dbIter) Next() bool {
 		}
 		return false
 	}
+	i.forward = true
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
 	i.node = i.p.nodeData[i.node+nNext]
@@ -91,6 +92,7 @@ func (i *dbIter) Prev() bool {
 		}
 		return false
 	}
+	i.forward = false
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
 	i.node = i.p.findLT(i.key)

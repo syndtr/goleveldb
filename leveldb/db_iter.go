@@ -149,6 +149,7 @@ func (i *dbIter) next() bool {
 			if seq <= i.seq {
 				switch t {
 				case tDel:
+					// Skip deleted key.
 					i.key = append(i.key[:0], ukey...)
 					i.dir = dirForward
 				case tVal:
@@ -245,6 +246,7 @@ func (i *dbIter) Prev() bool {
 				return false
 			}
 		}
+		i.dir = dirSOI
 		i.iterErr()
 		return false
 	}
