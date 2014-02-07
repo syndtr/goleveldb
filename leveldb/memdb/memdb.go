@@ -25,19 +25,30 @@ const tMaxHeight = 12
 type dbIter struct {
 	util.BasicReleaser
 	p          *DB
+	slice      *util.Range
 	node       int
 	forward    bool
 	key, value []byte
 }
 
-func (i *dbIter) fill() bool {
+func (i *dbIter) fill(checkStart, checkLimit bool) bool {
 	if i.node != 0 {
 		n := i.p.nodeData[i.node]
 		m := n + i.p.nodeData[i.node+nKey]
 		i.key = i.p.kvData[n:m]
+		if i.slice != nil {
+			switch {
+			case checkLimit && i.slice.Limit != nil && i.p.cmp.Compare(i.key, i.slice.Limit) >= 0:
+				fallthrough
+			case checkStart && i.slice.Start != nil && i.p.cmp.Compare(i.key, i.slice.Start) < 0:
+				i.node = 0
+				goto bail
+			}
+		}
 		i.value = i.p.kvData[m : m+i.p.nodeData[i.node+nVal]]
 		return true
 	}
+bail:
 	i.key = nil
 	i.value = nil
 	return false
@@ -48,27 +59,38 @@ func (i *dbIter) Valid() bool {
 }
 
 func (i *dbIter) First() bool {
+	i.forward = true
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
-	i.node = i.p.nodeData[nNext]
-	i.forward = true
-	return i.fill()
+	if i.slice != nil && i.slice.Start != nil {
+		i.node, _ = i.p.findGE(i.slice.Start, false)
+	} else {
+		i.node = i.p.nodeData[nNext]
+	}
+	return i.fill(false, true)
 }
 
 func (i *dbIter) Last() bool {
+	i.forward = false
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
-	i.node = i.p.findLast()
-	i.forward = false
-	return i.fill()
+	if i.slice != nil && i.slice.Limit != nil {
+		i.node = i.p.findLT(i.slice.Limit)
+	} else {
+		i.node = i.p.findLast()
+	}
+	return i.fill(true, false)
 }
 
 func (i *dbIter) Seek(key []byte) bool {
+	i.forward = true
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
+	if i.slice != nil && i.slice.Start != nil && i.p.cmp.Compare(key, i.slice.Start) < 0 {
+		key = i.slice.Start
+	}
 	i.node, _ = i.p.findGE(key, false)
-	i.forward = true
-	return i.fill()
+	return i.fill(false, true)
 }
 
 func (i *dbIter) Next() bool {
@@ -82,7 +104,7 @@ func (i *dbIter) Next() bool {
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
 	i.node = i.p.nodeData[i.node+nNext]
-	return i.fill()
+	return i.fill(false, true)
 }
 
 func (i *dbIter) Prev() bool {
@@ -96,7 +118,7 @@ func (i *dbIter) Prev() bool {
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
 	i.node = i.p.findLT(i.key)
-	return i.fill()
+	return i.fill(true, false)
 }
 
 func (i *dbIter) Key() []byte {
@@ -171,7 +193,6 @@ func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 			h--
 		}
 	}
-	return 0, false
 }
 
 func (p *DB) findLT(key []byte) int {
@@ -182,14 +203,14 @@ func (p *DB) findLT(key []byte) int {
 		o := p.nodeData[next]
 		if next == 0 || p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key) >= 0 {
 			if h == 0 {
-				return node
+				break
 			}
 			h--
 		} else {
 			node = next
 		}
 	}
-	return 0
+	return node
 }
 
 func (p *DB) findLast() int {
@@ -199,14 +220,14 @@ func (p *DB) findLast() int {
 		next := p.nodeData[node+nNext+h]
 		if next == 0 {
 			if h == 0 {
-				return node
+				break
 			}
 			h--
 		} else {
 			node = next
 		}
 	}
-	return 0
+	return node
 }
 
 // Put sets the value for the given key. It overwrites any previous value
@@ -330,11 +351,16 @@ func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
 // underlying DB. However, the resultant key/value pairs are not guaranteed
 // to be a consistent snapshot of the DB at a particular point in time.
 //
+// Slice allows slicing the iterator to only contains keys in the given
+// range. A nil Range.Start is treated as a key before all keys in the
+// DB. And a nil Range.Limit is treated as a key after all keys in
+// the DB.
+//
 // The iterator must be released after use, by calling Release method.
 //
 // Also read Iterator documentation of the leveldb/iterator package.
-func (p *DB) NewIterator() iterator.Iterator {
-	return &dbIter{p: p}
+func (p *DB) NewIterator(slice *util.Range) iterator.Iterator {
+	return &dbIter{p: p, slice: slice}
 }
 
 // Size returns sum of keys and values length.

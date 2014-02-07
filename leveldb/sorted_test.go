@@ -113,7 +113,7 @@ func (mc *stConstructor_MemDB) finish() (size int, err error) {
 }
 
 func (mc *stConstructor_MemDB) newIterator() iterator.Iterator {
-	return mc.db.NewIterator()
+	return mc.db.NewIterator(nil)
 }
 
 func (mc *stConstructor_MemDB) customTest(h *stHarness) {}
@@ -149,7 +149,7 @@ func (mc *stConstructor_MergedMemDB) finish() (size int, err error) {
 func (mc *stConstructor_MergedMemDB) newIterator() iterator.Iterator {
 	var ii []iterator.Iterator
 	for _, db := range mc.db {
-		ii = append(ii, db.NewIterator())
+		ii = append(ii, db.NewIterator(nil))
 	}
 	return iterator.NewMergedIterator(ii, comparer.DefaultComparer, true)
 }

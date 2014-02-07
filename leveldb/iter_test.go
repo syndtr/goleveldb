@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/table"
 	"github.com/syndtr/goleveldb/leveldb/testutil"
@@ -76,6 +78,53 @@ func (tableInit) Test(t *iteratorTesting, ni newIterator) {
 	})
 }
 
+type memdbNewIterator struct {
+	*memdb.DB
+}
+
+func (ni memdbNewIterator) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
+	return ni.DB.NewIterator(slice)
+}
+
+type memdbInit struct{}
+
+func (memdbInit) Build(t *iteratorTesting) newIterator {
+	db := memdb.New(comparer.DefaultComparer, 0)
+	t.IterateShuffled(t.rand, func(i int, key, value []byte) {
+		db.Put(key, value)
+	})
+	return memdbNewIterator{db}
+}
+
+func (memdbInit) Test(t *iteratorTesting, ni newIterator) {}
+
+type mergedMemdbNewIterator []*memdb.DB
+
+func (ni mergedMemdbNewIterator) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
+	iters := make([]iterator.Iterator, len(ni))
+	for i := range iters {
+		iters[i] = ni[i].NewIterator(slice)
+	}
+	return iterator.NewMergedIterator(iters, comparer.DefaultComparer, true)
+}
+
+func (mergedMemdbNewIterator) Test(t *iteratorTesting, ni newIterator) {}
+
+type mergedMemdbInit struct{}
+
+func (mergedMemdbInit) Build(t *iteratorTesting) newIterator {
+	var db [3]*memdb.DB
+	for i := range db {
+		db[i] = memdb.New(comparer.DefaultComparer, 0)
+	}
+	t.IterateShuffled(t.rand, func(i int, key, value []byte) {
+		db[t.rand.Intn(len(db))].Put(key, value)
+	})
+	return mergedMemdbNewIterator(db[:])
+}
+
+func (mergedMemdbInit) Test(t *iteratorTesting, ni newIterator) {}
+
 type iteratorTesting struct {
 	*testing.T
 	testutil.KeyValue
@@ -130,6 +179,8 @@ func (t *iteratorTesting) TestOne(name string, init iteratorInitializer) {
 
 func (t *iteratorTesting) Test() {
 	t.TestOne("table", tableInit{})
+	t.TestOne("memdb", memdbInit{})
+	t.TestOne("merged", mergedMemdbInit{})
 }
 
 func newIteratorTesting(t *testing.T) *iteratorTesting {

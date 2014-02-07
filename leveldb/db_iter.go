@@ -29,9 +29,9 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 	ti := v.getIterators(ro)
 	n := len(ti) + 2
 	i := make([]iterator.Iterator, 0, n)
-	i = append(i, em.NewIterator())
+	i = append(i, em.NewIterator(nil))
 	if fm != nil {
-		i = append(i, fm.NewIterator())
+		i = append(i, fm.NewIterator(nil))
 	}
 	i = append(i, ti...)
 	mi := iterator.NewMergedIterator(i, s.cmp, true)
@@ -163,15 +163,14 @@ func (i *dbIter) next() bool {
 			}
 		} else if i.strict {
 			i.setErr(errInvalidIkey)
-			return false
+			break
 		}
 		if !i.iter.Next() {
 			i.dir = dirEOI
 			i.iterErr()
-			return false
+			break
 		}
 	}
-	// Not reached.
 	return false
 }
 
