@@ -7,16 +7,40 @@
 package testutil
 
 import (
-	"bytes"
+	"fmt"
 	"math/rand"
-	"testing"
-	"time"
+
+	. "github.com/onsi/gomega"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 )
 
+type IterAct int
+
+func (a IterAct) String() string {
+	switch a {
+	case IterNone:
+		return "none"
+	case IterFirst:
+		return "first"
+	case IterLast:
+		return "last"
+	case IterPrev:
+		return "prev"
+	case IterNext:
+		return "next"
+	case IterSeek:
+		return "seek"
+	case IterSOI:
+		return "soi"
+	case IterEOI:
+		return "eoi"
+	}
+	return "unknown"
+}
+
 const (
-	IterNone = iota
+	IterNone IterAct = iota
 	IterFirst
 	IterLast
 	IterPrev
@@ -27,13 +51,12 @@ const (
 )
 
 type IteratorTesting struct {
-	*testing.T
 	KeyValue
-	Iter    iterator.Iterator
-	Rand    *rand.Rand
-	PostFn  func(t *IteratorTesting)
-	Pos     int
-	LastAct int
+	Iter         iterator.Iterator
+	Rand         *rand.Rand
+	PostFn       func(t *IteratorTesting)
+	Pos          int
+	Act, LastAct IterAct
 
 	once bool
 }
@@ -51,6 +74,18 @@ func (t *IteratorTesting) post() {
 	}
 }
 
+func (t *IteratorTesting) setAct(act IterAct) {
+	t.LastAct, t.Act = t.Act, act
+}
+
+func (t *IteratorTesting) text() string {
+	return fmt.Sprintf("at pos %d and last action was <%v> -> <%v>", t.Pos, t.LastAct, t.Act)
+}
+
+func (t *IteratorTesting) Text() string {
+	return "IteratorTesting is " + t.text()
+}
+
 func (t *IteratorTesting) IsFirst() bool {
 	t.init()
 	return t.Len() > 0 && t.Pos == 0
@@ -64,102 +99,97 @@ func (t *IteratorTesting) IsLast() bool {
 func (t *IteratorTesting) TestKV() {
 	t.init()
 	key, value := t.Index(t.Pos)
-	if !bytes.Equal(key, t.Iter.Key()) {
-		t.Errorf("invalid key = %q want %q", key, t.Iter.Key())
-	}
-	if !bytes.Equal(value, t.Iter.Value()) {
-		t.Errorf("invalid value = %q want %q", value, t.Iter.Value())
-	}
+	Expect(t.Iter.Key()).Should(Equal(key), "Key is invalid, %s", t.text())
+	Expect(t.Iter.Value()).Should(Equal(value), "Value for key %q, %s", key, t.text())
 }
 
 func (t *IteratorTesting) First() {
 	t.init()
-	t.LastAct = IterFirst
+	t.setAct(IterFirst)
+
+	ok := t.Iter.First()
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
 	if t.Len() > 0 {
 		t.Pos = 0
-		if !t.Iter.First() {
-			t.Fatalf("First: got soi, err=%v", t.Iter.Error())
-		}
+		Expect(ok).Should(BeTrue(), t.Text())
 		t.TestKV()
 	} else {
 		t.Pos = -1
-		if t.Iter.First() {
-			t.Fatalf("First: got %q expected soi, err=%v", t.Iter.Key(), t.Iter.Error())
-		}
+		Expect(ok).ShouldNot(BeTrue(), t.Text())
 	}
 	t.post()
 }
 
 func (t *IteratorTesting) Last() {
 	t.init()
-	t.LastAct = IterLast
+	t.setAct(IterLast)
+
+	ok := t.Iter.Last()
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
 	if t.Len() > 0 {
 		t.Pos = t.Len() - 1
-		if !t.Iter.Last() {
-			t.Fatalf("Last: got eoi, err=%v", t.Iter.Error())
-		}
+		Expect(ok).Should(BeTrue(), t.Text())
 		t.TestKV()
 	} else {
 		t.Pos = 0
-		if t.Iter.Last() {
-			t.Fatalf("Last: got %q expected eoi, err=%v", t.Iter.Key(), t.Iter.Error())
-		}
+		Expect(ok).ShouldNot(BeTrue(), t.Text())
 	}
 	t.post()
 }
 
 func (t *IteratorTesting) Next() {
 	t.init()
-	t.LastAct = IterNext
+	t.setAct(IterNext)
+
+	ok := t.Iter.Next()
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
 	if t.Pos < t.Len()-1 {
 		t.Pos++
-		if !t.Iter.Next() {
-			t.Fatalf("Next: got eoi, pos=%d err=%v", t.Pos, t.Iter.Error())
-		}
+		Expect(ok).Should(BeTrue(), t.Text())
 		t.TestKV()
 	} else {
 		t.Pos = t.Len()
-		if t.Iter.Next() {
-			t.Fatalf("Next: got %q expected eoi, err=%v", t.Iter.Key(), t.Iter.Error())
-		}
+		Expect(ok).ShouldNot(BeTrue(), t.Text())
 	}
 	t.post()
 }
 
 func (t *IteratorTesting) Prev() {
 	t.init()
-	t.LastAct = IterPrev
+	t.setAct(IterPrev)
+
+	ok := t.Iter.Prev()
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
 	if t.Pos > 0 {
 		t.Pos--
-		if !t.Iter.Prev() {
-			t.Fatalf("Prev: got soi, pos=%d err=%v", t.Pos, t.Iter.Error())
-		}
+		Expect(ok).Should(BeTrue(), t.Text())
 		t.TestKV()
 	} else {
 		t.Pos = -1
-		if t.Iter.Prev() {
-			t.Fatalf("Prev: got %q expected soi, err=%v", t.Iter.Key(), t.Iter.Error())
-		}
+		Expect(ok).ShouldNot(BeTrue(), t.Text())
 	}
 	t.post()
 }
 
 func (t *IteratorTesting) Seek(i int) {
 	t.init()
-	t.LastAct = IterSeek
+	t.setAct(IterSeek)
+
 	key, _ := t.Index(i)
 	oldKey, _ := t.IndexOrNil(t.Pos)
+
+	ok := t.Iter.Seek(key)
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
+	Expect(ok).Should(BeTrue(), fmt.Sprintf("Seek from key %q to %q, to pos %d, %s", oldKey, key, i, t.text()))
+
 	t.Pos = i
-	if !t.Iter.Seek(key) {
-		t.Fatalf("Seek %q -> %q: got eoi, pos=%d err=%v", oldKey, key, t.Pos, t.Iter.Error())
-	}
 	t.TestKV()
 	t.post()
 }
 
 func (t *IteratorTesting) SeekInexact(i int) {
 	t.init()
-	t.LastAct = IterSeek
+	t.setAct(IterSeek)
 	var key0 []byte
 	key1, _ := t.Index(i)
 	if i > 0 {
@@ -167,39 +197,41 @@ func (t *IteratorTesting) SeekInexact(i int) {
 	}
 	key := BytesSeparator(key0, key1)
 	oldKey, _ := t.IndexOrNil(t.Pos)
+
+	ok := t.Iter.Seek(key)
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
+	Expect(ok).Should(BeTrue(), fmt.Sprintf("Seek from key %q to %q (%q), to pos %d, %s", oldKey, key, key1, i, t.text()))
+
 	t.Pos = i
-	if !t.Iter.Seek(key) {
-		t.Fatalf("SeekInexact %q -> %q: got eoi, pos=%d key=%q err=%v", oldKey, key, key1, t.Pos, t.Iter.Error())
-	}
 	t.TestKV()
 	t.post()
 }
 
 func (t *IteratorTesting) SeekKey(key []byte) {
 	t.init()
-	t.LastAct = IterSeek
+	t.setAct(IterSeek)
 	oldKey, _ := t.IndexOrNil(t.Pos)
-	t.Pos = t.Search(key)
-	if t.Pos < t.Len() {
-		key_, _ := t.Index(t.Pos)
-		if !t.Iter.Seek(key) {
-			t.Fatalf("Seek %q -> %q: got eoi, key=%q pos=%d err=%v", oldKey, key, key_, t.Pos, t.Iter.Error())
-		}
+	i := t.Search(key)
+
+	ok := t.Iter.Seek(key)
+	Expect(t.Iter.Error()).ShouldNot(HaveOccurred())
+	if i < t.Len() {
+		key_, _ := t.Index(i)
+		Expect(ok).Should(BeTrue(), fmt.Sprintf("Seek from key %q to %q (%q), to pos %d, %s", oldKey, key, key_, i, t.text()))
+		t.Pos = i
 		t.TestKV()
 	} else {
-		if t.Iter.Seek(key) {
-			t.Fatalf("Seek %q -> %q: got %q expected eoi, err=%v", oldKey, key, t.Iter.Key(), t.Iter.Error())
-		}
+		Expect(ok).ShouldNot(BeTrue(), fmt.Sprintf("Seek from key %q to %q, %s", oldKey, key, t.text()))
 	}
+
+	t.Pos = i
 	t.post()
 }
 
 func (t *IteratorTesting) SOI() {
 	t.init()
-	t.LastAct = IterSOI
-	if t.Pos > 0 {
-		t.Fatalf("SOI: unmet condition, pos > 0")
-	}
+	t.setAct(IterSOI)
+	Expect(t.Pos).Should(BeNumerically("<=", 0), t.Text())
 	for i := 0; i < 3; i++ {
 		t.Prev()
 	}
@@ -208,10 +240,8 @@ func (t *IteratorTesting) SOI() {
 
 func (t *IteratorTesting) EOI() {
 	t.init()
-	t.LastAct = IterEOI
-	if t.Pos < t.Len()-1 {
-		t.Fatalf("EOI: unmet condition, pos < %d", t.Len()-1)
-	}
+	t.setAct(IterEOI)
+	Expect(t.Pos).Should(BeNumerically(">=", t.Len()-1), t.Text())
 	for i := 0; i < 3; i++ {
 		t.Next()
 	}
@@ -222,9 +252,7 @@ func (t *IteratorTesting) WalkPrev(fn func(t *IteratorTesting)) {
 	t.init()
 	for old := t.Pos; t.Pos > 0; old = t.Pos {
 		fn(t)
-		if t.Pos >= old {
-			t.Fatalf("WalkPrev: pos not regressing %d -> %d", old, t.Pos)
-		}
+		Expect(t.Pos).Should(BeNumerically("<", old), t.Text())
 	}
 }
 
@@ -232,9 +260,7 @@ func (t *IteratorTesting) WalkNext(fn func(t *IteratorTesting)) {
 	t.init()
 	for old := t.Pos; t.Pos < t.Len()-1; old = t.Pos {
 		fn(t)
-		if t.Pos <= old {
-			t.Fatalf("WalkNext: pos not advancing %d -> %d", old, t.Pos)
-		}
+		Expect(t.Pos).Should(BeNumerically(">", old), t.Text())
 	}
 }
 
@@ -250,13 +276,10 @@ func (t *IteratorTesting) NextAll() {
 	})
 }
 
-func (t *IteratorTesting) Test() {
+func DoIteratorTesting(t *IteratorTesting) {
 	if t.Rand == nil {
-		seed := time.Now().UnixNano()
-		t.Rand = rand.New(rand.NewSource(seed))
-		t.Logf("IteratorTesting: seed %d", seed)
+		t.Rand = NewRand()
 	}
-
 	t.SOI()
 	t.NextAll()
 	t.First()
@@ -278,13 +301,14 @@ func (t *IteratorTesting) Test() {
 	t.NextAll()
 	t.EOI()
 
-	// t.Log("IteratorTesting: shuffled seeks")
 	ShuffledIndex(t.Rand, t.Len(), 1, func(i int) {
 		t.Seek(i)
 	})
+
 	ShuffledIndex(t.Rand, t.Len(), 1, func(i int) {
 		t.SeekInexact(i)
 	})
+
 	ShuffledIndex(t.Rand, t.Len(), 1, func(i int) {
 		t.Seek(i)
 		if i%2 != 0 {

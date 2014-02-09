@@ -233,7 +233,6 @@ func (r *Reader) nextChunk(wantFirst, skip bool) error {
 		}
 		r.i, r.j, r.n = 0, 0, n
 	}
-	panic("unreachable")
 }
 
 // Next returns a reader for the next journal. It returns io.EOF if there are no

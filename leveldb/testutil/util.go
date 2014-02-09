@@ -8,11 +8,48 @@ package testutil
 
 import (
 	"bytes"
+	"flag"
 	"math/rand"
-	"time"
+	"sync"
+
+	"github.com/onsi/ginkgo/config"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
+
+var (
+	runfn []func()
+	runmu sync.Mutex
+)
+
+func Defer(fn func()) bool {
+	runmu.Lock()
+	runfn = append(runfn, fn)
+	runmu.Unlock()
+	return true
+}
+
+func RunDefer() bool {
+	runmu.Lock()
+	runfn_ := runfn
+	runfn = nil
+	runmu.Unlock()
+	for _, fn := range runfn_ {
+		fn()
+	}
+	return runfn_ != nil
+}
+
+func RandomSeed() int64 {
+	if !flag.Parsed() {
+		panic("random seed not initialized")
+	}
+	return config.GinkgoConfig.RandomSeed
+}
+
+func NewRand() *rand.Rand {
+	return rand.New(rand.NewSource(RandomSeed()))
+}
 
 var cmp = comparer.DefaultComparer
 
@@ -59,25 +96,20 @@ func BytesAfter(b []byte) []byte {
 	return append(x, 'x')
 }
 
-func makeRand(rnd *rand.Rand) (rnd_ *rand.Rand, seed int64) {
-	rnd_ = rnd
-	if rnd_ == nil {
-		seed = time.Now().UnixNano()
-		rnd_ = rand.New(rand.NewSource(seed))
+func RandomIndex(rnd *rand.Rand, n, round int, fn func(i int)) {
+	if rnd == nil {
+		rnd = NewRand()
 	}
-	return
-}
-
-func RandomIndex(rnd *rand.Rand, n, round int, fn func(i int)) (seed int64) {
-	rnd, seed = makeRand(rnd)
 	for x := 0; x < round; x++ {
 		fn(rnd.Intn(n))
 	}
 	return
 }
 
-func ShuffledIndex(rnd *rand.Rand, n, round int, fn func(i int)) (seed int64) {
-	rnd, seed = makeRand(rnd)
+func ShuffledIndex(rnd *rand.Rand, n, round int, fn func(i int)) {
+	if rnd == nil {
+		rnd = NewRand()
+	}
 	for x := 0; x < round; x++ {
 		for _, i := range rnd.Perm(n) {
 			fn(i)
@@ -86,8 +118,10 @@ func ShuffledIndex(rnd *rand.Rand, n, round int, fn func(i int)) (seed int64) {
 	return
 }
 
-func RandomRange(rnd *rand.Rand, n, round int, fn func(start, limit int)) (seed int64) {
-	rnd, seed = makeRand(rnd)
+func RandomRange(rnd *rand.Rand, n, round int, fn func(start, limit int)) {
+	if rnd == nil {
+		rnd = NewRand()
+	}
 	for x := 0; x < round; x++ {
 		start := rnd.Intn(n)
 		length := 0

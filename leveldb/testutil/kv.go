@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strings"
 
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
@@ -87,14 +88,14 @@ func (kv KeyValue) IterateString(fn func(i int, key, value string)) {
 	})
 }
 
-func (kv KeyValue) IterateShuffled(rnd *rand.Rand, fn func(i int, key, value []byte)) (seed int64) {
-	return ShuffledIndex(rnd, kv.Len(), 1, func(i int) {
+func (kv KeyValue) IterateShuffled(rnd *rand.Rand, fn func(i int, key, value []byte)) {
+	ShuffledIndex(rnd, kv.Len(), 1, func(i int) {
 		fn(i, kv.keys[i], kv.values[i])
 	})
 }
 
-func (kv KeyValue) IterateShuffledString(rnd *rand.Rand, fn func(i int, key, value string)) (seed int64) {
-	return kv.IterateShuffled(rnd, func(i int, key, value []byte) {
+func (kv KeyValue) IterateShuffledString(rnd *rand.Rand, fn func(i int, key, value string)) {
+	kv.IterateShuffled(rnd, func(i int, key, value []byte) {
 		fn(i, string(key), string(value))
 	})
 }
@@ -160,4 +161,64 @@ func (kv KeyValue) Range(start, limit int) (r util.Range) {
 		r.Limit = kv.keys[limit]
 	}
 	return
+}
+
+func KeyValue_EmptyKey() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("", "v")
+	return kv
+}
+
+func KeyValue_EmptyValue() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("abc", "")
+	kv.PutString("abcd", "")
+	return kv
+}
+
+func KeyValue_OneKeyValue() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("abc", "v")
+	return kv
+}
+
+func KeyValue_BigValue() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("big1", strings.Repeat("1", 200000))
+	return kv
+}
+
+func KeyValue_SpecialKey() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("\xff\xff", "v3")
+	return kv
+}
+
+func KeyValue_MultipleKeyValue() *KeyValue {
+	kv := &KeyValue{}
+	kv.PutString("a", "v")
+	kv.PutString("aa", "v1")
+	kv.PutString("aaa", "v2")
+	kv.PutString("aaacccccccccc", "v2")
+	kv.PutString("aaaccccccccccd", "v3")
+	kv.PutString("aaaccccccccccf", "v4")
+	kv.PutString("aaaccccccccccfg", "v5")
+	kv.PutString("ab", "v6")
+	kv.PutString("abc", "v7")
+	kv.PutString("abcd", "v8")
+	kv.PutString("accccccccccccccc", "v9")
+	kv.PutString("b", "v10")
+	kv.PutString("bb", "v11")
+	kv.PutString("bc", "v12")
+	kv.PutString("c", "v13")
+	kv.PutString("c1", "v13")
+	kv.PutString("czzzzzzzzzzzzzz", "v14")
+	kv.PutString("fffffffffffffff", "v15")
+	kv.PutString("g11", "v15")
+	kv.PutString("g111", "v15")
+	kv.PutString("g111\xff", "v15")
+	kv.PutString("zz", "v16")
+	kv.PutString("zzzzzzz", "v16")
+	kv.PutString("zzzzzzzzzzzzzzzz", "v16")
+	return kv
 }

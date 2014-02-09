@@ -438,7 +438,6 @@ func (f *file) name() string {
 	default:
 		panic("invalid file type")
 	}
-	return ""
 }
 
 func (f *file) path() string {
