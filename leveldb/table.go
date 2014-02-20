@@ -16,7 +16,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
-	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // table file
@@ -160,85 +159,32 @@ func (p tFiles) getRange(cmp *iComparer) (min, max iKey) {
 	return
 }
 
-func (p tFiles) newIndexIterator(tops *tOps, cmp *iComparer, ro *opt.ReadOptions) *tFilesIter {
-	return &tFilesIter{
-		tops: tops,
-		cmp:  cmp,
-		ro:   ro,
-		tt:   p,
-		pos:  -1,
-	}
-}
-
-type tFilesIter struct {
-	util.BasicReleaser
+type tFilesArrayIndexer struct {
+	tf   tFiles
 	tops *tOps
-	cmp  *iComparer
+	icmp *iComparer
 	ro   *opt.ReadOptions
-	tt   tFiles
-	pos  int
 }
 
-func (i *tFilesIter) empty() bool {
-	return len(i.tt) == 0
+func (a *tFilesArrayIndexer) Len() int {
+	return len(a.tf)
 }
 
-func (i *tFilesIter) Valid() bool {
-	if i.pos < 0 || i.pos >= len(i.tt) {
-		return false
-	}
-	return true
+func (a *tFilesArrayIndexer) Search(key []byte) int {
+	return a.tf.search(iKey(key), a.icmp)
 }
 
-func (i *tFilesIter) First() bool {
-	if i.empty() {
-		return false
-	}
-	i.pos = 0
-	return true
+func (a *tFilesArrayIndexer) Get(i int) iterator.Iterator {
+	return a.tops.newIterator(a.tf[i], a.ro)
 }
 
-func (i *tFilesIter) Last() bool {
-	if i.empty() {
-		return false
-	}
-	i.pos = len(i.tt) - 1
-	return true
-}
-
-func (i *tFilesIter) Seek(key []byte) bool {
-	if i.empty() {
-		return false
-	}
-	i.pos = i.tt.search(iKey(key), i.cmp)
-	return i.pos < len(i.tt)
-}
-
-func (i *tFilesIter) Next() bool {
-	if i.pos >= len(i.tt) {
-		return false
-	}
-	i.pos++
-	return i.pos < len(i.tt)
-}
-
-func (i *tFilesIter) Prev() bool {
-	if i.pos < 0 {
-		return false
-	}
-	i.pos--
-	return i.pos >= 0
-}
-
-func (i *tFilesIter) Get() iterator.Iterator {
-	if i.pos < 0 || i.pos >= len(i.tt) {
-		return nil
-	}
-	return i.tops.newIterator(i.tt[i.pos], i.ro)
-}
-
-func (i *tFilesIter) Error() error {
-	return nil
+func (p tFiles) newIndexIterator(tops *tOps, icmp *iComparer, ro *opt.ReadOptions) iterator.IteratorIndexer {
+	return iterator.NewArrayIndexer(&tFilesArrayIndexer{
+		tf:   p,
+		tops: tops,
+		icmp: icmp,
+		ro:   ro,
+	})
 }
 
 // table file sorter interface
