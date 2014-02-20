@@ -80,7 +80,7 @@ var _ = testutil.Defer(func() {
 		})
 
 		Describe("read test", func() {
-			testutil.AllKeyValueTesting(nil, func(kv testutil.KeyValue) testutil.DB {
+			Build := func(kv testutil.KeyValue) testutil.DB {
 				o := &opt.Options{
 					BlockSize:            512,
 					BlockRestartInterval: 3,
@@ -97,7 +97,23 @@ var _ = testutil.Defer(func() {
 				// Opening the table.
 				tr := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()), nil, o)
 				return tableWrapper{tr}
-			})
+			}
+			Test := func(kv *testutil.KeyValue, body func(r *Reader)) func() {
+				return func() {
+					db := Build(*kv)
+					if body != nil {
+						body(db.(tableWrapper).Reader)
+					}
+					testutil.KeyValueTesting(nil, db, *kv)
+				}
+			}
+
+			testutil.AllKeyValueTesting(nil, Build)
+			Describe("with one key per block", Test(testutil.KeyValue_Generate(nil, 9, 1, 10, 512, 512), func(r *Reader) {
+				It("should have correct blocks number", func() {
+					Expect(r.indexBlock.restartsLen).Should(Equal(9))
+				})
+			}))
 		})
 	})
 })
