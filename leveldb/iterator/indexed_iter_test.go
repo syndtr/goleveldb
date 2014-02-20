@@ -7,6 +7,8 @@
 package iterator_test
 
 import (
+	"sort"
+
 	. "github.com/onsi/ginkgo"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
@@ -21,9 +23,15 @@ type keyValue struct {
 
 type keyValueIndex []keyValue
 
+func (x keyValueIndex) Search(key []byte) int {
+	return sort.Search(x.Len(), func(i int) bool {
+		return comparer.DefaultComparer.Compare(x[i].key, key) >= 0
+	})
+}
+
 func (x keyValueIndex) Len() int                        { return len(x) }
 func (x keyValueIndex) Index(i int) (key, value []byte) { return x[i].key, nil }
-func (x keyValueIndex) Get(i int) Iterator              { return NewArrayIterator(x[i], comparer.DefaultComparer) }
+func (x keyValueIndex) Get(i int) Iterator              { return NewArrayIterator(x[i]) }
 
 var _ = testutil.Defer(func() {
 	Describe("Indexed iterator", func() {
@@ -57,7 +65,7 @@ var _ = testutil.Defer(func() {
 					// Test the iterator.
 					t := testutil.IteratorTesting{
 						KeyValue: kv.Clone(),
-						Iter:     NewIndexedIterator(NewArrayIndexer(index, comparer.DefaultComparer), true, true),
+						Iter:     NewIndexedIterator(NewArrayIndexer(index), true, true),
 					}
 					testutil.DoIteratorTesting(&t)
 					done <- true

@@ -9,7 +9,6 @@ package iterator_test
 import (
 	. "github.com/onsi/ginkgo"
 
-	"github.com/syndtr/goleveldb/leveldb/comparer"
 	. "github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/testutil"
 )
@@ -23,7 +22,7 @@ var _ = testutil.Defer(func() {
 			// Test the iterator.
 			t := testutil.IteratorTesting{
 				KeyValue: kv.Clone(),
-				Iter:     NewArrayIterator(kv, comparer.DefaultComparer),
+				Iter:     NewArrayIterator(kv),
 			}
 			testutil.DoIteratorTesting(&t)
 		})

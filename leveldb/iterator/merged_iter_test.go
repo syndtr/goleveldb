@@ -35,7 +35,7 @@ var _ = testutil.Defer(func() {
 						if empty == 0 || (rnd.Int()%2 == 0 && filled > 0) {
 							filled--
 							Expect(filledKV[filled].Len()).ShouldNot(BeZero())
-							iters[i] = NewArrayIterator(filledKV[filled], comparer.DefaultComparer)
+							iters[i] = NewArrayIterator(filledKV[filled])
 						} else {
 							empty--
 							iters[i] = NewEmptyIterator(nil)

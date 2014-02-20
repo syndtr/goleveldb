@@ -7,141 +7,152 @@
 package iterator
 
 import (
-	"sort"
-
-	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-// Array is the interface that wraps basic Index and Len method.
-type Array interface {
-	// Index returns key/value pair with index of i.
-	Index(i int) (key, value []byte)
-
+// BasicArray is the interface that wraps basic Len and Search method.
+type BasicArray interface {
 	// Len returns length of the array.
 	Len() int
+
+	// Search finds smallest index that point to a key that is greater
+	// than or equal to the given key.
+	Search(key []byte) int
 }
 
-// Array is the interface that wraps Array and basic Get method.
+// Array is the interface that wraps BasicArray and basic Index method.
+type Array interface {
+	BasicArray
+
+	// Index returns key/value pair with index of i.
+	Index(i int) (key, value []byte)
+}
+
+// Array is the interface that wraps BasicArray and basic Get method.
 type ArrayIndexer interface {
-	Array
+	BasicArray
 
 	// Get returns a new data iterator with index of i.
 	Get(i int) Iterator
 }
 
-type arrayIterator struct {
+type basicArrayIterator struct {
 	util.BasicReleaser
-	array      Array
-	indexer    ArrayIndexer
-	cmp        comparer.Comparer
-	pos        int
-	key, value []byte
+	array BasicArray
+	pos   int
 }
 
-func (i *arrayIterator) setKV() {
-	i.key, i.value = i.array.Index(i.pos)
+func (i *basicArrayIterator) Valid() bool {
+	return i.pos >= 0 && i.pos < i.array.Len()
 }
 
-func (i *arrayIterator) clearKV() {
-	i.key = nil
-	i.value = nil
-}
-
-func (i *arrayIterator) Valid() bool {
-	if i.pos < 0 || i.pos >= i.array.Len() {
-		return false
-	}
-	return true
-}
-
-func (i *arrayIterator) First() bool {
+func (i *basicArrayIterator) First() bool {
 	if i.array.Len() == 0 {
 		i.pos = -1
-		i.clearKV()
 		return false
 	}
 	i.pos = 0
-	i.setKV()
 	return true
 }
 
-func (i *arrayIterator) Last() bool {
+func (i *basicArrayIterator) Last() bool {
 	n := i.array.Len()
 	if n == 0 {
 		i.pos = 0
 		return false
 	}
 	i.pos = n - 1
-	i.setKV()
 	return true
 }
 
-func (i *arrayIterator) Seek(key []byte) bool {
+func (i *basicArrayIterator) Seek(key []byte) bool {
 	n := i.array.Len()
 	if n == 0 {
 		i.pos = 0
 		return false
 	}
-	i.pos = sort.Search(n, func(x int) bool {
-		key_, _ := i.array.Index(x)
-		return i.cmp.Compare(key_, key) >= 0
-	})
+	i.pos = i.array.Search(key)
 	if i.pos >= n {
-		i.clearKV()
 		return false
 	}
-	i.setKV()
 	return true
 }
 
-func (i *arrayIterator) Next() bool {
+func (i *basicArrayIterator) Next() bool {
 	i.pos++
 	if n := i.array.Len(); i.pos >= n {
 		i.pos = n
-		i.clearKV()
 		return false
 	}
-	i.setKV()
 	return true
 }
 
-func (i *arrayIterator) Prev() bool {
+func (i *basicArrayIterator) Prev() bool {
 	i.pos--
 	if i.pos < 0 {
 		i.pos = -1
-		i.clearKV()
 		return false
 	}
-	i.setKV()
 	return true
 }
 
+func (i *basicArrayIterator) Error() error { return nil }
+
+type arrayIterator struct {
+	basicArrayIterator
+	array      Array
+	pos        int
+	key, value []byte
+}
+
+func (i *arrayIterator) updateKV() {
+	if i.pos == i.basicArrayIterator.pos {
+		return
+	}
+	i.pos = i.basicArrayIterator.pos
+	if i.Valid() {
+		i.key, i.value = i.array.Index(i.pos)
+	} else {
+		i.key = nil
+		i.value = nil
+	}
+}
+
 func (i *arrayIterator) Key() []byte {
+	i.updateKV()
 	return i.key
 }
 
 func (i *arrayIterator) Value() []byte {
+	i.updateKV()
 	return i.value
 }
 
-func (i *arrayIterator) Get() Iterator {
-	if i.Valid() && i.indexer != nil {
-		return i.indexer.Get(i.pos)
+type arrayIteratorIndexer struct {
+	basicArrayIterator
+	array ArrayIndexer
+}
+
+func (i *arrayIteratorIndexer) Get() Iterator {
+	if i.Valid() {
+		return i.array.Get(i.basicArrayIterator.pos)
 	}
 	return nil
 }
 
-func (i *arrayIterator) Error() error { return nil }
-
-// NewArrayIterator returns an iterator from the given array. The given
-// array should in strictly increasing key order, as defined by cmp.
-func NewArrayIterator(array Array, cmp comparer.Comparer) Iterator {
-	return &arrayIterator{array: array, cmp: cmp, pos: -1}
+// NewArrayIterator returns an iterator from the given array.
+func NewArrayIterator(array Array) Iterator {
+	return &arrayIterator{
+		basicArrayIterator: basicArrayIterator{array: array, pos: -1},
+		array:              array,
+		pos:                -1,
+	}
 }
 
-// NewArrayIndexer returns an index iterator from the given array. The
-// given array should in strictly increasing key order, as defined by cmp.
-func NewArrayIndexer(array ArrayIndexer, cmp comparer.Comparer) IteratorIndexer {
-	return &arrayIterator{array: array, indexer: array, cmp: cmp, pos: -1}
+// NewArrayIndexer returns an index iterator from the given array.
+func NewArrayIndexer(array ArrayIndexer) IteratorIndexer {
+	return &arrayIteratorIndexer{
+		basicArrayIterator: basicArrayIterator{array: array, pos: -1},
+		array:              array,
+	}
 }
