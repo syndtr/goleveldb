@@ -9,7 +9,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/testutil"
 )
 
-func TestMemdb(t *testing.T) {
+func TestIterator(t *testing.T) {
 	testutil.RunDefer()
 
 	RegisterFailHandler(Fail)
