@@ -19,7 +19,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-func (b *block) NewIterator(slice *util.Range) iterator.Iterator {
+func (b *block) TestNewIterator(slice *util.Range) iterator.Iterator {
 	return b.newIterator(slice, false, nil)
 }
 

@@ -11,10 +11,12 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/testutil"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-func (p *DB) FindLT(key []byte) (rkey, value []byte, err error) {
+func (p *DB) TestFindLT(key []byte) (rkey, value []byte, err error) {
 	p.mu.RLock()
 	if node := p.findLT(key); node != 0 {
 		n := p.nodeData[node]
@@ -28,7 +30,7 @@ func (p *DB) FindLT(key []byte) (rkey, value []byte, err error) {
 	return
 }
 
-func (p *DB) FindLast() (rkey, value []byte, err error) {
+func (p *DB) TestFindLast() (rkey, value []byte, err error) {
 	p.mu.RLock()
 	if node := p.findLast(); node != 0 {
 		n := p.nodeData[node]
@@ -40,6 +42,28 @@ func (p *DB) FindLast() (rkey, value []byte, err error) {
 	}
 	p.mu.RUnlock()
 	return
+}
+
+func (p *DB) TestPut(key []byte, value []byte) error {
+	p.Put(key, value)
+	return nil
+}
+
+func (p *DB) TestDelete(key []byte) error {
+	p.Delete(key)
+	return nil
+}
+
+func (p *DB) TestFind(key []byte) (rkey, rvalue []byte, err error) {
+	return p.Find(key)
+}
+
+func (p *DB) TestGet(key []byte) (value []byte, err error) {
+	return p.Get(key)
+}
+
+func (p *DB) TestNewIterator(slice *util.Range) iterator.Iterator {
+	return p.NewIterator(slice)
 }
 
 var _ = testutil.Defer(func() {
@@ -80,13 +104,13 @@ var _ = testutil.Defer(func() {
 							expectedKey, expectedValue := kv.Index(i)
 
 							// Using key that exist.
-							rkey, rvalue, err := db.FindLT(key)
+							rkey, rvalue, err := db.TestFindLT(key)
 							Expect(err).ShouldNot(HaveOccurred(), "Error for key %q -> %q", key, expectedKey)
 							Expect(rkey).Should(Equal(expectedKey), "Key")
 							Expect(rvalue).Should(Equal(expectedValue), "Value for key %q -> %q", key, expectedKey)
 
 							// Using key that doesn't exist.
-							rkey, rvalue, err = db.FindLT(key_)
+							rkey, rvalue, err = db.TestFindLT(key_)
 							Expect(err).ShouldNot(HaveOccurred(), "Error for key %q (%q) -> %q", key_, key, expectedKey)
 							Expect(rkey).Should(Equal(expectedKey))
 							Expect(rvalue).Should(Equal(expectedValue), "Value for key %q (%q) -> %q", key_, key, expectedKey)
@@ -97,7 +121,7 @@ var _ = testutil.Defer(func() {
 				if kv.Len() > 0 {
 					It("Should find last key with findLast", func() {
 						key, value := kv.Index(kv.Len() - 1)
-						rkey, rvalue, err := db.FindLast()
+						rkey, rvalue, err := db.TestFindLast()
 						Expect(err).ShouldNot(HaveOccurred())
 						Expect(rkey).Should(Equal(key))
 						Expect(rvalue).Should(Equal(value))

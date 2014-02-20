@@ -22,15 +22,15 @@ type tableWrapper struct {
 	*Reader
 }
 
-func (t tableWrapper) Find(key []byte) (rkey, rvalue []byte, err error) {
+func (t tableWrapper) TestFind(key []byte) (rkey, rvalue []byte, err error) {
 	return t.Reader.Find(key, nil)
 }
 
-func (t tableWrapper) Get(key []byte) (value []byte, err error) {
+func (t tableWrapper) TestGet(key []byte) (value []byte, err error) {
 	return t.Reader.Get(key, nil)
 }
 
-func (t tableWrapper) NewIterator(slice *util.Range) iterator.Iterator {
+func (t tableWrapper) TestNewIterator(slice *util.Range) iterator.Iterator {
 	return t.Reader.NewIterator(slice, nil)
 }
 

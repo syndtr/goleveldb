@@ -42,11 +42,11 @@ const (
 )
 
 type Put interface {
-	Put(key []byte, value []byte) error
+	TestPut(key []byte, value []byte) error
 }
 
 type Delete interface {
-	Delete(key []byte) error
+	TestDelete(key []byte) error
 }
 
 type DBTesting struct {
@@ -82,7 +82,7 @@ func (t *DBTesting) Text() string {
 }
 
 func (t *DBTesting) TestPresentKV(key, value []byte) {
-	rvalue, err := t.DB.Get(key)
+	rvalue, err := t.DB.TestGet(key)
 	Expect(err).ShouldNot(HaveOccurred(), "Get on key %q, %s", key, t.text())
 	Expect(rvalue).Should(Equal(value), "Value for key %q, %s", key, t.text())
 }
@@ -94,7 +94,7 @@ func (t *DBTesting) TestAllPresent() {
 }
 
 func (t *DBTesting) TestDeletedKey(key []byte) {
-	_, err := t.DB.Get(key)
+	_, err := t.DB.TestGet(key)
 	Expect(err).Should(Equal(util.ErrNotFound), "Get on deleted key %q, %s", key, t.text())
 }
 
@@ -124,7 +124,7 @@ func (t *DBTesting) Put(key, value []byte) {
 		t.setAct(DBOverwrite, key)
 	}
 	t.Deleted.Delete(key)
-	err := t.DB.Put(key, value)
+	err := t.DB.TestPut(key, value)
 	Expect(err).ShouldNot(HaveOccurred(), t.Text())
 	t.TestPresentKV(key, value)
 	t.post()
@@ -147,7 +147,7 @@ func (t *DBTesting) Delete(key []byte) {
 	} else {
 		t.setAct(DBDeleteNA, key)
 	}
-	err := t.DB.Delete(key)
+	err := t.DB.TestDelete(key)
 	Expect(err).ShouldNot(HaveOccurred(), t.Text())
 	t.TestDeletedKey(key)
 	t.post()

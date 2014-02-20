@@ -284,7 +284,7 @@ func (p *DB) Delete(key []byte) error {
 
 	node, exact := p.findGE(key, true)
 	if !exact {
-		return nil
+		return ErrNotFound
 	}
 
 	h := p.nodeData[node+nHeight]

@@ -20,15 +20,15 @@ import (
 type DB interface{}
 
 type Find interface {
-	Find(key []byte) (rkey, rvalue []byte, err error)
+	TestFind(key []byte) (rkey, rvalue []byte, err error)
 }
 
 type Get interface {
-	Get(key []byte) (value []byte, err error)
+	TestGet(key []byte) (value []byte, err error)
 }
 
 type NewIterator interface {
-	NewIterator(slice *util.Range) iterator.Iterator
+	TestNewIterator(slice *util.Range) iterator.Iterator
 }
 
 func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
@@ -42,13 +42,13 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				key_, key, value := kv.IndexInexact(i)
 
 				// Using exact key.
-				rkey, rvalue, err := db.Find(key)
+				rkey, rvalue, err := db.TestFind(key)
 				Expect(err).ShouldNot(HaveOccurred(), "Error for key %q", key)
 				Expect(rkey).Should(Equal(key), "Key")
 				Expect(rvalue).Should(Equal(value), "Value for key %q", key)
 
 				// Using inexact key.
-				rkey, rvalue, err = db.Find(key_)
+				rkey, rvalue, err = db.TestFind(key_)
 				Expect(err).ShouldNot(HaveOccurred(), "Error for key %q (%q)", key_, key)
 				Expect(rkey).Should(Equal(key))
 				Expect(rvalue).Should(Equal(value), "Value for key %q (%q)", key_, key)
@@ -61,7 +61,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				key_, _ := kv.Index(kv.Len() - 1)
 				key = BytesAfter(key_)
 			}
-			rkey, _, err := db.Find(key)
+			rkey, _, err := db.TestFind(key)
 			Expect(err).Should(HaveOccurred(), "Find for key %q yield key %q", key, rkey)
 			Expect(err).Should(Equal(util.ErrNotFound))
 		})
@@ -73,13 +73,13 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				key_, key, value := kv.IndexInexact(i)
 
 				// Using exact key.
-				rvalue, err := db.Get(key)
+				rvalue, err := db.TestGet(key)
 				Expect(err).ShouldNot(HaveOccurred(), "Error for key %q", key)
 				Expect(rvalue).Should(Equal(value), "Value for key %q", key)
 
 				// Using inexact key.
 				if len(key_) > 0 {
-					_, err = db.Get(key_)
+					_, err = db.TestGet(key_)
 					Expect(err).Should(HaveOccurred(), "Error for key %q", key_)
 					Expect(err).Should(Equal(util.ErrNotFound))
 				}
@@ -89,7 +89,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 
 	if db, ok := p.(NewIterator); ok {
 		TestIter := func(r *util.Range, _kv KeyValue) {
-			iter := db.NewIterator(r)
+			iter := db.TestNewIterator(r)
 			Expect(iter.Error()).ShouldNot(HaveOccurred())
 
 			t := IteratorTesting{
