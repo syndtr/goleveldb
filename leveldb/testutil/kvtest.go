@@ -37,7 +37,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 	}
 
 	if db, ok := p.(Find); ok {
-		It("Should be able to find all keys", func() {
+		It("Should find all keys with Find", func() {
 			ShuffledIndex(nil, kv.Len(), 1, func(i int) {
 				key_, key, value := kv.IndexInexact(i)
 
@@ -55,7 +55,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 			})
 		})
 
-		It("Should returns error if the key is not present", func() {
+		It("Should return error if the key is not present", func() {
 			var key []byte
 			if kv.Len() > 0 {
 				key_, _ := kv.Index(kv.Len() - 1)
@@ -100,7 +100,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 			DoIteratorTesting(&t)
 		}
 
-		It("Should do iterations and seeks correctly", func(done Done) {
+		It("Should iterates and seeks correctly", func(done Done) {
 			TestIter(nil, kv.Clone())
 			done <- true
 		})
@@ -116,7 +116,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				{&util.Range{Start: key_, Limit: nil}, i, kv.Len()},
 				{&util.Range{Start: nil, Limit: key_}, 0, i},
 			} {
-				It(fmt.Sprintf("Should do iterations and seeks correctly of a slice of %d .. %d", x.start, x.limit), func(done Done) {
+				It(fmt.Sprintf("Should iterates and seeks correctly of a slice %d .. %d", x.start, x.limit), func(done Done) {
 					TestIter(x.r, kv.Slice(x.start, x.limit))
 					done <- true
 				})
@@ -124,7 +124,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 		})
 
 		RandomRange(rnd, kv.Len(), kv.Len(), func(start, limit int) {
-			It(fmt.Sprintf("Should do iterations and seeks correctly of a slice of %d .. %d", start, limit), func(done Done) {
+			It(fmt.Sprintf("Should iterates and seeks correctly of a slice %d .. %d", start, limit), func(done Done) {
 				r := kv.Range(start, limit)
 				TestIter(&r, kv.Slice(start, limit))
 				done <- true

@@ -234,7 +234,7 @@ func (p *DB) findLast() int {
 // for that key; a DB is not a multi-map.
 //
 // It is safe to modify the contents of the arguments after Put returns.
-func (p *DB) Put(key []byte, value []byte) {
+func (p *DB) Put(key []byte, value []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -246,7 +246,7 @@ func (p *DB) Put(key []byte, value []byte) {
 		m := p.nodeData[node+nVal]
 		p.nodeData[node+nVal] = len(value)
 		p.kvSize += len(value) - m
-		return
+		return nil
 	}
 
 	h := p.randHeight()
@@ -271,6 +271,7 @@ func (p *DB) Put(key []byte, value []byte) {
 
 	p.kvSize += len(key) + len(value)
 	p.n++
+	return nil
 }
 
 // Delete deletes the value for the given key. It returns ErrNotFound if
@@ -283,7 +284,7 @@ func (p *DB) Delete(key []byte) error {
 
 	node, exact := p.findGE(key, true)
 	if !exact {
-		return ErrNotFound
+		return nil
 	}
 
 	h := p.nodeData[node+nHeight]
