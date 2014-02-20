@@ -273,6 +273,10 @@ func (i *dbIter) Release() {
 		// Clear the finalizer.
 		runtime.SetFinalizer(i, nil)
 
+		if i.releaser != nil {
+			i.releaser.Release()
+		}
+
 		i.dir = dirReleased
 		i.key = nil
 		i.value = nil
