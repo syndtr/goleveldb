@@ -120,10 +120,10 @@ var _ = testutil.Defer(func() {
 					}
 
 					It("Should do iterations and seeks correctly #0",
-						Test(&util.Range{Start: []byte("k0"), Limit: []byte("k6")}))
+						Test(&util.Range{Start: []byte("k0"), Limit: []byte("k6")}), 2.0)
 
 					It("Should do iterations and seeks correctly #1",
-						Test(&util.Range{Start: []byte(""), Limit: []byte("zzzzzzz")}))
+						Test(&util.Range{Start: []byte(""), Limit: []byte("zzzzzzz")}), 2.0)
 				})
 			}
 		})

@@ -103,7 +103,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 		It("Should iterates and seeks correctly", func(done Done) {
 			TestIter(nil, kv.Clone())
 			done <- true
-		})
+		}, 3.0)
 
 		RandomIndex(rnd, kv.Len(), kv.Len(), func(i int) {
 			type slice struct {
@@ -119,7 +119,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				It(fmt.Sprintf("Should iterates and seeks correctly of a slice %d .. %d", x.start, x.limit), func(done Done) {
 					TestIter(x.r, kv.Slice(x.start, x.limit))
 					done <- true
-				})
+				}, 3.0)
 			}
 		})
 
@@ -128,7 +128,7 @@ func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 				r := kv.Range(start, limit)
 				TestIter(&r, kv.Slice(start, limit))
 				done <- true
-			})
+			}, 3.0)
 		})
 	}
 }
