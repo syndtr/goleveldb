@@ -121,7 +121,7 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 				continue
 			}
 
-			tmp.sort(tFileSorterNewest(nil))
+			tmp.sortByNum()
 			ts = tmp
 		} else {
 			i := ts.search(key, icmp)
@@ -360,7 +360,6 @@ func (p *versionStaging) finish() *version {
 
 	// build new version
 	nv := &version{s: s}
-	sorter := &tFileSorterKey{cmp: s.cmp}
 	for level, tm := range p.tables {
 		bt := btt[level]
 
@@ -387,7 +386,7 @@ func (p *versionStaging) finish() *version {
 		}
 
 		// sort tables
-		nt.sort(sorter)
+		nt.sortByKey(s.cmp)
 		nv.tables[level] = nt
 	}
 
