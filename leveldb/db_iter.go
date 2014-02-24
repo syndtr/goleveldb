@@ -20,18 +20,18 @@ var (
 	errInvalidIkey = errors.New("leveldb: Iterator: invalid internal key")
 )
 
-func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
+func (db *DB) newRawIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
 	s := db.s
 
 	em, fm := db.getMems()
 	v := s.version()
 
-	ti := v.getIterators(ro)
+	ti := v.getIterators(slice, ro)
 	n := len(ti) + 2
 	i := make([]iterator.Iterator, 0, n)
-	i = append(i, em.NewIterator(nil))
+	i = append(i, em.NewIterator(slice))
 	if fm != nil {
-		i = append(i, fm.NewIterator(nil))
+		i = append(i, fm.NewIterator(slice))
 	}
 	i = append(i, ti...)
 	mi := iterator.NewMergedIterator(i, s.cmp, true)
@@ -39,13 +39,25 @@ func (db *DB) newRawIterator(ro *opt.ReadOptions) iterator.Iterator {
 	return mi
 }
 
-func (db *DB) newIterator(seq uint64, ro *opt.ReadOptions) *dbIter {
-	rawIter := db.newRawIterator(ro)
+func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *dbIter {
+	var slice_ *util.Range
+	if slice != nil {
+		slice_ = &util.Range{}
+		if slice.Start != nil {
+			slice_.Start = newIKey(slice.Start, kMaxSeq, tSeek)
+		}
+		if slice.Limit != nil {
+			slice_.Limit = newIKey(slice.Limit, kMaxSeq, tSeek)
+		}
+	}
+	rawIter := db.newRawIterator(slice_, ro)
 	iter := &dbIter{
 		cmp:    db.s.cmp.cmp,
 		iter:   rawIter,
 		seq:    seq,
 		strict: db.s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator),
+		key:    make([]byte, 0),
+		value:  make([]byte, 0),
 	}
 	runtime.SetFinalizer(iter, (*dbIter).Release)
 	return iter
@@ -193,25 +205,27 @@ func (i *dbIter) Next() bool {
 func (i *dbIter) prev() bool {
 	i.dir = dirBackward
 	del := true
-	for {
-		ukey, seq, t, ok := parseIkey(i.iter.Key())
-		if ok {
-			if seq <= i.seq {
-				if !del && i.cmp.Compare(ukey, i.key) < 0 {
-					return true
+	if i.iter.Valid() {
+		for {
+			ukey, seq, t, ok := parseIkey(i.iter.Key())
+			if ok {
+				if seq <= i.seq {
+					if !del && i.cmp.Compare(ukey, i.key) < 0 {
+						return true
+					}
+					del = (t == tDel)
+					if !del {
+						i.key = append(i.key[:0], ukey...)
+						i.value = append(i.value[:0], i.iter.Value()...)
+					}
 				}
-				del = (t == tDel)
-				if !del {
-					i.key = append(i.key[:0], ukey...)
-					i.value = append(i.value[:0], i.iter.Value()...)
-				}
+			} else if i.strict {
+				i.setErr(errInvalidIkey)
+				return false
 			}
-		} else if i.strict {
-			i.setErr(errInvalidIkey)
-			return false
-		}
-		if !i.iter.Prev() {
-			break
+			if !i.iter.Prev() {
+				break
+			}
 		}
 	}
 	if del {

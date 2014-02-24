@@ -133,7 +133,7 @@ func (h *dbCorruptHarness) check(min, max int) {
 	db := p.db
 
 	var n, badk, badv, missed, good int
-	iter := db.NewIterator(p.ro)
+	iter := db.NewIterator(nil, p.ro)
 	for iter.Next() {
 		k := 0
 		fmt.Sscanf(string(iter.Key()), "%d", &k)

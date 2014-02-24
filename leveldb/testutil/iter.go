@@ -99,6 +99,7 @@ func (t *IteratorTesting) IsLast() bool {
 func (t *IteratorTesting) TestKV() {
 	t.init()
 	key, value := t.Index(t.Pos)
+	Expect(t.Iter.Key()).NotTo(BeNil())
 	Expect(t.Iter.Key()).Should(Equal(key), "Key is invalid, %s", t.text())
 	Expect(t.Iter.Value()).Should(Equal(value), "Value for key %q, %s", key, t.text())
 }

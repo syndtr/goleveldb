@@ -13,23 +13,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
-
-type DB interface{}
-
-type Find interface {
-	TestFind(key []byte) (rkey, rvalue []byte, err error)
-}
-
-type Get interface {
-	TestGet(key []byte) (value []byte, err error)
-}
-
-type NewIterator interface {
-	TestNewIterator(slice *util.Range) iterator.Iterator
-}
 
 func KeyValueTesting(rnd *rand.Rand, p DB, kv KeyValue) {
 	if rnd == nil {

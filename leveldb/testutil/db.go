@@ -12,8 +12,31 @@ import (
 
 	. "github.com/onsi/gomega"
 
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
+
+type DB interface{}
+
+type Put interface {
+	TestPut(key []byte, value []byte) error
+}
+
+type Delete interface {
+	TestDelete(key []byte) error
+}
+
+type Find interface {
+	TestFind(key []byte) (rkey, rvalue []byte, err error)
+}
+
+type Get interface {
+	TestGet(key []byte) (value []byte, err error)
+}
+
+type NewIterator interface {
+	TestNewIterator(slice *util.Range) iterator.Iterator
+}
 
 type DBAct int
 
@@ -40,14 +63,6 @@ const (
 	DBDelete
 	DBDeleteNA
 )
-
-type Put interface {
-	TestPut(key []byte, value []byte) error
-}
-
-type Delete interface {
-	TestDelete(key []byte) error
-}
 
 type DBTesting struct {
 	Rand *rand.Rand
@@ -185,4 +200,17 @@ func DoDBTesting(t *DBTesting) {
 		t.PutRandom()
 	}
 	t.RandomAct((t.Deleted.Len() + t.Present.Len()) * 10)
+
+	// Additional iterator testing
+	if db, ok := t.DB.(NewIterator); ok {
+		iter := db.TestNewIterator(nil)
+		Expect(iter.Error()).NotTo(HaveOccurred())
+
+		it := IteratorTesting{
+			KeyValue: t.Present,
+			Iter:     iter,
+		}
+
+		DoIteratorTesting(&it)
+	}
 }

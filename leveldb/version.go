@@ -13,6 +13,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var levelMaxSize [kNumLevels]float64
@@ -124,7 +125,7 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 			tmp.sortByNum()
 			ts = tmp
 		} else {
-			i := ts.search(key, icmp)
+			i := ts.searchMax(key, icmp)
 			if i >= len(ts) || ucmp.Compare(ukey, ts[i].min.ukey()) < 0 {
 				continue
 			}
@@ -174,13 +175,13 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 	return
 }
 
-func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
+func (v *version) getIterators(slice *util.Range, ro *opt.ReadOptions) (its []iterator.Iterator) {
 	s := v.s
 	icmp := s.cmp
 
 	// Merge all level zero files together since they may overlap
 	for _, t := range v.tables[0] {
-		it := s.tops.newIterator(t, ro)
+		it := s.tops.newIterator(t, slice, ro)
 		its = append(its, it)
 	}
 
@@ -190,7 +191,7 @@ func (v *version) getIterators(ro *opt.ReadOptions) (its []iterator.Iterator) {
 			continue
 		}
 
-		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict, true)
+		it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, slice, ro), strict, true)
 		its = append(its, it)
 	}
 

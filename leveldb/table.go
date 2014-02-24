@@ -16,6 +16,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // table file
@@ -103,7 +104,13 @@ func (tf tFiles) size() (sum uint64) {
 	return sum
 }
 
-func (tf tFiles) search(key iKey, icmp *iComparer) int {
+func (tf tFiles) searchMin(key iKey, icmp *iComparer) int {
+	return sort.Search(len(tf), func(i int) bool {
+		return icmp.Compare(tf[i].min, key) >= 0
+	})
+}
+
+func (tf tFiles) searchMax(key iKey, icmp *iComparer) int {
 	return sort.Search(len(tf), func(i int) bool {
 		return icmp.Compare(tf[i].max, key) >= 0
 	})
@@ -125,7 +132,7 @@ func (tf tFiles) isOverlaps(min, max []byte, disjSorted bool, icmp *iComparer) b
 	var idx int
 	if len(min) > 0 {
 		// Find the earliest possible internal key for min
-		idx = tf.search(newIKey(min, kMaxSeq, tSeek), icmp)
+		idx = tf.searchMax(newIKey(min, kMaxSeq, tSeek), icmp)
 	}
 
 	if idx >= len(tf) {
@@ -179,28 +186,45 @@ func (tf tFiles) getRange(icmp *iComparer) (min, max iKey) {
 	return
 }
 
-func (tf tFiles) newIndexIterator(tops *tOps, icmp *iComparer, ro *opt.ReadOptions) iterator.IteratorIndexer {
+func (tf tFiles) newIndexIterator(tops *tOps, icmp *iComparer, slice *util.Range, ro *opt.ReadOptions) iterator.IteratorIndexer {
+	if slice != nil {
+		var start, limit int
+		if slice.Start != nil {
+			start = tf.searchMax(iKey(slice.Start), icmp)
+		}
+		if slice.Limit != nil {
+			limit = tf.searchMin(iKey(slice.Limit), icmp)
+		} else {
+			limit = tf.Len()
+		}
+		tf = tf[start:limit]
+	}
 	return iterator.NewArrayIndexer(&tFilesArrayIndexer{
 		tFiles: tf,
 		tops:   tops,
 		icmp:   icmp,
+		slice:  slice,
 		ro:     ro,
 	})
 }
 
 type tFilesArrayIndexer struct {
 	tFiles
-	tops *tOps
-	icmp *iComparer
-	ro   *opt.ReadOptions
+	tops  *tOps
+	icmp  *iComparer
+	slice *util.Range
+	ro    *opt.ReadOptions
 }
 
 func (a *tFilesArrayIndexer) Search(key []byte) int {
-	return a.search(iKey(key), a.icmp)
+	return a.searchMax(iKey(key), a.icmp)
 }
 
 func (a *tFilesArrayIndexer) Get(i int) iterator.Iterator {
-	return a.tops.newIterator(a.tFiles[i], a.ro)
+	if i == 0 || i == a.Len()-1 {
+		return a.tops.newIterator(a.tFiles[i], a.slice, a.ro)
+	}
+	return a.tops.newIterator(a.tFiles[i], nil, a.ro)
 }
 
 type tFilesSortByKey struct {
@@ -325,12 +349,12 @@ func (t *tOps) getApproximateOffset(f *tFile, key []byte) (offset uint64, err er
 	return
 }
 
-func (t *tOps) newIterator(f *tFile, ro *opt.ReadOptions) iterator.Iterator {
+func (t *tOps) newIterator(f *tFile, slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
 	c, err := t.lookup(f)
 	if err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
-	iter := c.Value().(*table.Reader).NewIterator(nil, ro)
+	iter := c.Value().(*table.Reader).NewIterator(slice, ro)
 	iter.SetReleaser(c)
 	return iter
 }

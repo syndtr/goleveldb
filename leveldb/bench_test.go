@@ -240,7 +240,7 @@ func (p *dbBench) seeks() {
 }
 
 func (p *dbBench) newIter() iterator.Iterator {
-	iter := p.db.NewIterator(p.ro)
+	iter := p.db.NewIterator(nil, p.ro)
 	err := iter.Error()
 	if err != nil {
 		p.b.Fatal("cannot create iterator: ", err)

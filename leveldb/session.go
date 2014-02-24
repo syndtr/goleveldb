@@ -365,10 +365,10 @@ func (c *compaction) newIterator() iterator.Iterator {
 
 		if level+i == 0 {
 			for _, t := range tt {
-				its = append(its, s.tops.newIterator(t, ro))
+				its = append(its, s.tops.newIterator(t, nil, ro))
 			}
 		} else {
-			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, ro), strict, true)
+			it := iterator.NewIndexedIterator(tt.newIndexIterator(s.tops, icmp, nil, ro), strict, true)
 			its = append(its, it)
 		}
 	}

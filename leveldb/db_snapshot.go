@@ -12,6 +12,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type snapshotElement struct {
@@ -119,12 +120,17 @@ func (p *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error
 // underlying DB. The resultant key/value pairs are guaranteed to be
 // consistent.
 //
+// Slice allows slicing the iterator to only contains keys in the given
+// range. A nil Range.Start is treated as a key before all keys in the
+// DB. And a nil Range.Limit is treated as a key after all keys in
+// the DB.
+//
 // The iterator must be released after use, by calling Release method.
 // Releasing the snapshot doesn't mean releasing the iterator too, the
 // iterator would be still valid until released.
 //
 // Also read Iterator documentation of the leveldb/iterator package.
-func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
+func (p *Snapshot) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
 	db := p.db
 	if err := db.ok(); err != nil {
 		return iterator.NewEmptyIterator(err)
@@ -134,7 +140,7 @@ func (p *Snapshot) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
 	if p.released {
 		return iterator.NewEmptyIterator(ErrSnapshotReleased)
 	}
-	return db.newIterator(p.elem.seq, ro)
+	return db.newIterator(p.elem.seq, slice, ro)
 }
 
 // Release releases the snapshot. This will not release any returned

@@ -224,7 +224,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	ucmp := db.s.cmp.cmp
 
 	ikey := newIKey([]byte(key), kMaxSeq, tVal)
-	iter := db.newRawIterator(new(opt.ReadOptions))
+	iter := db.newRawIterator(nil, nil)
 	if !iter.Seek(ikey) && iter.Error() != nil {
 		t.Error("AllEntries: error during seek, err: ", iter.Error())
 		return
@@ -276,7 +276,7 @@ func (h *dbHarness) getKeyVal(want string) {
 		t.Fatal("GetSnapshot: got error: ", err)
 	}
 	res := ""
-	iter := s.NewIterator(new(opt.ReadOptions))
+	iter := s.NewIterator(nil, nil)
 	for iter.Next() {
 		res += fmt.Sprintf("(%s->%s)", string(iter.Key()), string(iter.Value()))
 	}
@@ -766,7 +766,7 @@ func TestDb_IterMultiWithDelete(t *testing.T) {
 		h.delete("b")
 		h.get("b", false)
 
-		iter := h.db.NewIterator(new(opt.ReadOptions))
+		iter := h.db.NewIterator(nil, nil)
 		iter.Seek([]byte("c"))
 		testKeyVal(t, iter, "c->vc")
 		iter.Prev()
@@ -775,7 +775,7 @@ func TestDb_IterMultiWithDelete(t *testing.T) {
 
 		h.compactMem()
 
-		iter = h.db.NewIterator(new(opt.ReadOptions))
+		iter = h.db.NewIterator(nil, nil)
 		iter.Seek([]byte("c"))
 		testKeyVal(t, iter, "c->vc")
 		iter.Prev()
@@ -791,7 +791,7 @@ func TestDb_IteratorPinsRef(t *testing.T) {
 	h.put("foo", "hello")
 
 	// Get iterator that will yield the current contents of the DB.
-	iter := h.db.NewIterator(new(opt.ReadOptions))
+	iter := h.db.NewIterator(nil, nil)
 
 	// Write to force compactions
 	h.put("foo", "newvalue1")
@@ -1424,7 +1424,7 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 		h.put("k", "v")
 		h.getVal("k", "v")
 
-		iter = db.NewIterator(h.ro)
+		iter = db.NewIterator(nil, h.ro)
 		iter.Seek([]byte("k"))
 		testKeyVal(t, iter, "k->v")
 
@@ -1436,7 +1436,7 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 
 		h.getValr(snap, "k", "v")
 
-		iter2 = snap.NewIterator(h.ro)
+		iter2 = snap.NewIterator(nil, h.ro)
 		iter2.Seek([]byte("k"))
 		testKeyVal(t, iter2, "k->v")
 
@@ -1470,10 +1470,10 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	_, err = db.GetSnapshot()
 	assertErr(t, err, true)
 
-	iter3 := db.NewIterator(h.ro)
+	iter3 := db.NewIterator(nil, h.ro)
 	assertErr(t, iter3.Error(), true)
 
-	iter3 = snap.NewIterator(h.ro)
+	iter3 = snap.NewIterator(nil, h.ro)
 	assertErr(t, iter3.Error(), true)
 
 	assertErr(t, db.Delete([]byte("k"), h.wo), true)
@@ -1725,7 +1725,7 @@ func TestDb_Concurrent2(t *testing.T) {
 		for i := 0; i < n2; i++ {
 			closeWg.Add(1)
 			go func(i int) {
-				it := h.db.NewIterator(nil)
+				it := h.db.NewIterator(nil, nil)
 				var pk []byte
 				for it.Next() {
 					kk := it.Key()

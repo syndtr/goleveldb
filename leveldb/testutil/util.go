@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"flag"
 	"math/rand"
+	"reflect"
 	"sync"
 
 	"github.com/onsi/ginkgo/config"
@@ -18,21 +19,43 @@ import (
 )
 
 var (
-	runfn []func()
+	runfn = make(map[string][]func())
 	runmu sync.Mutex
 )
 
-func Defer(fn func()) bool {
-	runmu.Lock()
-	runfn = append(runfn, fn)
-	runmu.Unlock()
+func Defer(args ...interface{}) bool {
+	var (
+		group string
+		fn    func()
+	)
+	for _, arg := range args {
+		v := reflect.ValueOf(arg)
+		switch v.Kind() {
+		case reflect.String:
+			group = v.String()
+		case reflect.Func:
+			r := reflect.ValueOf(&fn).Elem()
+			r.Set(v)
+		}
+	}
+	if fn != nil {
+		runmu.Lock()
+		runfn[group] = append(runfn[group], fn)
+		runmu.Unlock()
+	}
 	return true
 }
 
-func RunDefer() bool {
+func RunDefer(groups ...string) bool {
+	if len(groups) == 0 {
+		groups = append(groups, "")
+	}
 	runmu.Lock()
-	runfn_ := runfn
-	runfn = nil
+	var runfn_ []func()
+	for _, group := range groups {
+		runfn_ = append(runfn_, runfn[group]...)
+		delete(runfn, group)
+	}
 	runmu.Unlock()
 	for _, fn := range runfn_ {
 		fn()

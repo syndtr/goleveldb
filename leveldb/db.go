@@ -231,7 +231,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		}
 
 		t := newTFile(f, uint64(size), nil, nil)
-		iter := s.tops.newIterator(t, nil)
+		iter := s.tops.newIterator(t, nil, nil)
 		// min ikey
 		if iter.First() {
 			t.min = iter.Key()
@@ -266,7 +266,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	// extract largest seq number from newest table
 	if nt != nil {
 		var lseq uint64
-		iter := s.tops.newIterator(nt, nil)
+		iter := s.tops.newIterator(nt, nil, nil)
 		for iter.Next() {
 			seq, _, ok := iKey(iter.Key()).parseNum()
 			if !ok {
@@ -473,17 +473,22 @@ func (d *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 // underlying DB. The resultant key/value pairs are guaranteed to be
 // consistent.
 //
+// Slice allows slicing the iterator to only contains keys in the given
+// range. A nil Range.Start is treated as a key before all keys in the
+// DB. And a nil Range.Limit is treated as a key after all keys in
+// the DB.
+//
 // The iterator must be released after use, by calling Release method.
 //
 // Also read Iterator documentation of the leveldb/iterator package.
-func (d *DB) NewIterator(ro *opt.ReadOptions) iterator.Iterator {
+func (d *DB) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
 	if err := d.ok(); err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
 
 	p := d.newSnapshot()
 	defer p.Release()
-	return p.NewIterator(ro)
+	return p.NewIterator(slice, ro)
 }
 
 // GetSnapshot returns a latest snapshot of the underlying DB. A snapshot
