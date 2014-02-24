@@ -31,7 +31,7 @@ var _ = testutil.Defer(func() {
 				db := newTestingDB(o, nil, nil)
 				t := testutil.DBTesting{
 					DB:      db,
-					Deleted: testutil.KeyValue_Generate(nil, 500, 1, 30, 5, 5).Clone(),
+					Deleted: testutil.KeyValue_Generate(nil, 500, 1, 50, 5, 5).Clone(),
 				}
 				testutil.DoDBTesting(&t)
 				db.TestClose()
