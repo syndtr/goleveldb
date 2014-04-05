@@ -204,6 +204,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	if err != nil {
 		return
 	}
+
 	ff := files(ff0)
 	ff.sort()
 
@@ -281,7 +282,11 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	}
 
 	// set file num based on largest one
-	s.stFileNum = ff[len(ff)-1].Num() + 1
+	if len(ff) > 0 {
+		s.stFileNum = ff[len(ff)-1].Num() + 1
+	} else {
+		s.stFileNum = 0
+	}
 
 	// create brand new manifest
 	err = s.create()
