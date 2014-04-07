@@ -138,7 +138,8 @@ type Options struct {
 	ErrorIfExist bool
 
 	// ErrorIfMissing defines whether an error should returned if the DB is
-	// missing.
+	// missing. If false then the database will be created if missing, otherwise
+	// an error will be returned.
 	//
 	// The default value is false.
 	ErrorIfMissing bool
