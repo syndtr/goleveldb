@@ -14,16 +14,17 @@ import (
 )
 
 var cases = []struct {
-	name  string
-	ftype FileType
-	num   uint64
+	oldName []string
+	name    string
+	ftype   FileType
+	num     uint64
 }{
-	{"000100.log", TypeJournal, 100},
-	{"000000.log", TypeJournal, 0},
-	{"000000.sst", TypeTable, 0},
-	{"MANIFEST-000002", TypeManifest, 2},
-	{"MANIFEST-000007", TypeManifest, 7},
-	{"18446744073709551615.log", TypeJournal, 18446744073709551615},
+	{nil, "000100.log", TypeJournal, 100},
+	{nil, "000000.log", TypeJournal, 0},
+	{[]string{"000000.sst"}, "000000.ldb", TypeTable, 0},
+	{nil, "MANIFEST-000002", TypeManifest, 2},
+	{nil, "MANIFEST-000007", TypeManifest, 7},
+	{nil, "18446744073709551615.log", TypeJournal, 18446744073709551615},
 }
 
 var invalidCases = []string{
@@ -62,16 +63,18 @@ func TestFileStorage_CreateFileName(t *testing.T) {
 
 func TestFileStorage_ParseFileName(t *testing.T) {
 	for _, c := range cases {
-		f := new(file)
-		if !f.parse(c.name) {
-			t.Errorf("cannot parse filename '%s'", c.name)
-			continue
-		}
-		if f.Type() != c.ftype {
-			t.Errorf("filename '%s' invalid type got '%d', want '%d'", c.name, f.Type(), c.ftype)
-		}
-		if f.Num() != c.num {
-			t.Errorf("filename '%s' invalid number got '%d', want '%d'", c.name, f.Num(), c.num)
+		for _, name := range append([]string{c.name}, c.oldName...) {
+			f := new(file)
+			if !f.parse(name) {
+				t.Errorf("cannot parse filename '%s'", name)
+				continue
+			}
+			if f.Type() != c.ftype {
+				t.Errorf("filename '%s' invalid type got '%d', want '%d'", name, f.Type(), c.ftype)
+			}
+			if f.Num() != c.num {
+				t.Errorf("filename '%s' invalid number got '%d', want '%d'", name, f.Num(), c.num)
+			}
 		}
 	}
 }
