@@ -105,8 +105,8 @@ type Storage interface {
 	// The file types may be OR'ed together.
 	GetFiles(t FileType) ([]File, error)
 
-	// GetManifest returns a manifest file. Returns os.ErrNotExist if manifest
-	// file does not exist.
+	// GetManifest returns a manifest file. Should returns os.ErrNotExist only
+	// if database never created in this underlying storage.
 	GetManifest() (File, error)
 
 	// SetManifest sets the given file as manifest file. The given file should
