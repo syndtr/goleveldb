@@ -34,7 +34,8 @@ func (db *DB) newRawIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 		i = append(i, fm.NewIterator(slice))
 	}
 	i = append(i, ti...)
-	mi := iterator.NewMergedIterator(i, s.cmp, true)
+	strict := s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator)
+	mi := iterator.NewMergedIterator(i, s.cmp, strict)
 	mi.SetReleaser(&versionReleaser{v: v})
 	return mi
 }
