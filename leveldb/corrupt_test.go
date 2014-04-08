@@ -127,6 +127,18 @@ func (h *dbCorruptHarness) corrupt(ft storage.FileType, offset, n int) {
 	w.Close()
 }
 
+func (h *dbCorruptHarness) removeAll(ft storage.FileType) {
+	ff, err := h.stor.GetFiles(ft)
+	if err != nil {
+		h.t.Fatal("get files: ", err)
+	}
+	for _, f := range ff {
+		if err := f.Remove(); err != nil {
+			h.t.Error("remove file: ", err)
+		}
+	}
+}
+
 func (h *dbCorruptHarness) check(min, max int) {
 	p := &h.dbHarness
 	t := p.t
@@ -215,6 +227,11 @@ func TestCorruptDB_MissingManifest(t *testing.T) {
 	h.build(1000)
 	h.compactMem()
 	h.closeDB()
+
+	h.stor.SetIgnoreOpenErr(storage.TypeManifest)
+	h.removeAll(storage.TypeManifest)
+	h.openAssert(false)
+	h.stor.SetIgnoreOpenErr(0)
 
 	h.recover()
 	h.check(1000, 1000)

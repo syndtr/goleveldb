@@ -169,7 +169,11 @@ func (tf tsFile) Open() (r storage.Reader, err error) {
 	}
 	r, err = tf.File.Open()
 	if err != nil {
-		ts.t.Errorf("E: cannot open file, num=%d type=%v: %v", tf.Num(), tf.Type(), err)
+		if ts.ignoreOpenErr&tf.Type() != 0 {
+			ts.t.Logf("I: cannot open file, num=%d type=%v: %v (ignored)", tf.Num(), tf.Type(), err)
+		} else {
+			ts.t.Errorf("E: cannot open file, num=%d type=%v: %v", tf.Num(), tf.Type(), err)
+		}
 	} else {
 		ts.t.Logf("I: file opened, num=%d type=%v", tf.Num(), tf.Type())
 		ts.opens[tf.x()] = false
@@ -226,14 +230,15 @@ type testStorage struct {
 	mu   sync.Mutex
 	cond sync.Cond
 	// Open files, true=writer, false=reader
-	opens        map[uint64]bool
-	emuOpenErr   storage.FileType
-	emuCreateErr storage.FileType
-	emuDelaySync storage.FileType
-	emuWriteErr  storage.FileType
-	emuSyncErr   storage.FileType
-	readCnt      uint64
-	readCntEn    storage.FileType
+	opens         map[uint64]bool
+	emuOpenErr    storage.FileType
+	emuCreateErr  storage.FileType
+	emuDelaySync  storage.FileType
+	emuWriteErr   storage.FileType
+	emuSyncErr    storage.FileType
+	ignoreOpenErr storage.FileType
+	readCnt       uint64
+	readCntEn     storage.FileType
 }
 
 func (ts *testStorage) SetOpenErr(t storage.FileType) {
@@ -298,6 +303,10 @@ func (ts *testStorage) countRead(t storage.FileType) {
 		ts.readCnt++
 	}
 	ts.mu.Unlock()
+}
+
+func (ts *testStorage) SetIgnoreOpenErr(t storage.FileType) {
+	ts.ignoreOpenErr = t
 }
 
 func (ts *testStorage) Lock() (r util.Releaser, err error) {

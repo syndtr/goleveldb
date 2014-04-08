@@ -129,6 +129,10 @@ func openDB(s *session) (*DB, error) {
 // Also, if ErrorIfExist is true and the DB exist Open will returns
 // os.ErrExist error.
 //
+// Open will return an error with type of ErrManifest if manifest file
+// is missing or corrupted. Missing or corrupted manifest file can be
+// recovered with Recover function.
+//
 // The DB must be closed after use, by calling Close method.
 func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(p, o)
@@ -165,6 +169,10 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 // The DB will be created if not exist, unless ErrorIfMissing is true.
 // Also, if ErrorIfExist is true and the DB exist OpenFile will returns
 // os.ErrExist error.
+//
+// OpenFile will return an error with type of ErrManifest if manifest file
+// is missing or corrupted. Missing or corrupted manifest file can be
+// recovered with Recover function.
 //
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
