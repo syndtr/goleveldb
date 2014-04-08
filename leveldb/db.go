@@ -163,12 +163,13 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 	return openDB(s)
 }
 
-// OpenFile opens or creates a DB for the given path. OpenFile uses standard
-// file-system backed storage implementation as desribed in the leveldb/storage
-// package.
+// OpenFile opens or creates a DB for the given path.
 // The DB will be created if not exist, unless ErrorIfMissing is true.
 // Also, if ErrorIfExist is true and the DB exist OpenFile will returns
 // os.ErrExist error.
+//
+// OpenFile uses standard file-system backed storage implementation as
+// desribed in the leveldb/storage package.
 //
 // OpenFile will return an error with type of ErrManifest if manifest file
 // is missing or corrupted. Missing or corrupted manifest file can be
@@ -307,6 +308,29 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		return
 	}
 	return openDB(s)
+}
+
+// RecoverFile recovers and opens a DB with missing or corrupted manifest files
+// for the given path. It will ignore any manifest files, valid or not.
+// The DB must already exist or it will returns an error.
+// Also, Recover will ignore ErrorIfMissing and ErrorIfExist options.
+//
+// RecoverFile uses standard file-system backed storage implementation as desribed
+// in the leveldb/storage package.
+//
+// The DB must be closed after use, by calling Close method.
+func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
+	stor, err := storage.OpenFile(path)
+	if err != nil {
+		return
+	}
+	db, err = Recover(stor, o)
+	if err != nil {
+		stor.Close()
+	} else {
+		db.closer = stor
+	}
+	return
 }
 
 func (d *DB) recoverJournal() error {
