@@ -23,8 +23,6 @@ import (
 
 var errFileOpen = errors.New("leveldb/storage: file still open")
 
-var ErrMissingCurrentFile = errors.New("leveldb/storage: missing CURRENT file")
-
 type fileLock interface {
 	release() error
 }
@@ -212,7 +210,7 @@ func (fs *fileStorage) GetManifest() (f File, err error) {
 	}
 	// Find latest CURRENT file.
 	var rem []string
-	var pend, exist bool
+	var pend bool
 	var cerr error
 	for _, fn := range fnn {
 		if strings.HasPrefix(fn, "CURRENT") {
@@ -228,7 +226,6 @@ func (fs *fileStorage) GetManifest() (f File, err error) {
 					continue
 				}
 			}
-			exist = true
 			path := filepath.Join(fs.path, fn)
 			r, e1 := os.OpenFile(path, os.O_RDONLY, 0)
 			if e1 != nil {
@@ -260,18 +257,12 @@ func (fs *fileStorage) GetManifest() (f File, err error) {
 			if err := r.Close(); err != nil {
 				fs.log(fmt.Sprintf("close %s: %v", fn, err))
 			}
-		} else if !exist {
-			if _, _, ok := parseFile(fn); ok {
-				exist = true
-			}
 		}
 	}
 	// Don't remove any files if there is no valid CURRENT file.
 	if f == nil {
 		if cerr != nil {
 			err = cerr
-		} else if exist {
-			err = ErrMissingCurrentFile
 		} else {
 			err = os.ErrNotExist
 		}
@@ -483,34 +474,28 @@ func (f *file) path() string {
 	return filepath.Join(f.fs.path, f.name())
 }
 
-func parseFile(name string) (t FileType, num uint64, ok bool) {
+func (f *file) parse(name string) bool {
+	var num uint64
 	var tail string
 	_, err := fmt.Sscanf(name, "%d.%s", &num, &tail)
 	if err == nil {
 		switch tail {
 		case "log":
-			t = TypeJournal
+			f.t = TypeJournal
 		case "ldb", "sst":
-			t = TypeTable
+			f.t = TypeTable
 		default:
-			return
+			return false
 		}
-		ok = true
-		return
-	}
-	n, _ := fmt.Sscanf(name, "MANIFEST-%d%s", &num, &tail)
-	if n == 1 {
-		t = TypeManifest
-		ok = true
-	}
-	return
-}
-
-func (f *file) parse(name string) bool {
-	if t, num, ok := parseFile(name); ok {
-		f.t = t
 		f.num = num
 		return true
 	}
+	n, _ := fmt.Sscanf(name, "MANIFEST-%d%s", &num, &tail)
+	if n == 1 {
+		f.t = TypeManifest
+		f.num = num
+		return true
+	}
+
 	return false
 }
