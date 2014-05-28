@@ -37,6 +37,4 @@ const (
 	// the lower level file set of a compaction if it would make the
 	// total compaction cover more than this many bytes.
 	kExpCompactionMaxBytes = 25 * kMaxTableSize
-
-	kWriteBufferPercent = 110
 )

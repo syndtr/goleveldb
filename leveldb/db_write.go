@@ -44,7 +44,7 @@ func (d *DB) writeJournal() {
 	}
 }
 
-func (d *DB) flush() (mem *memdb.DB, err error) {
+func (d *DB) flush(n int) (mem *memdb.DB, nn int, err error) {
 	s := d.s
 
 	delayed := false
@@ -52,11 +52,12 @@ func (d *DB) flush() (mem *memdb.DB, err error) {
 		v := s.version()
 		defer v.release()
 		mem = d.getEffectiveMem()
+		nn = mem.Free()
 		switch {
 		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
-		case mem.Size() < s.o.GetWriteBuffer():
+		case nn >= n:
 			return false
 		case v.tLen(0) >= kL0_StopWritesTrigger:
 			delayed = true
@@ -65,6 +66,11 @@ func (d *DB) flush() (mem *memdb.DB, err error) {
 				return false
 			}
 		default:
+			// Allow memdb to grow if it has no entry.
+			if mem.Len() == 0 {
+				nn = n
+				return false
+			}
 			// Wait for pending memdb compaction.
 			select {
 			case _, _ = <-d.closeCh:
@@ -75,7 +81,7 @@ func (d *DB) flush() (mem *memdb.DB, err error) {
 				return false
 			}
 			// Create new memdb and journal.
-			mem, err = d.newMem()
+			mem, err = d.newMem(n)
 			if err != nil {
 				return false
 			}
@@ -108,11 +114,15 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	b.init(wo.GetSync())
 
 	// The write happen synchronously.
+retry:
 	select {
 	case _, _ = <-d.closeCh:
 		return ErrClosed
 	case d.writeCh <- b:
-		return <-d.writeAckCh
+		if <-d.writeMergedCh {
+			return <-d.writeAckCh
+		}
+		goto retry
 	case d.writeLockCh <- struct{}{}:
 	}
 
@@ -124,7 +134,7 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 		}
 	}()
 
-	mem, err := d.flush()
+	mem, memFree, err := d.flush(b.size())
 	if err != nil {
 		return
 	}
@@ -134,14 +144,21 @@ func (d *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	if x := b.size(); x <= 128<<10 {
 		m = x + (128 << 10)
 	}
+	m = minInt(m, memFree)
 
 	// Merge with other batch.
 drain:
-	for b.size() <= m && !b.sync {
+	for b.size() < m && !b.sync {
 		select {
 		case nb := <-d.writeCh:
-			b.append(nb)
-			merged++
+			if b.size()+nb.size() <= m {
+				b.append(nb)
+				d.writeMergedCh <- true
+				merged++
+			} else {
+				d.writeMergedCh <- false
+				break drain
+			}
 		default:
 			break drain
 		}

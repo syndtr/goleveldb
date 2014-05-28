@@ -364,11 +364,27 @@ func (p *DB) NewIterator(slice *util.Range) iterator.Iterator {
 	return &dbIter{p: p, slice: slice}
 }
 
-// Size returns sum of keys and values length.
+// Capacity returns keys/values buffer capacity.
+func (p *DB) Capacity() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cap(p.kvData)
+}
+
+// Size returns sum of keys and values length. Note that deleted
+// key/value will not be accouted for, but it will still consume
+// the buffer, since the buffer is append only.
 func (p *DB) Size() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.kvSize
+}
+
+// Free returns keys/values free buffer before need to grow.
+func (p *DB) Free() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return cap(p.kvData) - len(p.kvData)
 }
 
 // Len returns the number of entries in the DB.

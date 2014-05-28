@@ -53,11 +53,12 @@ type DB struct {
 	snapsRoot snapshotElement
 
 	// Write
-	writeCh      chan *Batch
-	writeLockCh  chan struct{}
-	writeAckCh   chan error
-	journalCh    chan *Batch
-	journalAckCh chan error
+	writeCh       chan *Batch
+	writeMergedCh chan bool
+	writeLockCh   chan struct{}
+	writeAckCh    chan error
+	journalCh     chan *Batch
+	journalAckCh  chan error
 
 	// Compaction
 	compCh       chan chan<- struct{}
@@ -83,11 +84,12 @@ func openDB(s *session) (*DB, error) {
 		// Initial sequence
 		seq: s.stSeq,
 		// Write
-		writeCh:      make(chan *Batch),
-		writeLockCh:  make(chan struct{}, 1),
-		writeAckCh:   make(chan error),
-		journalCh:    make(chan *Batch),
-		journalAckCh: make(chan error),
+		writeCh:       make(chan *Batch),
+		writeMergedCh: make(chan bool),
+		writeLockCh:   make(chan struct{}, 1),
+		writeAckCh:    make(chan error),
+		journalCh:     make(chan *Batch),
+		journalAckCh:  make(chan error),
 		// Compaction
 		compCh:       make(chan chan<- struct{}, 1),
 		compMemCh:    make(chan chan<- struct{}, 1),
@@ -425,7 +427,7 @@ func (d *DB) recoverJournal() error {
 	// Recover all journals.
 	if len(ff2) > 0 {
 		s.logf("journal@recovery F·%d", len(ff2))
-		mem = memdb.New(icmp, toPercent(writeBuffer, kWriteBufferPercent))
+		mem = memdb.New(icmp, writeBuffer)
 		for _, file := range ff2 {
 			if err := recoverJournal(file); err != nil {
 				return err
@@ -439,7 +441,7 @@ func (d *DB) recoverJournal() error {
 		}
 	}
 	// Create a new journal.
-	if _, err := d.newMem(); err != nil {
+	if _, err := d.newMem(0); err != nil {
 		return err
 	}
 	// Commit.

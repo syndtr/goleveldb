@@ -27,10 +27,10 @@ type batchReplay interface {
 
 // Batch is a write batch.
 type Batch struct {
-	buf  []byte
-	rLen int
-	seq  uint64
-	sync bool
+	buf        []byte
+	rLen, bLen int
+	seq        uint64
+	sync       bool
 }
 
 func (b *Batch) grow(n int) {
@@ -67,20 +67,21 @@ func (b *Batch) appendRec(t vType, key, value []byte) {
 		off += len(value)
 	}
 	b.buf = buf[:off]
+	b.rLen++
+	//  Include 8-byte ikey header
+	b.bLen += len(key) + len(value) + 8
 }
 
 // Put appends 'put operation' of the given key/value pair to the batch.
 // It is safe to modify the contents of the argument after Put returns.
 func (b *Batch) Put(key, value []byte) {
 	b.appendRec(tVal, key, value)
-	b.rLen++
 }
 
 // Delete appends 'delete operation' of the given key to the batch.
 // It is safe to modify the contents of the argument after Delete returns.
 func (b *Batch) Delete(key []byte) {
 	b.appendRec(tDel, key, nil)
-	b.rLen++
 }
 
 // Reset resets the batch.
@@ -88,6 +89,7 @@ func (b *Batch) Reset() {
 	b.buf = nil
 	b.seq = 0
 	b.rLen = 0
+	b.bLen = 0
 	b.sync = false
 }
 
@@ -125,7 +127,7 @@ func (b *Batch) len() int {
 }
 
 func (b *Batch) size() int {
-	return len(b.buf)
+	return b.bLen
 }
 
 func (b *Batch) encode() []byte {
@@ -143,6 +145,8 @@ func (b *Batch) decode(buf []byte) error {
 
 	b.seq = binary.LittleEndian.Uint64(buf)
 	b.rLen = int(binary.LittleEndian.Uint32(buf[8:]))
+	// No need to be precise at this point, it won't be used anyway
+	b.bLen = len(buf) - kBatchHdrLen
 	b.buf = buf
 
 	return nil

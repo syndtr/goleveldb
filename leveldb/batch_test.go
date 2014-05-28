@@ -9,6 +9,9 @@ package leveldb
 import (
 	"bytes"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
 type tbRec struct {
@@ -97,4 +100,21 @@ func TestBatch_Append(t *testing.T) {
 	b2b.Put([]byte("bar"), []byte("barvalue"))
 	b2a.append(b2b)
 	compareBatch(t, b1, b2a)
+}
+
+func TestBatch_Size(t *testing.T) {
+	b := new(Batch)
+	for i := 0; i < 2; i++ {
+		b.Put([]byte("key1"), []byte("value1"))
+		b.Put([]byte("key2"), []byte("value2"))
+		b.Delete([]byte("key1"))
+		b.Put([]byte("foo"), []byte("foovalue"))
+		b.Put([]byte("bar"), []byte("barvalue"))
+		mem := memdb.New(&iComparer{comparer.DefaultComparer}, 0)
+		b.memReplay(mem)
+		if b.size() != mem.Size() {
+			t.Errorf("invalid batch size calculation, want=%d got=%d", mem.Size(), b.size())
+		}
+		b.Reset()
+	}
 }

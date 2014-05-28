@@ -317,7 +317,7 @@ func (h *dbHarness) compactMem() {
 	}
 
 	// create new memdb and journal
-	_, err := db.newMem()
+	_, err := db.newMem(0)
 	if err != nil {
 		t.Error("newMem: got error: ", err)
 		return
@@ -584,7 +584,7 @@ func TestDb_EmptyBatch(t *testing.T) {
 }
 
 func TestDb_GetFromFrozen(t *testing.T) {
-	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
+	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100100})
 	defer h.close()
 
 	h.put("foo", "v1")
@@ -593,6 +593,13 @@ func TestDb_GetFromFrozen(t *testing.T) {
 	h.stor.DelaySync(storage.TypeTable)      // Block sync calls
 	h.put("k1", strings.Repeat("x", 100000)) // Fill memtable
 	h.put("k2", strings.Repeat("y", 100000)) // Trigger compaction
+	for i := 0; h.db.getFrozenMem() == nil && i < 100; i++ {
+		time.Sleep(10 * time.Microsecond)
+	}
+	if h.db.getFrozenMem() == nil {
+		h.stor.ReleaseSync(storage.TypeTable)
+		t.Fatal("No frozen mem")
+	}
 	h.getVal("foo", "v1")
 	h.stor.ReleaseSync(storage.TypeTable) // Release sync calls
 
@@ -848,14 +855,12 @@ func TestDb_RecoverDuringMemtableCompaction(t *testing.T) {
 	truno(t, &opt.Options{WriteBuffer: 1000000}, func(h *dbHarness) {
 
 		h.stor.DelaySync(storage.TypeTable)
-		h.put("foo", "v1")
 		h.put("big1", strings.Repeat("x", 10000000))
 		h.put("big2", strings.Repeat("y", 1000))
 		h.put("bar", "v2")
 		h.stor.ReleaseSync(storage.TypeTable)
 
 		h.reopenDB()
-		h.getVal("foo", "v1")
 		h.getVal("bar", "v2")
 		h.getVal("big1", strings.Repeat("x", 10000000))
 		h.getVal("big2", strings.Repeat("y", 1000))
