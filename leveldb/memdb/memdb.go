@@ -71,6 +71,9 @@ func (i *dbIter) First() bool {
 }
 
 func (i *dbIter) Last() bool {
+	if i.p == nil {
+		return false
+	}
 	i.forward = false
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
@@ -83,6 +86,9 @@ func (i *dbIter) Last() bool {
 }
 
 func (i *dbIter) Seek(key []byte) bool {
+	if i.p == nil {
+		return false
+	}
 	i.forward = true
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
@@ -94,6 +100,9 @@ func (i *dbIter) Seek(key []byte) bool {
 }
 
 func (i *dbIter) Next() bool {
+	if i.p == nil {
+		return false
+	}
 	if i.node == 0 {
 		if !i.forward {
 			return i.First()
@@ -108,6 +117,9 @@ func (i *dbIter) Next() bool {
 }
 
 func (i *dbIter) Prev() bool {
+	if i.p == nil {
+		return false
+	}
 	if i.node == 0 {
 		if i.forward {
 			return i.Last()
@@ -130,6 +142,16 @@ func (i *dbIter) Value() []byte {
 }
 
 func (i *dbIter) Error() error { return nil }
+
+func (i *dbIter) Release() {
+	if i.p != nil {
+		i.p = nil
+		i.node = 0
+		i.key = nil
+		i.value = nil
+		i.BasicReleaser.Release()
+	}
+}
 
 const (
 	nKV = iota
