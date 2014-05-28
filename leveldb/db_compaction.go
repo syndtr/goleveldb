@@ -81,7 +81,9 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 	s := c.s
 
 	// Write memdb to table
-	t, n, err := s.tops.createFrom(mem.NewIterator(nil))
+	iter := mem.NewIterator(nil)
+	defer iter.Release()
+	t, n, err := s.tops.createFrom(iter)
 	if err != nil {
 		return err
 	}
