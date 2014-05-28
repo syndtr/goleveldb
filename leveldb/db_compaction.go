@@ -177,6 +177,14 @@ func (d *DB) memCompaction() {
 
 	s.logf("mem@flush N·%d S·%s", mem.Len(), shortenb(mem.Size()))
 
+	// Don't compact empty memdb.
+	if mem.Len() == 0 {
+		s.logf("mem@flush skipping")
+		// drop frozen mem
+		d.dropFrozenMem()
+		return
+	}
+
 	d.transact("mem@flush", func() (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
