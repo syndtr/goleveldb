@@ -83,6 +83,10 @@ func (s *session) close() {
 	if s.manifestWriter != nil {
 		s.manifestWriter.Close()
 	}
+	s.manifest = nil
+	s.manifestWriter = nil
+	s.manifestFile = nil
+	s.stVersion = nil
 }
 
 func (s *session) release() {

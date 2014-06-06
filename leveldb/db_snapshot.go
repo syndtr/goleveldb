@@ -51,17 +51,19 @@ func (db *DB) acquireSnapshot() *snapshotElement {
 
 // Releases given snapshot element.
 func (db *DB) releaseSnapshot(elem *snapshotElement) {
-	db.snapsMu.Lock()
-	elem.ref--
-	if elem.ref == 0 {
-		elem.prev.next = elem.next
-		elem.next.prev = elem.prev
-		elem.next = nil
-		elem.prev = nil
-	} else if elem.ref < 0 {
-		panic("leveldb: Snapshot: negative element reference")
+	if !db.isClosed() {
+		db.snapsMu.Lock()
+		elem.ref--
+		if elem.ref == 0 {
+			elem.prev.next = elem.next
+			elem.next.prev = elem.prev
+			elem.next = nil
+			elem.prev = nil
+		} else if elem.ref < 0 {
+			panic("leveldb: Snapshot: negative element reference")
+		}
+		db.snapsMu.Unlock()
 	}
-	db.snapsMu.Unlock()
 }
 
 // Gets minimum sequence that not being snapshoted.

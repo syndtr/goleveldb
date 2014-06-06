@@ -728,5 +728,19 @@ func (d *DB) Close() error {
 		}
 	}
 
+	d.s = nil
+	d.mem = nil
+	d.frozenMem = nil
+	d.journal = nil
+	d.journalWriter = nil
+	d.journalFile = nil
+	d.frozenJournalFile = nil
+	d.snapsRoot = snapshotElement{}
+	d.closer = nil
+
+	close(d.writeCh)
+	close(d.journalCh)
+	close(d.compReqCh)
+
 	return err
 }
