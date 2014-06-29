@@ -362,7 +362,11 @@ func (t *tOps) newIterator(f *tFile, slice *util.Range, ro *opt.ReadOptions) ite
 func (t *tOps) remove(f *tFile) {
 	num := f.file.Num()
 	t.cacheNS.Delete(num, func(exist bool) {
-		f.file.Remove()
+		if err := f.file.Remove(); err != nil {
+			t.s.logf("table@remove removing @%d %q", num, err)
+		} else {
+			t.s.logf("table@remove removed @%d", num)
+		}
 		if bc := t.s.o.GetBlockCache(); bc != nil {
 			bc.GetNamespace(num).Zap(false)
 		}

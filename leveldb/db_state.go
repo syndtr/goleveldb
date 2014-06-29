@@ -85,7 +85,11 @@ func (d *DB) getFrozenMem() *memdb.DB {
 // Drop frozen memdb; assume that frozen memdb isn't nil.
 func (d *DB) dropFrozenMem() {
 	d.memMu.Lock()
-	d.frozenJournalFile.Remove()
+	if err := d.frozenJournalFile.Remove(); err != nil {
+		d.s.logf("journal@remove removing @%d %q", d.frozenJournalFile.Num(), err)
+	} else {
+		d.s.logf("journal@remove removed @%d", d.frozenJournalFile.Num())
+	}
 	d.frozenJournalFile = nil
 	d.frozenMem = nil
 	d.memMu.Unlock()
