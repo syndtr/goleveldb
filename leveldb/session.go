@@ -37,6 +37,7 @@ type session struct {
 	stJournalNum     uint64 // current journal file number; need external synchronization
 	stPrevJournalNum uint64 // prev journal file number; no longer used; for compatibility with older version of leveldb
 	stSeq            uint64 // last mem compacted seq; need external synchronization
+	stTempFileNum    uint64
 
 	stor     storage.Storage
 	storLock util.Releaser

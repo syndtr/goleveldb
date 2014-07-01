@@ -51,6 +51,11 @@ func (s *session) getFiles(t storage.FileType) ([]storage.File, error) {
 	return s.stor.GetFiles(t)
 }
 
+func (s *session) newTemp() storage.File {
+	num := atomic.AddUint64(&s.stTempFileNum, 1) - 1
+	return s.stor.GetFile(num, storage.TypeTemp)
+}
+
 // session state
 
 // Get current version.

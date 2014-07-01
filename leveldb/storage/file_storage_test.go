@@ -25,6 +25,7 @@ var cases = []struct {
 	{nil, "MANIFEST-000002", TypeManifest, 2},
 	{nil, "MANIFEST-000007", TypeManifest, 7},
 	{nil, "18446744073709551615.log", TypeJournal, 18446744073709551615},
+	{nil, "000100.tmp", TypeTemp, 100},
 }
 
 var invalidCases = []string{
