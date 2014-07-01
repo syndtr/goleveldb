@@ -162,6 +162,27 @@ func (p *memFilePtr) Create() (Writer, error) {
 	return m, nil
 }
 
+func (p *memFilePtr) Replace(newfile File) error {
+	p1, ok := newfile.(*memFilePtr)
+	if !ok {
+		return ErrInvalidFile
+	}
+	ms := p.ms
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	m1, exist := ms.files[p1.x()]
+	if !exist {
+		return os.ErrNotExist
+	}
+	m0, exist := ms.files[p.x()]
+	if (exist && m0.open) || m1.open {
+		return errFileOpen
+	}
+	delete(ms.files, p1.x())
+	ms.files[p.x()] = m1
+	return nil
+}
+
 func (p *memFilePtr) Type() FileType {
 	return p.t
 }
