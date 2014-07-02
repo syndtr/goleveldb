@@ -80,6 +80,11 @@ func parseIkey(p []byte) (ukey []byte, seq uint64, t vType, ok bool) {
 	return
 }
 
+func validIkey(p []byte) bool {
+	_, _, _, ok := parseIkey(p)
+	return ok
+}
+
 func (p iKey) assert() {
 	if p == nil {
 		panic("nil iKey")
@@ -87,6 +92,14 @@ func (p iKey) assert() {
 	if len(p) < 8 {
 		panic(fmt.Sprintf("invalid iKey %q, len=%d", []byte(p), len(p)))
 	}
+}
+
+func (p iKey) ok() bool {
+	if len(p) < 8 {
+		return false
+	}
+	_, _, ok := p.parseNum()
+	return ok
 }
 
 func (p iKey) ukey() []byte {

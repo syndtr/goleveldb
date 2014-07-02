@@ -21,6 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/table"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -210,102 +211,7 @@ func Recover(p storage.Storage, o *opt.Options) (db *DB, err error) {
 		}
 	}()
 
-	// get all files
-	ff0, err := s.getFiles(storage.TypeAll)
-	if err != nil {
-		return
-	}
-
-	ff := files(ff0)
-	ff.sort()
-
-	s.logf("db@recovery F·%d", len(ff))
-
-	rec := new(sessionRecord)
-
-	// recover tables
-	var nt *tFile
-	for _, f := range ff {
-		if f.Type() != storage.TypeTable {
-			continue
-		}
-
-		var r storage.Reader
-		r, err = f.Open()
-		if err != nil {
-			return
-		}
-		var size int64
-		size, err = r.Seek(0, 2)
-		r.Close()
-		if err != nil {
-			return
-		}
-
-		t := newTFile(f, uint64(size), nil, nil)
-		iter := s.tops.newIterator(t, nil, nil)
-		// min ikey
-		if iter.First() {
-			t.min = iter.Key()
-		} else {
-			err = iter.Error()
-			iter.Release()
-			if err != nil {
-				return
-			} else {
-				continue
-			}
-		}
-		// max ikey
-		if iter.Last() {
-			t.max = iter.Key()
-		} else {
-			err = iter.Error()
-			iter.Release()
-			if err != nil {
-				return
-			} else {
-				continue
-			}
-		}
-		iter.Release()
-		s.logf("db@recovery found table @%d S·%s %q:%q", t.file.Num(), shortenb(int(t.size)), t.min, t.max)
-		// add table to level 0
-		rec.addTableFile(0, t)
-		nt = t
-	}
-
-	// extract largest seq number from newest table
-	if nt != nil {
-		var lseq uint64
-		iter := s.tops.newIterator(nt, nil, nil)
-		for iter.Next() {
-			seq, _, ok := iKey(iter.Key()).parseNum()
-			if !ok {
-				continue
-			}
-			if seq > lseq {
-				lseq = seq
-			}
-		}
-		iter.Release()
-		rec.setSeq(lseq)
-	}
-
-	// set file num based on largest one
-	if len(ff) > 0 {
-		s.stFileNum = ff[len(ff)-1].Num() + 1
-	} else {
-		s.stFileNum = 0
-	}
-
-	// create brand new manifest
-	err = s.create()
-	if err != nil {
-		return
-	}
-	// commit record
-	err = s.commit(rec)
+	err = recoverTable(s, o)
 	if err != nil {
 		return
 	}
@@ -333,6 +239,151 @@ func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
 		db.closer = stor
 	}
 	return
+}
+
+func recoverTable(s *session, o *opt.Options) error {
+	ff0, err := s.getFiles(storage.TypeTable)
+	if err != nil {
+		return err
+	}
+	ff1 := files(ff0)
+	ff1.sort()
+
+	var mSeq uint64
+	var good, corrupted int
+	rec := new(sessionRecord)
+	buildTable := func(iter iterator.Iterator) (tmp storage.File, size int64, err error) {
+		tmp = s.newTemp()
+		writer, err := tmp.Create()
+		if err != nil {
+			return
+		}
+		defer func() {
+			writer.Close()
+			if err != nil {
+				tmp.Remove()
+				tmp = nil
+			}
+		}()
+		tw := table.NewWriter(writer, o)
+		// Copy records.
+		for iter.Next() {
+			key := iter.Key()
+			if validIkey(key) {
+				err = tw.Append(key, iter.Value())
+				if err != nil {
+					return
+				}
+			}
+		}
+		err = iter.Error()
+		if err != nil {
+			return
+		}
+		err = tw.Close()
+		if err != nil {
+			return
+		}
+		err = writer.Sync()
+		if err != nil {
+			return
+		}
+		size = int64(tw.BytesLen())
+		return
+	}
+	recoverTable := func(file storage.File) error {
+		s.logf("table@recovery recovering @%d", file.Num())
+		reader, err := file.Open()
+		if err != nil {
+			return err
+		}
+		defer reader.Close()
+		// Get file size.
+		size, err := reader.Seek(0, 2)
+		if err != nil {
+			return err
+		}
+		var tSeq uint64
+		var tgood, tcorrupted, blockerr int
+		var min, max []byte
+		tr := table.NewReader(reader, size, nil, o)
+		iter := tr.NewIterator(nil, nil)
+		iter.(iterator.ErrorCallbackSetter).SetErrorCallback(func(err error) {
+			s.logf("table@recovery found error @%d %q", file.Num(), err)
+			blockerr++
+		})
+		// Scan the table.
+		for iter.Next() {
+			key := iter.Key()
+			_, seq, _, ok := parseIkey(key)
+			if !ok {
+				tcorrupted++
+				continue
+			}
+			tgood++
+			if seq > tSeq {
+				tSeq = seq
+			}
+			if min == nil {
+				min = append([]byte{}, key...)
+			}
+			max = append(max[:0], key...)
+		}
+		if err := iter.Error(); err != nil {
+			iter.Release()
+			return err
+		}
+		iter.Release()
+		if tgood > 0 {
+			if tcorrupted > 0 || blockerr > 0 {
+				// Rebuild the table.
+				s.logf("table@recovery rebuilding @%d", file.Num())
+				iter := tr.NewIterator(nil, nil)
+				tmp, newSize, err := buildTable(iter)
+				iter.Release()
+				if err != nil {
+					return err
+				}
+				reader.Close()
+				if err := file.Replace(tmp); err != nil {
+					return err
+				}
+				size = newSize
+			}
+			if tSeq > mSeq {
+				mSeq = tSeq
+			}
+			// Add table to level 0.
+			rec.addTable(0, file.Num(), uint64(size), min, max)
+			s.logf("table@recovery recovered @%d N·%d C·%d B·%d S·%d Q·%d", file.Num(), tgood, tcorrupted, blockerr, size, tSeq)
+		} else {
+			s.logf("table@recovery unrecoverable @%d C·%d B·%d S·%d", file.Num(), tcorrupted, blockerr, size)
+		}
+
+		good += tgood
+		corrupted += tcorrupted
+
+		return nil
+	}
+	// Recover all tables.
+	if len(ff1) > 0 {
+		s.logf("table@recovery F·%d", len(ff1))
+		s.markFileNum(ff1[len(ff1)-1].Num())
+		for _, file := range ff1 {
+			if err := recoverTable(file); err != nil {
+				return err
+			}
+		}
+		s.logf("table@recovery recovered F·%d N·%d C·%d Q·%d", len(ff1), good, corrupted, mSeq)
+	}
+	// Set sequence number.
+	rec.setSeq(mSeq + 1)
+	// Create new manifest.
+	if err := s.create(); err != nil {
+		return err
+	}
+	// Commit.
+	return s.commit(rec)
 }
 
 func (d *DB) recoverJournal() error {
