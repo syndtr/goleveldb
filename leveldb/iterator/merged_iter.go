@@ -36,14 +36,30 @@ type mergedIterator struct {
 	index    int
 	dir      dir
 	err      error
+	errf     func(err error)
 	releaser util.Releaser
 }
 
 func assertKey(key []byte) []byte {
 	if key == nil {
-		panic("leveldb/iterator: nil valid key")
+		panic("leveldb/iterator: nil key")
 	}
 	return key
+}
+
+func (i *mergedIterator) iterErr(iter Iterator) bool {
+	if i.errf != nil {
+		if err := iter.Error(); err != nil {
+			i.errf(err)
+		}
+	}
+	if i.strict {
+		if err := iter.Error(); err != nil {
+			i.err = err
+			return true
+		}
+	}
+	return false
 }
 
 func (i *mergedIterator) Valid() bool {
@@ -62,12 +78,8 @@ func (i *mergedIterator) First() bool {
 		switch {
 		case iter.First():
 			i.keys[x] = assertKey(iter.Key())
-		case i.strict:
-			if err := iter.Error(); err != nil {
-				i.err = err
-				return false
-			}
-			fallthrough
+		case i.iterErr(iter):
+			return false
 		default:
 			i.keys[x] = nil
 		}
@@ -88,12 +100,8 @@ func (i *mergedIterator) Last() bool {
 		switch {
 		case iter.Last():
 			i.keys[x] = assertKey(iter.Key())
-		case i.strict:
-			if err := iter.Error(); err != nil {
-				i.err = err
-				return false
-			}
-			fallthrough
+		case i.iterErr(iter):
+			return false
 		default:
 			i.keys[x] = nil
 		}
@@ -114,12 +122,8 @@ func (i *mergedIterator) Seek(key []byte) bool {
 		switch {
 		case iter.Seek(key):
 			i.keys[x] = assertKey(iter.Key())
-		case i.strict:
-			if err := iter.Error(); err != nil {
-				i.err = err
-				return false
-			}
-			fallthrough
+		case i.iterErr(iter):
+			return false
 		default:
 			i.keys[x] = nil
 		}
@@ -171,12 +175,8 @@ func (i *mergedIterator) Next() bool {
 	switch {
 	case iter.Next():
 		i.keys[x] = assertKey(iter.Key())
-	case i.strict:
-		if err := iter.Error(); err != nil {
-			i.err = err
-			return false
-		}
-		fallthrough
+	case i.iterErr(iter):
+		return false
 	default:
 		i.keys[x] = nil
 	}
@@ -223,12 +223,8 @@ func (i *mergedIterator) Prev() bool {
 			switch {
 			case seek && iter.Prev(), !seek && iter.Last():
 				i.keys[x] = assertKey(iter.Key())
-			case i.strict:
-				if err := iter.Error(); err != nil {
-					i.err = err
-					return false
-				}
-				fallthrough
+			case i.iterErr(iter):
+				return false
 			default:
 				i.keys[x] = nil
 			}
@@ -240,12 +236,8 @@ func (i *mergedIterator) Prev() bool {
 	switch {
 	case iter.Prev():
 		i.keys[x] = assertKey(iter.Key())
-	case i.strict:
-		if err := iter.Error(); err != nil {
-			i.err = err
-			return false
-		}
-		fallthrough
+	case i.iterErr(iter):
+		return false
 	default:
 		i.keys[x] = nil
 	}
@@ -289,6 +281,10 @@ func (i *mergedIterator) SetReleaser(releaser util.Releaser) {
 
 func (i *mergedIterator) Error() error {
 	return i.err
+}
+
+func (i *mergedIterator) SetErrorCallback(f func(err error)) {
+	i.errf = f
 }
 
 // NewMergedIterator returns an iterator that merges its input. Walking the

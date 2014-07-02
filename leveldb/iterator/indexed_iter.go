@@ -28,6 +28,7 @@ type indexedIterator struct {
 
 	data Iterator
 	err  error
+	errf func(err error)
 }
 
 func (i *indexedIterator) setData() {
@@ -50,6 +51,11 @@ func (i *indexedIterator) clearData() {
 }
 
 func (i *indexedIterator) dataErr() bool {
+	if i.errf != nil {
+		if err := i.data.Error(); err != nil {
+			i.errf(err)
+		}
+	}
 	if i.strict {
 		if err := i.data.Error(); err != nil {
 			i.err = err
@@ -194,6 +200,10 @@ func (i *indexedIterator) Error() error {
 		return err
 	}
 	return nil
+}
+
+func (i *indexedIterator) SetErrorCallback(f func(err error)) {
+	i.errf = f
 }
 
 // NewIndexedIterator returns an indexed iterator. An index is iterator

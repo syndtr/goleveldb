@@ -89,6 +89,16 @@ type Iterator interface {
 	Value() []byte
 }
 
+// ErrorCallbackSetter is the interface that wraps basic SetErrorCallback
+// method.
+//
+// ErrorCallbackSetter implemented by indexed and merged iterator.
+type ErrorCallbackSetter interface {
+	// SetErrorCallback allows set an error callback of the coresponding
+	// iterator. Use nil to clear the callback.
+	SetErrorCallback(f func(err error))
+}
+
 type emptyIterator struct {
 	releaser util.Releaser
 	released bool
