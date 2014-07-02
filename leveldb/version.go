@@ -133,6 +133,10 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 			ts = ts[i : i+1]
 		}
 
+		var l0found bool
+		var l0seq uint64
+		var l0type vType
+		var l0value []byte
 		for _, t := range ts {
 			if tseek {
 				if tset == nil {
@@ -152,22 +156,42 @@ func (v *version) get(key iKey, ro *opt.ReadOptions) (value []byte, cstate bool,
 			}
 
 			rkey := iKey(_rkey)
-			if _, t, ok := rkey.parseNum(); ok {
+			if seq, t, ok := rkey.parseNum(); ok {
 				if ucmp.Compare(ukey, rkey.ukey()) == 0 {
-					switch t {
-					case tVal:
-						value = rval
-					case tDel:
-						err = ErrNotFound
-					default:
-						panic("not reached")
+					if level == 0 {
+						if seq >= l0seq {
+							l0found = true
+							l0seq = seq
+							l0type = t
+							l0value = rval
+						}
+					} else {
+						switch t {
+						case tVal:
+							value = rval
+						case tDel:
+							err = ErrNotFound
+						default:
+							panic("invalid type")
+						}
+						return
 					}
-					return value, cstate, err
 				}
 			} else {
 				err = errors.New("leveldb: internal key corrupted")
 				return
 			}
+		}
+		if level == 0 && l0found {
+			switch l0type {
+			case tVal:
+				value = l0value
+			case tDel:
+				err = ErrNotFound
+			default:
+				panic("invalid type")
+			}
+			return
 		}
 	}
 

@@ -386,6 +386,33 @@ func TestCorruptDB_UnrelatedKeys(t *testing.T) {
 	h.close()
 }
 
+func TestCorruptDB_Level0NewerFileHasOlderSeqnum(t *testing.T) {
+	h := newDbCorruptHarness(t)
+
+	h.put("a", "v1")
+	h.put("b", "v1")
+	h.compactMem()
+	h.put("a", "v2")
+	h.put("b", "v2")
+	h.compactMem()
+	h.put("a", "v3")
+	h.put("b", "v3")
+	h.compactMem()
+	h.put("c", "v0")
+	h.put("d", "v0")
+	h.compactMem()
+	h.compactRangeAt(1, "", "")
+	h.closeDB()
+
+	h.recover()
+	h.getVal("a", "v3")
+	h.getVal("b", "v3")
+	h.getVal("c", "v0")
+	h.getVal("d", "v0")
+
+	h.close()
+}
+
 func TestCorruptDB_RecoverInvalidSeq_Issue53(t *testing.T) {
 	h := newDbCorruptHarness(t)
 
