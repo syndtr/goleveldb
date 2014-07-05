@@ -251,6 +251,23 @@ func (s *session) getCompactionRange(level int, min, max []byte) *compaction {
 		return nil
 	}
 
+	// Avoid compacting too much in one shot in case the range is large.
+	// But we cannot do this for level-0 since level-0 files can overlap
+	// and we must not pick one file and drop another older file if the
+	// two files overlap.
+	if level > 0 {
+		limit := uint64(kMaxTableSize)
+		total := uint64(0)
+		for i, t := range t0 {
+			total += t.size
+			if total >= limit {
+				s.logf("table@compaction limiting F·%d -> F·%d", len(t0), i+1)
+				t0 = t0[:i+1]
+				break
+			}
+		}
+	}
+
 	c := &compaction{s: s, version: v, level: level}
 	c.tables[0] = t0
 	c.expand()

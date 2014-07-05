@@ -181,6 +181,21 @@ func (h *dbHarness) delete(key string) {
 	}
 }
 
+func (h *dbHarness) assertNumKeys(want int) {
+	iter := h.db.NewIterator(nil, h.ro)
+	defer iter.Release()
+	got := 0
+	for iter.Next() {
+		got++
+	}
+	if err := iter.Error(); err != nil {
+		h.t.Error("assertNumKeys: ", err)
+	}
+	if want != got {
+		h.t.Errorf("assertNumKeys: want=%d got=%d", want, got)
+	}
+}
+
 func (h *dbHarness) getr(db Reader, key string, expectFound bool) (found bool, v []byte) {
 	t := h.t
 	v, err := db.Get([]byte(key), h.ro)
@@ -1798,4 +1813,47 @@ func TestDb_DeletionMarkersOnMemdb(t *testing.T) {
 	h.delete("foo")
 	h.get("foo", false)
 	h.getKeyVal("")
+}
+
+func TestDb_LeveldbIssue178(t *testing.T) {
+	nKeys := (kMaxTableSize / 30) * 5
+	key1 := func(i int) string {
+		return fmt.Sprintf("my_key_%d", i)
+	}
+	key2 := func(i int) string {
+		return fmt.Sprintf("my_key_%d_xxx", i)
+	}
+
+	// Disable compression since it affects the creation of layers and the
+	// code below is trying to test against a very specific scenario.
+	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
+	defer h.close()
+
+	// Create first key range.
+	batch := new(Batch)
+	for i := 0; i < nKeys; i++ {
+		batch.Put([]byte(key1(i)), []byte("value for range 1 key"))
+	}
+	h.write(batch)
+
+	// Create second key range.
+	batch.Reset()
+	for i := 0; i < nKeys; i++ {
+		batch.Put([]byte(key2(i)), []byte("value for range 2 key"))
+	}
+	h.write(batch)
+
+	// Delete second key range.
+	batch.Reset()
+	for i := 0; i < nKeys; i++ {
+		batch.Delete([]byte(key2(i)))
+	}
+	h.write(batch)
+	h.waitMemCompaction()
+
+	// Run manual compaction.
+	h.compactRange(key1(0), key1(nKeys-1))
+
+	// Checking the keys.
+	h.assertNumKeys(nKeys)
 }
