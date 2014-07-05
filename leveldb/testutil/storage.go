@@ -57,6 +57,7 @@ const (
 	typeManifest = iota
 	typeJournal
 	typeTable
+	typeTemp
 
 	typeCount
 )
@@ -91,6 +92,8 @@ func flattenType(m StorageMode, t storage.FileType) int {
 		return x + typeJournal
 	case storage.TypeTable:
 		return x + typeTable
+	case storage.TypeTemp:
+		return x + typeTemp
 	default:
 		panic("invalid file type")
 	}
@@ -107,6 +110,8 @@ func listFlattenType(m StorageMode, t storage.FileType) []int {
 			ret = append(ret, x+typeJournal)
 		case t&storage.TypeTable != 0:
 			ret = append(ret, x+typeTable)
+		case t&storage.TypeTemp != 0:
+			ret = append(ret, x+typeTemp)
 		}
 	}
 	switch {
