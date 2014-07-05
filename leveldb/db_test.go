@@ -124,13 +124,15 @@ func (h *dbHarness) openAssert(want bool) {
 	}
 }
 
-func (h *dbHarness) put(key, value string) {
-	t := h.t
-	db := h.db
+func (h *dbHarness) write(batch *Batch) {
+	if err := h.db.Write(batch, h.wo); err != nil {
+		h.t.Error("Write: got error: ", err)
+	}
+}
 
-	err := db.Put([]byte(key), []byte(value), h.wo)
-	if err != nil {
-		t.Error("Put: got error: ", err)
+func (h *dbHarness) put(key, value string) {
+	if err := h.db.Put([]byte(key), []byte(value), h.wo); err != nil {
+		h.t.Error("Put: got error: ", err)
 	}
 }
 
@@ -291,7 +293,16 @@ func (h *dbHarness) getKeyVal(want string) {
 func (h *dbHarness) waitCompaction() {
 	t := h.t
 	db := h.db
-	if err := db.wakeCompaction(2); err != nil {
+	if err := db.compSendIdle(db.tcompCmdC); err != nil {
+		t.Error("compaction error: ", err)
+	}
+}
+
+func (h *dbHarness) waitMemCompaction() {
+	t := h.t
+	db := h.db
+
+	if err := db.compSendIdle(db.mcompCmdC); err != nil {
 		t.Error("compaction error: ", err)
 	}
 }
@@ -300,41 +311,15 @@ func (h *dbHarness) compactMem() {
 	t := h.t
 	db := h.db
 
-	if err := db.wakeCompaction(1); err != nil {
+	db.writeLockC <- struct{}{}
+	defer func() {
+		<-db.writeLockC
+	}()
+
+	if _, err := db.rotateMem(0); err != nil {
 		t.Error("compaction error: ", err)
-		return
 	}
-
-	if mem := db.getEffectiveMem(); mem.Len() == 0 {
-		return
-	}
-
-	select {
-	case <-db.compMemAckCh:
-	case err := <-db.compErrCh:
-		t.Error("compaction error: ", err)
-		return
-	}
-
-	// create new memdb and journal
-	_, err := db.newMem(0)
-	if err != nil {
-		t.Error("newMem: got error: ", err)
-		return
-	}
-
-	cch := make(chan struct{})
-	// Schedule mem compaction.
-	select {
-	case db.compMemCh <- (chan<- struct{})(cch):
-	case err := <-db.compErrCh:
-		t.Error("compaction error: ", err)
-		return
-	}
-	// Wait.
-	select {
-	case <-cch:
-	case err := <-db.compErrCh:
+	if err := db.compSendIdle(db.mcompCmdC); err != nil {
 		t.Error("compaction error: ", err)
 	}
 
@@ -347,35 +332,22 @@ func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) 
 	t := h.t
 	db := h.db
 
-	cch := make(chan struct{})
-	req := &cReq{level: level, cch: cch}
+	var _min, _max []byte
 	if min != "" {
-		req.min = []byte(min)
+		_min = []byte(min)
 	}
 	if max != "" {
-		req.max = []byte(max)
+		_max = []byte(max)
 	}
 
-	// Push manual compaction request.
-	select {
-	case err := <-db.compErrCh:
-		t.Error("CompactRangeAt: compaction error: ", err)
-		return
-	case db.compReqCh <- req:
-	}
-
-	// Wait for compaction
-	select {
-	case err := <-db.compErrCh:
+	if err := db.compSendRange(db.tcompCmdC, level, _min, _max); err != nil {
 		if wanterr {
 			t.Log("CompactRangeAt: got error (expected): ", err)
 		} else {
 			t.Error("CompactRangeAt: got error: ", err)
 		}
-	case <-cch:
-		if wanterr {
-			t.Error("CompactRangeAt: expect error")
-		}
+	} else if wanterr {
+		t.Error("CompactRangeAt: expect error")
 	}
 }
 
@@ -394,8 +366,7 @@ func (h *dbHarness) compactRange(min, max string) {
 	if max != "" {
 		r.Limit = []byte(max)
 	}
-	err := db.CompactRange(r)
-	if err != nil {
+	if err := db.CompactRange(r); err != nil {
 		t.Error("CompactRange: got error: ", err)
 	}
 }
@@ -1244,7 +1215,7 @@ func TestDb_CompactionTableOpenError(t *testing.T) {
 
 	h.stor.SetOpenErr(storage.TypeTable)
 	go h.db.CompactRange(util.Range{})
-	if err := h.db.wakeCompaction(2); err != nil {
+	if err := h.db.compSendIdle(h.db.tcompCmdC); err != nil {
 		t.Log("compaction error: ", err)
 	}
 	h.closeDB0()
