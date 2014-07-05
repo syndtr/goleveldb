@@ -343,6 +343,22 @@ type fileWrap struct {
 	f *file
 }
 
+func (fw fileWrap) Sync() error {
+	if fw.f.Type() == TypeManifest {
+		// Also sync parent directory if file type is manifest.
+		// See: https://code.google.com/p/leveldb/issues/detail?id=190.
+		f, err := os.Open(fw.f.fs.path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := f.Sync(); err != nil {
+			return err
+		}
+	}
+	return fw.File.Sync()
+}
+
 func (fw fileWrap) Close() error {
 	f := fw.f
 	f.fs.mu.Lock()
