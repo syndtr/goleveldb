@@ -9,6 +9,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -36,7 +37,7 @@ func (t FileType) String() string {
 	case TypeTemp:
 		return "temp"
 	}
-	return "<unknown>"
+	return fmt.Sprintf("<unknown:%d>", t)
 }
 
 var (
