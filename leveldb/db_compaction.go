@@ -131,7 +131,13 @@ haserr:
 	}
 }
 
-func (d *DB) compactionTransact(name string, exec, rollback func() error) {
+type compactionTransactCounter int
+
+func (cnt *compactionTransactCounter) incr() {
+	*cnt++
+}
+
+func (d *DB) compactionTransact(name string, exec func(cnt *compactionTransactCounter) error, rollback func() error) {
 	s := d.s
 	defer func() {
 		if x := recover(); x != nil {
@@ -143,25 +149,59 @@ func (d *DB) compactionTransact(name string, exec, rollback func() error) {
 			panic(x)
 		}
 	}()
+	const (
+		backoffMin = 1 * time.Second
+		backoffMax = 8 * time.Second
+		backoffMul = 2 * time.Second
+	)
+	backoff := backoffMin
+	backoffT := time.NewTimer(backoff)
+	lastCnt := compactionTransactCounter(0)
 	for n := 0; ; n++ {
+		// Check wether the DB is closed.
 		if d.isClosed() {
 			s.logf("%s exiting", name)
 			d.compactionExitTransact()
 		} else if n > 0 {
 			s.logf("%s retrying N·%d", name, n)
 		}
-		err := exec()
+
+		// Execute.
+		cnt := compactionTransactCounter(0)
+		err := exec(&cnt)
+
+		// Set compaction error status.
 		select {
+		case d.compErrSetC <- err:
 		case _, _ = <-d.closeC:
 			s.logf("%s exiting", name)
 			d.compactionExitTransact()
-		case d.compErrSetC <- err:
 		}
 		if err == nil {
 			return
 		}
-		s.logf("%s error %q", name, err)
-		time.Sleep(time.Second)
+		s.logf("%s error I·%d %q", name, cnt, err)
+
+		// Reset backoff duration if counter is advancing.
+		if cnt > lastCnt {
+			backoff = backoffMin
+			lastCnt = cnt
+		}
+
+		// Backoff.
+		backoffT.Reset(backoff)
+		if backoff < backoffMax {
+			backoff *= backoffMul
+			if backoff > backoffMax {
+				backoff = backoffMax
+			}
+		}
+		select {
+		case <-backoffT.C:
+		case _, _ = <-d.closeC:
+			s.logf("%s exiting", name)
+			d.compactionExitTransact()
+		}
 	}
 }
 
@@ -197,7 +237,7 @@ func (d *DB) memCompaction() {
 		return
 	}
 
-	d.compactionTransact("mem@flush", func() (err error) {
+	d.compactionTransact("mem@flush", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.flush(mem, -1)
@@ -212,7 +252,7 @@ func (d *DB) memCompaction() {
 		return nil
 	})
 
-	d.compactionTransact("mem@commit", func() (err error) {
+	d.compactionTransact("mem@commit", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.commit(d.journalFile.Num(), d.frozenSeq)
@@ -251,7 +291,7 @@ func (d *DB) tableCompaction(c *compaction, noTrivial bool) {
 		s.logf("table@move L%d@%d -> L%d", c.level, t.file.Num(), c.level+1)
 		rec.deleteTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
-		d.compactionTransact("table@move", func() (err error) {
+		d.compactionTransact("table@move", func(cnt *compactionTransactCounter) (err error) {
 			return s.commit(rec)
 		}, nil)
 		return
@@ -275,7 +315,7 @@ func (d *DB) tableCompaction(c *compaction, noTrivial bool) {
 	var snapIter int
 	var snapDropCnt int
 	var dropCnt int
-	d.compactionTransact("table@build", func() (err error) {
+	d.compactionTransact("table@build", func(cnt *compactionTransactCounter) (err error) {
 		ukey := append([]byte{}, snapUkey...)
 		hasUkey := snapHasUkey
 		lseq := snapSeq
@@ -306,6 +346,9 @@ func (d *DB) tableCompaction(c *compaction, noTrivial bool) {
 		iter := c.newIterator()
 		defer iter.Release()
 		for i := 0; iter.Next(); i++ {
+			// Incr transact counter.
+			cnt.incr()
+
 			// Skip until last state.
 			if i < snapIter {
 				continue
@@ -429,7 +472,7 @@ func (d *DB) tableCompaction(c *compaction, noTrivial bool) {
 	})
 
 	// Commit changes
-	d.compactionTransact("table@commit", func() (err error) {
+	d.compactionTransact("table@commit", func(cnt *compactionTransactCounter) (err error) {
 		stats[1].startTimer()
 		defer stats[1].stopTimer()
 		return s.commit(rec)
