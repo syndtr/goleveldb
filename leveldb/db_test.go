@@ -1857,3 +1857,30 @@ func TestDb_LeveldbIssue178(t *testing.T) {
 	// Checking the keys.
 	h.assertNumKeys(nKeys)
 }
+
+func TestDb_LeveldbIssue200(t *testing.T) {
+	h := newDbHarness(t)
+	defer h.close()
+
+	h.put("1", "b")
+	h.put("2", "c")
+	h.put("3", "d")
+	h.put("4", "e")
+	h.put("5", "f")
+
+	iter := h.db.NewIterator(nil, h.ro)
+
+	// Add an element that should not be reflected in the iterator.
+	h.put("25", "cd")
+
+	iter.Seek([]byte("5"))
+	assertBytes(t, []byte("5"), iter.Key())
+	iter.Prev()
+	assertBytes(t, []byte("4"), iter.Key())
+	iter.Prev()
+	assertBytes(t, []byte("3"), iter.Key())
+	iter.Next()
+	assertBytes(t, []byte("4"), iter.Key())
+	iter.Next()
+	assertBytes(t, []byte("5"), iter.Key())
+}
