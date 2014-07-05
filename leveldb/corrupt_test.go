@@ -176,6 +176,18 @@ func (h *dbCorruptHarness) removeAll(ft storage.FileType) {
 	}
 }
 
+func (h *dbCorruptHarness) removeOne(ft storage.FileType) {
+	ff, err := h.stor.GetFiles(ft)
+	if err != nil {
+		h.t.Fatal("get files: ", err)
+	}
+	f := ff[rand.Intn(len(ff))]
+	h.t.Logf("removing file @%d", f.Num())
+	if err := f.Remove(); err != nil {
+		h.t.Error("remove file: ", err)
+	}
+}
+
 func (h *dbCorruptHarness) check(min, max int) {
 	p := &h.dbHarness
 	t := p.t
@@ -436,6 +448,25 @@ func TestCorruptDB_RecoverInvalidSeq_Issue53(t *testing.T) {
 	h.getVal("b", "v3")
 	h.getVal("c", "v0")
 	h.getVal("d", "v0")
+
+	h.close()
+}
+
+func TestCorruptDB_MissingTableFiles(t *testing.T) {
+	h := newDbCorruptHarness(t)
+
+	h.put("a", "v1")
+	h.put("b", "v1")
+	h.compactMem()
+	h.put("c", "v2")
+	h.put("d", "v2")
+	h.compactMem()
+	h.put("e", "v3")
+	h.put("f", "v3")
+	h.closeDB()
+
+	h.removeOne(storage.TypeTable)
+	h.openAssert(false)
 
 	h.close()
 }

@@ -20,16 +20,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-// ErrManifest is the type that wraps errors produced by missing
-// or corrupted manifest file.
-type ErrManifest struct {
-	Err error
-}
-
-func (e ErrManifest) Error() string {
-	return e.Err.Error()
-}
-
 // session represent a persistent database session.
 type session struct {
 	// Need 64-bit alignment.
@@ -108,7 +98,7 @@ func (s *session) recover() (err error) {
 			// Don't return os.ErrNotExist if the underlying storage contains
 			// other files that belong to LevelDB. So the DB won't get trashed.
 			if files, _ := s.stor.GetFiles(storage.TypeAll); len(files) > 0 {
-				err = ErrManifest{Err: errors.New("leveldb: manifest file missing")}
+				err = ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest file missing")}
 			}
 		}
 	}()
@@ -148,7 +138,7 @@ func (s *session) recover() (err error) {
 			// commit record to version staging
 			staging.commit(rec)
 		} else if strict {
-			return ErrManifest{Err: err}
+			return ErrCorrupted{Type: CorruptedManifest, Err: err}
 		} else {
 			s.logf("manifest error: %v (skipped)", err)
 		}
@@ -159,15 +149,15 @@ func (s *session) recover() (err error) {
 
 	switch {
 	case !rec.has(recComparer):
-		return ErrManifest{Err: errors.New("leveldb: manifest missing comparer name")}
+		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing comparer name")}
 	case rec.comparer != s.cmp.cmp.Name():
-		return ErrManifest{Err: errors.New("leveldb: comparer mismatch, " + "want '" + s.cmp.cmp.Name() + "', " + "got '" + rec.comparer + "'")}
+		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: comparer mismatch, " + "want '" + s.cmp.cmp.Name() + "', " + "got '" + rec.comparer + "'")}
 	case !rec.has(recNextNum):
-		return ErrManifest{Err: errors.New("leveldb: manifest missing next file number")}
+		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing next file number")}
 	case !rec.has(recJournalNum):
-		return ErrManifest{Err: errors.New("leveldb: manifest missing journal file number")}
+		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing journal file number")}
 	case !rec.has(recSeq):
-		return ErrManifest{Err: errors.New("leveldb: manifest missing seq number")}
+		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing seq number")}
 	}
 
 	s.manifestFile = file

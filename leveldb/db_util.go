@@ -7,6 +7,8 @@
 package leveldb
 
 import (
+	"errors"
+
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -30,15 +32,15 @@ func (p Sizes) Sum() (n uint64) {
 	return n
 }
 
-// Remove unused files.
-func (d *DB) cleanFiles() error {
+// Check and clean files.
+func (d *DB) checkAndCleanFiles() error {
 	s := d.s
 
 	v := s.version_NB()
-	tables := make(map[uint64]struct{})
+	tables := make(map[uint64]bool)
 	for _, tt := range v.tables {
 		for _, t := range tt {
-			tables[t.file.Num()] = struct{}{}
+			tables[t.file.Num()] = false
 		}
 	}
 
@@ -46,6 +48,8 @@ func (d *DB) cleanFiles() error {
 	if err != nil {
 		return err
 	}
+
+	var nTables int
 	var rem []storage.File
 	for _, f := range ff {
 		keep := true
@@ -60,12 +64,26 @@ func (d *DB) cleanFiles() error {
 			}
 		case storage.TypeTable:
 			_, keep = tables[f.Num()]
+			if keep {
+				tables[f.Num()] = true
+				nTables++
+			}
 		}
 
 		if !keep {
 			rem = append(rem, f)
 		}
 	}
+
+	if nTables != len(tables) {
+		for num, present := range tables {
+			if !present {
+				s.logf("db@janitor table missing @%d", num)
+			}
+		}
+		return ErrCorrupted{Type: MissingFiles, Err: errors.New("leveldb: table files missing")}
+	}
+
 	s.logf("db@janitor F·%d G·%d", len(ff), len(rem))
 	for _, f := range rem {
 		s.logf("db@janitor removing %s-%d", f.Type(), f.Num())

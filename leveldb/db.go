@@ -25,13 +25,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-var (
-	ErrNotFound         = util.ErrNotFound
-	ErrSnapshotReleased = errors.New("leveldb: snapshot released")
-	ErrIterReleased     = errors.New("leveldb: iterator released")
-	ErrClosed           = errors.New("leveldb: closed")
-)
-
 // DB is a LevelDB database.
 type DB struct {
 	// Need 64-bit alignment.
@@ -110,7 +103,12 @@ func openDB(s *session) (*DB, error) {
 	}
 
 	// Remove any obsolete files.
-	if err := db.cleanFiles(); err != nil {
+	if err := db.checkAndCleanFiles(); err != nil {
+		// Close journal.
+		if db.journal != nil {
+			db.journal.Close()
+			db.journalWriter.Close()
+		}
 		return nil, err
 	}
 
@@ -133,9 +131,9 @@ func openDB(s *session) (*DB, error) {
 // Also, if ErrorIfExist is true and the DB exist Open will returns
 // os.ErrExist error.
 //
-// Open will return an error with type of ErrManifest if manifest file
-// is missing or corrupted. Missing or corrupted manifest file can be
-// recovered with Recover function.
+// Open will return an error with type of ErrCorrupted if corruption
+// detected in the DB. Corrupted DB can be recovered with Recover
+// function.
 //
 // The DB must be closed after use, by calling Close method.
 func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
@@ -175,9 +173,9 @@ func Open(p storage.Storage, o *opt.Options) (db *DB, err error) {
 // OpenFile uses standard file-system backed storage implementation as
 // desribed in the leveldb/storage package.
 //
-// OpenFile will return an error with type of ErrManifest if manifest file
-// is missing or corrupted. Missing or corrupted manifest file can be
-// recovered with Recover function.
+// OpenFile will return an error with type of ErrCorrupted if corruption
+// detected in the DB. Corrupted DB can be recovered with Recover
+// function.
 //
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
