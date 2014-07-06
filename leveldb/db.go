@@ -387,7 +387,6 @@ func recoverTable(s *session, o *opt.Options) error {
 
 func (d *DB) recoverJournal() error {
 	s := d.s
-	icmp := s.cmp
 
 	ff0, err := s.getFiles(storage.TypeJournal)
 	if err != nil {
@@ -477,7 +476,7 @@ func (d *DB) recoverJournal() error {
 	// Recover all journals.
 	if len(ff2) > 0 {
 		s.logf("journal@recovery F·%d", len(ff2))
-		mem = memdb.New(icmp, writeBuffer)
+		mem = memdb.New(s.icmp, writeBuffer)
 		for _, file := range ff2 {
 			if err := recoverJournal(file); err != nil {
 				return err
@@ -508,7 +507,6 @@ func (d *DB) recoverJournal() error {
 func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
 	s := d.s
 
-	ucmp := s.cmp.cmp
 	ikey := newIKey(key, seq, tSeek)
 
 	em, fm := d.getMems()
@@ -519,7 +517,7 @@ func (d *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err
 		mk, mv, me := m.Find(ikey)
 		if me == nil {
 			ukey, _, t, ok := parseIkey(mk)
-			if ok && ucmp.Compare(ukey, key) == 0 {
+			if ok && s.icmp.uCompare(ukey, key) == 0 {
 				if t == tDel {
 					return nil, ErrNotFound
 				}

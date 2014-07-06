@@ -117,12 +117,10 @@ func (tf tFiles) searchMax(key iKey, icmp *iComparer) int {
 }
 
 func (tf tFiles) isOverlaps(min, max []byte, disjSorted bool, icmp *iComparer) bool {
-	ucmp := icmp.cmp
-
 	if !disjSorted {
 		// Need to check against all files
 		for _, t := range tf {
-			if !t.isAfter(min, ucmp) && !t.isBefore(max, ucmp) {
+			if !t.isAfter(min, icmp.ucmp) && !t.isBefore(max, icmp.ucmp) {
 				return true
 			}
 		}
@@ -139,7 +137,7 @@ func (tf tFiles) isOverlaps(min, max []byte, disjSorted bool, icmp *iComparer) b
 		// beginning of range is after all files, so no overlap
 		return false
 	}
-	return !tf[idx].isBefore(max, ucmp)
+	return !tf[idx].isBefore(max, icmp.ucmp)
 }
 
 func (tf tFiles) getOverlaps(min, max []byte, r *tFiles, disjSorted bool, ucmp comparer.BasicComparer) {

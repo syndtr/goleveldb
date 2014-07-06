@@ -149,7 +149,6 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 	db := h.db
 
 	var res uint64
-	ucmp := db.s.cmp.cmp
 	v := db.s.version()
 	for i, tt := range v.tables[1 : len(v.tables)-1] {
 		level := i + 1
@@ -157,7 +156,7 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 		for _, t := range tt {
 			var r tFiles
 			min, max := t.min.ukey(), t.max.ukey()
-			next.getOverlaps(min, max, &r, true, ucmp)
+			next.getOverlaps(min, max, &r, true, db.s.icmp.ucmp)
 			sum := r.size()
 			if sum > res {
 				res = sum
@@ -238,7 +237,7 @@ func (h *dbHarness) getVal(key, value string) {
 func (h *dbHarness) allEntriesFor(key, want string) {
 	t := h.t
 	db := h.db
-	ucmp := db.s.cmp.cmp
+	s := db.s
 
 	ikey := newIKey([]byte(key), kMaxSeq, tVal)
 	iter := db.newRawIterator(nil, nil)
@@ -251,7 +250,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	for iter.Valid() {
 		rkey := iKey(iter.Key())
 		if _, t, ok := rkey.parseNum(); ok {
-			if ucmp.Compare(ikey.ukey(), rkey.ukey()) != 0 {
+			if s.icmp.uCompare(ikey.ukey(), rkey.ukey()) != 0 {
 				break
 			}
 			if !first {
