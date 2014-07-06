@@ -389,11 +389,11 @@ func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	t := h.t
 	db := h.db
 
-	s, err := db.GetApproximateSizes([]util.Range{
+	s, err := db.SizeOf([]util.Range{
 		{[]byte(start), []byte(limit)},
 	})
 	if err != nil {
-		t.Error("GetApproximateSizes: got error: ", err)
+		t.Error("SizeOf: got error: ", err)
 	}
 	if s.Sum() < low || s.Sum() > hi {
 		t.Errorf("sizeof %q to %q not in range, want %d - %d, got %d",
@@ -1010,7 +1010,7 @@ func TestDb_SparseMerge(t *testing.T) {
 	h.maxNextLevelOverlappingBytes(20 * 1048576)
 }
 
-func TestDb_ApproximateSizes(t *testing.T) {
+func TestDb_SizeOf(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
 		Compression: opt.NoCompression,
 		WriteBuffer: 10000000,
@@ -1030,7 +1030,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 		h.put(numKey(i), strings.Repeat(fmt.Sprintf("v%09d", i), s1/10))
 	}
 
-	// 0 because GetApproximateSizes() does not account for memtable space
+	// 0 because SizeOf() does not account for memtable space
 	h.sizeAssert("", numKey(50), 0, 0)
 
 	for r := 0; r < 3; r++ {
@@ -1060,7 +1060,7 @@ func TestDb_ApproximateSizes(t *testing.T) {
 	}
 }
 
-func TestDb_ApproximateSizes_MixOfSmallAndLarge(t *testing.T) {
+func TestDb_SizeOf_MixOfSmallAndLarge(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
 	defer h.close()
 
@@ -1474,7 +1474,7 @@ func TestDb_ClosedIsClosed(t *testing.T) {
 	_, err = db.GetProperty("leveldb.stats")
 	assertErr(t, err, true)
 
-	_, err = db.GetApproximateSizes([]util.Range{{[]byte("a"), []byte("z")}})
+	_, err = db.SizeOf([]util.Range{{[]byte("a"), []byte("z")}})
 	assertErr(t, err, true)
 
 	assertErr(t, db.CompactRange(util.Range{}), true)

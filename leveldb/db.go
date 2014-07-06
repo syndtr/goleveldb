@@ -654,13 +654,13 @@ func (d *DB) GetProperty(name string) (value string, err error) {
 	return
 }
 
-// GetApproximateSizes calculates approximate sizes of the given key ranges.
+// SizeOf calculates approximate sizes of the given key ranges.
 // The length of the returned sizes are equal with the length of the given
 // ranges. The returned sizes measure storage space usage, so if the user
 // data compresses by a factor of ten, the returned sizes will be one-tenth
 // the size of the corresponding user data size.
 // The results may not include the sizes of recently written data.
-func (d *DB) GetApproximateSizes(ranges []util.Range) (Sizes, error) {
+func (d *DB) SizeOf(ranges []util.Range) (Sizes, error) {
 	if err := d.ok(); err != nil {
 		return nil, err
 	}
@@ -672,11 +672,11 @@ func (d *DB) GetApproximateSizes(ranges []util.Range) (Sizes, error) {
 	for _, r := range ranges {
 		min := newIKey(r.Start, kMaxSeq, tSeek)
 		max := newIKey(r.Limit, kMaxSeq, tSeek)
-		start, err := v.getApproximateOffset(min)
+		start, err := v.offsetOf(min)
 		if err != nil {
 			return nil, err
 		}
-		limit, err := v.getApproximateOffset(max)
+		limit, err := v.offsetOf(max)
 		if err != nil {
 			return nil, err
 		}

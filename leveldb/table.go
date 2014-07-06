@@ -336,12 +336,12 @@ func (t *tOps) get(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []by
 	return c.Value().(*table.Reader).Find(key, ro)
 }
 
-func (t *tOps) getApproximateOffset(f *tFile, key []byte) (offset uint64, err error) {
+func (t *tOps) offsetOf(f *tFile, key []byte) (offset uint64, err error) {
 	c, err := t.lookup(f)
 	if err != nil {
 		return
 	}
-	_offset, err := c.Value().(*table.Reader).GetApproximateOffset(key)
+	_offset, err := c.Value().(*table.Reader).OffsetOf(key)
 	offset = uint64(_offset)
 	c.Release()
 	return
