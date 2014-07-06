@@ -232,7 +232,7 @@ func (d *DB) memCompaction() {
 	// Pause table compaction.
 	ch := make(chan struct{})
 	select {
-	case d.tcompPauseC <- ch:
+	case d.tcompPauseC <- (chan<- struct{})(ch):
 	case _, _ = <-d.closeC:
 		return
 	}
@@ -268,7 +268,7 @@ func (d *DB) memCompaction() {
 	// Drop frozen mem.
 	d.dropFrozenMem()
 
-	// Unpause table compaction.
+	// Resume table compaction.
 	select {
 	case <-ch:
 	case _, _ = <-d.closeC:
