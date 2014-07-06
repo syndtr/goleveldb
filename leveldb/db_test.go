@@ -994,6 +994,7 @@ func TestDb_SparseMerge(t *testing.T) {
 	h.put("C", "vc")
 	h.compactMem()
 	h.compactRangeAt(0, "", "")
+	h.waitCompaction()
 
 	// Make sparse update
 	h.put("A", "va2")
@@ -1003,8 +1004,10 @@ func TestDb_SparseMerge(t *testing.T) {
 
 	h.maxNextLevelOverlappingBytes(20 * 1048576)
 	h.compactRangeAt(0, "", "")
+	h.waitCompaction()
 	h.maxNextLevelOverlappingBytes(20 * 1048576)
 	h.compactRangeAt(1, "", "")
+	h.waitCompaction()
 	h.maxNextLevelOverlappingBytes(20 * 1048576)
 }
 
