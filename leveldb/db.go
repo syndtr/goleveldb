@@ -495,6 +495,11 @@ func (d *DB) recoverJournal() error {
 	}
 	// Commit.
 	if err := cm.commit(d.journalFile.Num(), d.seq); err != nil {
+		// Close journal.
+		if d.journal != nil {
+			d.journal.Close()
+			d.journalWriter.Close()
+		}
 		return err
 	}
 	// Remove the last journal.
