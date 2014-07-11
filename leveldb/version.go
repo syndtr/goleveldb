@@ -87,109 +87,125 @@ func (v *version) release() {
 	v.s.vmu.Unlock()
 }
 
-func (v *version) get(ikey iKey, ro *opt.ReadOptions) (value []byte, cstate bool, err error) {
+func (v *version) walkOverlapping(ikey iKey, f func(level int, t *tFile) bool, lf func(level int) bool) {
 	ukey := ikey.ukey()
 
-	var tset *tSet
-	tseek := true
-
-	// We can search level-by-level since entries never hop across
-	// levels. Therefore we are guaranteed that if we find data
-	// in an smaller level, later levels are irrelevant.
-	for level, ts := range v.tables {
-		if len(ts) == 0 {
+	// Walk tables level-by-level.
+	for level, tables := range v.tables {
+		if len(tables) == 0 {
 			continue
 		}
 
 		if level == 0 {
 			// Level-0 files may overlap each other. Find all files that
-			// overlap user_key and process them in order from newest to
-			var tmp tFiles
-			for _, t := range ts {
-				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 &&
-					v.s.icmp.uCompare(ukey, t.imax.ukey()) <= 0 {
-					tmp = append(tmp, t)
-				}
-			}
-
-			if len(tmp) == 0 {
-				continue
-			}
-
-			tmp.sortByNum()
-			ts = tmp
-		} else {
-			i := ts.searchMax(v.s.icmp, ikey)
-			if i >= len(ts) || v.s.icmp.uCompare(ukey, ts[i].imin.ukey()) < 0 {
-				continue
-			}
-
-			ts = ts[i : i+1]
-		}
-
-		var l0found bool
-		var l0seq uint64
-		var l0type vType
-		var l0value []byte
-		for _, t := range ts {
-			if tseek {
-				if tset == nil {
-					tset = &tSet{level, t}
-				} else if tset.table.consumeSeek() <= 0 {
-					cstate = atomic.CompareAndSwapPointer(&v.cSeek, nil, unsafe.Pointer(tset))
-					tseek = false
-				}
-			}
-
-			var _rkey, rval []byte
-			_rkey, rval, err = v.s.tops.find(t, ikey, ro)
-			if err == ErrNotFound {
-				continue
-			} else if err != nil {
-				return
-			}
-
-			rkey := iKey(_rkey)
-			if seq, t, ok := rkey.parseNum(); ok {
-				if v.s.icmp.uCompare(ukey, rkey.ukey()) == 0 {
-					if level == 0 {
-						if seq >= l0seq {
-							l0found = true
-							l0seq = seq
-							l0type = t
-							l0value = rval
-						}
-					} else {
-						switch t {
-						case tVal:
-							value = rval
-						case tDel:
-							err = ErrNotFound
-						default:
-							panic("invalid type")
-						}
+			// overlap ukey.
+			for _, t := range tables {
+				if t.overlaps(v.s.icmp, ukey, ukey) {
+					if !f(level, t) {
 						return
 					}
 				}
-			} else {
-				err = errors.New("leveldb: internal key corrupted")
-				return
+			}
+		} else {
+			if i := tables.searchMax(v.s.icmp, ikey); i < len(tables) {
+				t := tables[i]
+				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
+					if !f(level, t) {
+						return
+					}
+				}
 			}
 		}
-		if level == 0 && l0found {
-			switch l0type {
-			case tVal:
-				value = l0value
-			case tDel:
-				err = ErrNotFound
-			default:
-				panic("invalid type")
-			}
+
+		if lf != nil && !lf(level) {
 			return
 		}
 	}
+}
+
+func (v *version) get(ikey iKey, ro *opt.ReadOptions) (value []byte, tcomp bool, err error) {
+	ukey := ikey.ukey()
+
+	var (
+		tset  *tSet
+		tseek bool
+
+		l0found bool
+		l0seq   uint64
+		l0vt    vType
+		l0val   []byte
+	)
 
 	err = ErrNotFound
+
+	// Since entries never hope across level, finding key/value
+	// in smaller level make later levels irrelevant.
+	v.walkOverlapping(ikey, func(level int, t *tFile) bool {
+		if !tseek {
+			if tset == nil {
+				tset = &tSet{level, t}
+			} else if tset.table.consumeSeek() <= 0 {
+				tseek = true
+				tcomp = atomic.CompareAndSwapPointer(&v.cSeek, nil, unsafe.Pointer(tset))
+			}
+		}
+
+		ikey__, val_, err_ := v.s.tops.find(t, ikey, ro)
+		switch err_ {
+		case nil:
+		case ErrNotFound:
+			return true
+		default:
+			err = err_
+			return false
+		}
+
+		ikey_ := iKey(ikey__)
+		if seq, vt, ok := ikey_.parseNum(); ok {
+			if v.s.icmp.uCompare(ukey, ikey_.ukey()) != 0 {
+				return true
+			}
+
+			if level == 0 {
+				if seq >= l0seq {
+					l0found = true
+					l0seq = seq
+					l0vt = vt
+					l0val = val_
+				}
+			} else {
+				switch vt {
+				case tVal:
+					value = val_
+					err = nil
+				case tDel:
+				default:
+					panic("leveldb: invalid internal key type")
+				}
+				return false
+			}
+		} else {
+			err = errors.New("leveldb: internal key corrupted")
+			return false
+		}
+
+		return true
+	}, func(level int) bool {
+		if l0found {
+			switch l0vt {
+			case tVal:
+				value = l0val
+				err = nil
+			case tDel:
+			default:
+				panic("leveldb: invalid internal key type")
+			}
+			return false
+		}
+
+		return true
+	})
+
 	return
 }
 
@@ -390,7 +406,11 @@ func (p *versionStaging) finish() *version {
 		}
 
 		// Sort tables.
-		nt.sortByKey(p.base.s.icmp)
+		if level == 0 {
+			nt.sortByNum()
+		} else {
+			nt.sortByKey(p.base.s.icmp)
+		}
 		nv.tables[level] = nt
 	}
 
