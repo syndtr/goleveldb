@@ -762,6 +762,7 @@ func (db *DB) Close() error {
 	db.closeW.Wait()
 
 	// Close journal.
+	db.writeLockC <- struct{}{}
 	if db.journal != nil {
 		db.journal.Close()
 		db.journalWriter.Close()
