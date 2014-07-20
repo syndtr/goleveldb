@@ -136,6 +136,7 @@ func openDB(s *session) (*DB, error) {
 // detected in the DB. Corrupted DB can be recovered with Recover
 // function.
 //
+// The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(stor, o)
@@ -178,6 +179,7 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // detected in the DB. Corrupted DB can be recovered with Recover
 // function.
 //
+// The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path)
@@ -198,6 +200,7 @@ func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 // The DB must already exist or it will returns an error.
 // Also, Recover will ignore ErrorIfMissing and ErrorIfExist options.
 //
+// The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(stor, o)
@@ -226,6 +229,7 @@ func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // RecoverFile uses standard file-system backed storage implementation as desribed
 // in the leveldb/storage package.
 //
+// The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path)
@@ -733,7 +737,8 @@ func (db *DB) SizeOf(ranges []util.Range) (Sizes, error) {
 	return sizes, nil
 }
 
-// Close closes the DB. This will also releases any outstanding snapshot.
+// Close closes the DB. This will also releases any outstanding snapshot and
+// abort any in-flight compaction.
 //
 // It is not safe to close a DB until all outstanding iterators are released.
 // It is valid to call Close multiple times. Other methods should not be
