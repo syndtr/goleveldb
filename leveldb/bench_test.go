@@ -250,6 +250,7 @@ func (p *dbBench) newIter() iterator.Iterator {
 }
 
 func (p *dbBench) close() {
+	p.b.Log(p.db.s.tops.bpool)
 	p.db.Close()
 	p.stor.Close()
 	os.RemoveAll(benchDB)
