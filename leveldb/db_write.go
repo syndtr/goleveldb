@@ -86,10 +86,14 @@ func (db *DB) flush(n int) (mem *memdb.DB, nn int, err error) {
 			// Allow memdb to grow if it has no entry.
 			if mem.Len() == 0 {
 				nn = n
-				return false
+			} else {
+				mem, err = db.rotateMem(n)
+				if err == nil {
+					nn = mem.Free()
+				} else {
+					nn = 0
+				}
 			}
-			mem, err = db.rotateMem(n)
-			nn = mem.Free()
 			return false
 		}
 		return true
