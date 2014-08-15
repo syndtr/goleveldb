@@ -8,10 +8,6 @@
 
 package util
 
-import (
-	"sync"
-)
-
 type Pool struct {
 	pool chan interface{}
 }
