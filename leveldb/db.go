@@ -655,6 +655,8 @@ func (db *DB) GetSnapshot() (*Snapshot, error) {
 //		Returns statistics of the underlying DB.
 //	leveldb.sstables
 //		Returns sstables list for each level.
+//	leveldb.blockpool
+//		Returns block pool stats.
 func (db *DB) GetProperty(name string) (value string, err error) {
 	err = db.ok()
 	if err != nil {
@@ -700,6 +702,8 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Num(), t.size, t.imin, t.imax)
 			}
 		}
+	case p == "blockpool":
+		value = fmt.Sprintf("%v", db.s.tops.bpool)
 	default:
 		err = errors.New("leveldb: GetProperty: unknown property: " + name)
 	}
