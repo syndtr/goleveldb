@@ -438,6 +438,7 @@ func (i *blockIter) Value() []byte {
 
 func (i *blockIter) Release() {
 	if i.dir > dirReleased {
+		i.block = nil
 		i.prevNode = nil
 		i.prevKeys = nil
 		i.key = nil
