@@ -704,6 +704,14 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		}
 	case p == "blockpool":
 		value = fmt.Sprintf("%v", db.s.tops.bpool)
+	case p == "cachedblock":
+		if bc := db.s.o.GetBlockCache(); bc != nil {
+			value = fmt.Sprintf("%d", bc.Size())
+		} else {
+			value = "<nil>"
+		}
+	case p == "openedtables":
+		value = fmt.Sprintf("%d", db.s.tops.cache.Size())
 	default:
 		err = errors.New("leveldb: GetProperty: unknown property: " + name)
 	}
