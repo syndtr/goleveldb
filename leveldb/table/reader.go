@@ -37,8 +37,7 @@ func max(x, y int) int {
 }
 
 type block struct {
-	bpool          *util.BufferPool
-	cmp            comparer.BasicComparer
+	tr             *Reader
 	data           []byte
 	restartsLen    int
 	restartsOffset int
@@ -47,31 +46,25 @@ type block struct {
 }
 
 func (b *block) seek(rstart, rlimit int, key []byte) (index, offset int, err error) {
-	n := b.restartsOffset
-	data := b.data
-	cmp := b.cmp
-
 	index = sort.Search(b.restartsLen-rstart-(b.restartsLen-rlimit), func(i int) bool {
-		offset := int(binary.LittleEndian.Uint32(data[n+4*(rstart+i):]))
-		offset += 1                               // shared always zero, since this is a restart point
-		v1, n1 := binary.Uvarint(data[offset:])   // key length
-		_, n2 := binary.Uvarint(data[offset+n1:]) // value length
+		offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
+		offset += 1                                 // shared always zero, since this is a restart point
+		v1, n1 := binary.Uvarint(b.data[offset:])   // key length
+		_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
 		m := offset + n1 + n2
-		return cmp.Compare(data[m:m+int(v1)], key) > 0
+		return b.tr.cmp.Compare(b.data[m:m+int(v1)], key) > 0
 	}) + rstart - 1
 	if index < rstart {
 		// The smallest key is greater-than key sought.
 		index = rstart
 	}
-	offset = int(binary.LittleEndian.Uint32(data[n+4*index:]))
+	offset = int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*index:]))
 	return
 }
 
 func (b *block) restartIndex(rstart, rlimit, offset int) int {
-	n := b.restartsOffset
-	data := b.data
 	return sort.Search(b.restartsLen-rstart-(b.restartsLen-rlimit), func(i int) bool {
-		return int(binary.LittleEndian.Uint32(data[n+4*(rstart+i):])) > offset
+		return int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):])) > offset
 	}) + rstart - 1
 }
 
@@ -141,10 +134,10 @@ func (b *block) newIterator(slice *util.Range, inclLimit bool, cache util.Releas
 }
 
 func (b *block) Release() {
-	if b.bpool != nil {
-		b.bpool.Put(b.data)
-		b.bpool = nil
+	if b.tr.bpool != nil {
+		b.tr.bpool.Put(b.data)
 	}
+	b.tr = nil
 	b.data = nil
 }
 
@@ -270,7 +263,7 @@ func (i *blockIter) Seek(key []byte) bool {
 		i.dir = dirForward
 	}
 	for i.Next() {
-		if i.block.cmp.Compare(i.key, key) >= 0 {
+		if i.block.tr.cmp.Compare(i.key, key) >= 0 {
 			return true
 		}
 	}
@@ -557,6 +550,7 @@ func (r *Reader) readRawBlock(bh blockHandle, checksum bool) ([]byte, error) {
 	}
 	if checksum || r.checksum {
 		if !verifyChecksum(data) {
+			r.bpool.Put(data)
 			return nil, errors.New("leveldb/table: Reader: invalid block (checksum mismatch)")
 		}
 	}
@@ -575,6 +569,7 @@ func (r *Reader) readRawBlock(bh blockHandle, checksum bool) ([]byte, error) {
 			return nil, err
 		}
 	default:
+		r.bpool.Put(data)
 		return nil, fmt.Errorf("leveldb/table: Reader: unknown block compression type: %d", data[bh.length])
 	}
 	return data, nil
@@ -587,7 +582,7 @@ func (r *Reader) readBlock(bh blockHandle, checksum bool) (*block, error) {
 	}
 	restartsLen := int(binary.LittleEndian.Uint32(data[len(data)-4:]))
 	b := &block{
-		cmp:            r.cmp,
+		tr:             r,
 		data:           data,
 		restartsLen:    restartsLen,
 		restartsOffset: len(data) - (restartsLen+1)*4,
@@ -633,7 +628,7 @@ func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, checksum, fi
 			if err != nil {
 				return 0, nil
 			}
-			return int(dataBH.length), dataBlock
+			return cap(dataBlock.data), dataBlock
 		})
 		if err != nil {
 			return iterator.NewEmptyIterator(err)
