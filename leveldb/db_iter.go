@@ -10,6 +10,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -66,6 +67,7 @@ func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *d
 	}
 	rawIter := db.newRawIterator(islice, ro)
 	iter := &dbIter{
+		db:     db,
 		icmp:   db.s.icmp,
 		iter:   rawIter,
 		seq:    seq,
@@ -73,6 +75,7 @@ func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *d
 		key:    make([]byte, 0),
 		value:  make([]byte, 0),
 	}
+	atomic.AddInt32(&db.aliveIters, 1)
 	runtime.SetFinalizer(iter, (*dbIter).Release)
 	return iter
 }
@@ -89,6 +92,7 @@ const (
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
+	db     *DB
 	icmp   *iComparer
 	iter   iterator.Iterator
 	seq    uint64
@@ -303,6 +307,7 @@ func (i *dbIter) Release() {
 
 		if i.releaser != nil {
 			i.releaser.Release()
+			i.releaser = nil
 		}
 
 		i.dir = dirReleased
@@ -310,6 +315,8 @@ func (i *dbIter) Release() {
 		i.value = nil
 		i.iter.Release()
 		i.iter = nil
+		atomic.AddInt32(&i.db.aliveIters, -1)
+		i.db = nil
 	}
 }
 

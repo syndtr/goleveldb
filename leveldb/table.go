@@ -372,10 +372,9 @@ func (t *tOps) offsetOf(f *tFile, key []byte) (offset uint64, err error) {
 	if err != nil {
 		return
 	}
-	_offset, err := ch.Value().(tableWrapper).OffsetOf(key)
-	offset = uint64(_offset)
-	ch.Release()
-	return
+	defer ch.Release()
+	offset_, err := ch.Value().(tableWrapper).OffsetOf(key)
+	return uint64(offset_), err
 }
 
 // Creates an iterator from the given table.

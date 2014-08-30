@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -46,6 +47,9 @@ type DB struct {
 	// Snapshot.
 	snapsMu   sync.Mutex
 	snapsRoot snapshotElement
+
+	// Stats.
+	aliveSnaps, aliveIters int32
 
 	// Write.
 	writeC       chan *Batch
@@ -657,6 +661,14 @@ func (db *DB) GetSnapshot() (*Snapshot, error) {
 //		Returns sstables list for each level.
 //	leveldb.blockpool
 //		Returns block pool stats.
+//	leveldb.cachedblock
+//		Returns size of cached block.
+//	leveldb.openedtables
+//		Returns number of opened tables.
+//	leveldb.alivesnaps
+//		Returns number of alive snapshots.
+//	leveldb.aliveiters
+//		Returns number of alive iterators.
 func (db *DB) GetProperty(name string) (value string, err error) {
 	err = db.ok()
 	if err != nil {
@@ -712,6 +724,10 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		}
 	case p == "openedtables":
 		value = fmt.Sprintf("%d", db.s.tops.cache.Size())
+	case p == "alivesnaps":
+		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveSnaps))
+	case p == "aliveiters":
+		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveIters))
 	default:
 		err = errors.New("leveldb: GetProperty: unknown property: " + name)
 	}
