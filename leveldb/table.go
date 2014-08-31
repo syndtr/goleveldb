@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"io"
 	"sort"
 	"sync/atomic"
 
@@ -323,15 +322,6 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 	return
 }
 
-type tableWrapper struct {
-	*table.Reader
-	closer io.Closer
-}
-
-func (tr tableWrapper) Release() {
-	tr.closer.Close()
-}
-
 // Opens table. It returns a cache handle, which should
 // be released after use.
 func (t *tOps) open(f *tFile) (ch cache.Handle, err error) {
@@ -347,7 +337,7 @@ func (t *tOps) open(f *tFile) (ch cache.Handle, err error) {
 		if bc := t.s.o.GetBlockCache(); bc != nil {
 			bcacheNS = bc.GetNamespace(num)
 		}
-		return 1, tableWrapper{table.NewReader(r, int64(f.size), bcacheNS, t.bpool, t.s.o), r}
+		return 1, table.NewReader(r, int64(f.size), bcacheNS, t.bpool, t.s.o)
 	})
 	if ch == nil && err == nil {
 		err = ErrClosed
@@ -363,7 +353,7 @@ func (t *tOps) find(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []b
 		return nil, nil, err
 	}
 	defer ch.Release()
-	return ch.Value().(tableWrapper).Find(key, ro)
+	return ch.Value().(*table.Reader).Find(key, ro)
 }
 
 // Returns approximate offset of the given key.
@@ -373,7 +363,7 @@ func (t *tOps) offsetOf(f *tFile, key []byte) (offset uint64, err error) {
 		return
 	}
 	defer ch.Release()
-	offset_, err := ch.Value().(tableWrapper).OffsetOf(key)
+	offset_, err := ch.Value().(*table.Reader).OffsetOf(key)
 	return uint64(offset_), err
 }
 
@@ -383,7 +373,7 @@ func (t *tOps) newIterator(f *tFile, slice *util.Range, ro *opt.ReadOptions) ite
 	if err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
-	iter := ch.Value().(tableWrapper).NewIterator(slice, ro)
+	iter := ch.Value().(*table.Reader).NewIterator(slice, ro)
 	iter.SetReleaser(ch)
 	return iter
 }

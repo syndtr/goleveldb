@@ -837,6 +837,17 @@ func (r *Reader) OffsetOf(key []byte) (offset int64, err error) {
 	return
 }
 
+// Release implements util.Releaser.
+// It also close the file if it is an io.Closer.
+func (r *Reader) Release() {
+	if closer, ok := r.reader.(io.Closer); ok {
+		closer.Close()
+	}
+	r.reader = nil
+	r.cache = nil
+	r.bpool = nil
+}
+
 // NewReader creates a new initialized table reader for the file.
 // The cache and bpool is optional and can be nil.
 //
