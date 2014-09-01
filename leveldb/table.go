@@ -390,7 +390,7 @@ func (t *tOps) remove(f *tFile) {
 				t.s.logf("table@remove removed @%d", num)
 			}
 			if bc := t.s.o.GetBlockCache(); bc != nil {
-				bc.GetNamespace(num).Zap()
+				bc.ZapNamespace(num)
 			}
 		}
 	})
