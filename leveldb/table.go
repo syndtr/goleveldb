@@ -400,6 +400,7 @@ func (t *tOps) remove(f *tFile) {
 // regadless still used or not.
 func (t *tOps) close() {
 	t.cache.Zap()
+	t.bpool.Close()
 }
 
 // Creates new initialized table ops instance.
