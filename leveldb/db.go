@@ -36,7 +36,7 @@ type DB struct {
 
 	// MemDB.
 	memMu             sync.RWMutex
-	memPool           *util.Pool
+	memPool           chan *memdb.DB
 	mem, frozenMem    *memDB
 	journal           *journal.Writer
 	journalWriter     storage.Writer
@@ -84,7 +84,7 @@ func openDB(s *session) (*DB, error) {
 		// Initial sequence
 		seq: s.stSeq,
 		// MemDB
-		memPool: util.NewPool(1),
+		memPool: make(chan *memdb.DB, 1),
 		// Write
 		writeC:       make(chan *Batch),
 		writeMergedC: make(chan bool),
@@ -126,6 +126,7 @@ func openDB(s *session) (*DB, error) {
 	go db.tCompaction()
 	go db.mCompaction()
 	go db.jWriter()
+	go db.mpoolDrain()
 
 	s.logf("db@open done T·%v", time.Since(start))
 
@@ -572,7 +573,7 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 		}
 		defer m.decref()
 
-		mk, mv, me := m.db.Find(ikey)
+		mk, mv, me := m.mdb.Find(ikey)
 		if me == nil {
 			ukey, _, t, ok := parseIkey(mk)
 			if ok && db.s.icmp.uCompare(ukey, key) == 0 {
