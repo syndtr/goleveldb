@@ -521,7 +521,7 @@ func BenchmarkLRUCache_SetRelease(b *testing.B) {
 	ns := c.GetNamespace(0)
 	b.ResetTimer()
 	for i := uint64(0); i < uint64(b.N); i++ {
-		set(ns, i, nil, 1, nil).Release()
+		set(ns, i, "", 1, nil).Release()
 	}
 }
 
@@ -538,10 +538,10 @@ func BenchmarkLRUCache_SetReleaseTwice(b *testing.B) {
 	nb := b.N - na
 
 	for i := uint64(0); i < uint64(na); i++ {
-		set(ns, i, nil, 1, nil).Release()
+		set(ns, i, "", 1, nil).Release()
 	}
 
 	for i := uint64(0); i < uint64(nb); i++ {
-		set(ns, i, nil, 1, nil).Release()
+		set(ns, i, "", 1, nil).Release()
 	}
 }
