@@ -69,6 +69,7 @@ Iterate over subset of database content:
 	...
 
 Iterate over subset of database content with a particular prefix:
+
 	iter := db.NewIterator(util.BytesPrefix([]byte("foo-")), nil)
 	for iter.Next() {
 		// Use key/value.
