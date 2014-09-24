@@ -254,6 +254,63 @@ func (x *testingCacheObject) Release() {
 	}
 }
 
+func TestLRUCache_ConcurrentSetGet(t *testing.T) {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	seed := time.Now().UnixNano()
+	t.Logf("seed=%d", seed)
+
+	const (
+		N = 2000000
+		M = 4000
+		C = 3
+	)
+
+	var set, get uint32
+
+	wg := &sync.WaitGroup{}
+	c := NewLRUCache(M / 4)
+	for ni := uint64(0); ni < C; ni++ {
+		r0 := rand.New(rand.NewSource(seed + int64(ni)))
+		r1 := rand.New(rand.NewSource(seed + int64(ni) + 1))
+		ns := c.GetNamespace(ni)
+
+		wg.Add(2)
+		go func(ns Namespace, r *rand.Rand) {
+			for i := 0; i < N; i++ {
+				x := uint64(r.Int63n(M))
+				o := ns.Get(x, func() (int, interface{}) {
+					atomic.AddUint32(&set, 1)
+					return 1, x
+				})
+				if v := o.Value().(uint64); v != x {
+					t.Errorf("#%d invalid value, got=%d", x, v)
+				}
+				o.Release()
+			}
+			wg.Done()
+		}(ns, r0)
+		go func(ns Namespace, r *rand.Rand) {
+			for i := 0; i < N; i++ {
+				x := uint64(r.Int63n(M))
+				o := ns.Get(x, nil)
+				if o != nil {
+					atomic.AddUint32(&get, 1)
+					if v := o.Value().(uint64); v != x {
+						t.Errorf("#%d invalid value, got=%d", x, v)
+					}
+					o.Release()
+				}
+			}
+			wg.Done()
+		}(ns, r1)
+	}
+
+	wg.Wait()
+
+	t.Logf("set=%d get=%d", set, get)
+}
+
 func TestLRUCache_Finalizer(t *testing.T) {
 	const (
 		capacity   = 100
