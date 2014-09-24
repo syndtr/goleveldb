@@ -13,6 +13,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"code.google.com/p/snappy-go/snappy"
 
@@ -25,8 +26,9 @@ import (
 )
 
 var (
-	ErrNotFound     = util.ErrNotFound
-	ErrIterReleased = errors.New("leveldb/table: iterator released")
+	ErrNotFound       = util.ErrNotFound
+	ErrReaderReleased = errors.New("leveldb/table: reader released")
+	ErrIterReleased   = errors.New("leveldb/table: iterator released")
 )
 
 func max(x, y int) int {
@@ -511,6 +513,13 @@ type indexIter struct {
 }
 
 func (i *indexIter) Get() iterator.Iterator {
+	if i.blockIter.err != nil {
+		return iterator.NewEmptyIterator(i.blockIter.err)
+	} else if i.blockIter.dir == dirReleased {
+		i.blockIter.err = ErrIterReleased
+		return iterator.NewEmptyIterator(i.blockIter.err)
+	}
+
 	value := i.Value()
 	if value == nil {
 		return nil
@@ -519,15 +528,17 @@ func (i *indexIter) Get() iterator.Iterator {
 	if n == 0 {
 		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)"))
 	}
+
 	var slice *util.Range
 	if i.slice != nil && (i.blockIter.isFirst() || i.blockIter.isLast()) {
 		slice = i.slice
 	}
-	return i.blockIter.block.tr.getDataIter(dataBH, slice, i.checksum, i.fillCache)
+	return i.blockIter.block.tr.getDataIterErr(dataBH, slice, i.checksum, i.fillCache)
 }
 
 // Reader is a table reader.
 type Reader struct {
+	mu     sync.RWMutex
 	reader io.ReaderAt
 	cache  cache.Namespace
 	err    error
@@ -696,6 +707,17 @@ func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, checksum, fi
 	return b.newIterator(slice, false, rel)
 }
 
+func (r *Reader) getDataIterErr(dataBH blockHandle, slice *util.Range, checksum, fillCache bool) iterator.Iterator {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	if r.err != nil {
+		return iterator.NewEmptyIterator(r.err)
+	}
+
+	return r.getDataIter(dataBH, slice, checksum, fillCache)
+}
+
 // NewIterator creates an iterator from the table.
 //
 // Slice allows slicing the iterator to only contains keys in the given
@@ -708,6 +730,9 @@ func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, checksum, fi
 //
 // Also read Iterator documentation of the leveldb/iterator package.
 func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.err != nil {
 		return iterator.NewEmptyIterator(r.err)
 	}
@@ -733,6 +758,9 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Find returns.
 func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.err != nil {
 		err = r.err
 		return
@@ -791,6 +819,9 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 // The caller should not modify the contents of the returned slice, but
 // it is safe to modify the contents of the argument after Get returns.
 func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.err != nil {
 		err = r.err
 		return
@@ -808,6 +839,9 @@ func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) 
 //
 // It is safe to modify the contents of the argument after Get returns.
 func (r *Reader) OffsetOf(key []byte) (offset int64, err error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	if r.err != nil {
 		err = r.err
 		return
@@ -840,12 +874,16 @@ func (r *Reader) OffsetOf(key []byte) (offset int64, err error) {
 // Release implements util.Releaser.
 // It also close the file if it is an io.Closer.
 func (r *Reader) Release() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if closer, ok := r.reader.(io.Closer); ok {
 		closer.Close()
 	}
 	r.reader = nil
 	r.cache = nil
 	r.bpool = nil
+	r.err = ErrReaderReleased
 }
 
 // NewReader creates a new initialized table reader for the file.
