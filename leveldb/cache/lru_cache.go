@@ -124,6 +124,9 @@ func (c *lruCache) Zap() {
 func (c *lruCache) evict() {
 	top := &c.recent
 	for n := c.recent.rPrev; c.used > c.capacity && n != top; {
+		if n.state != nodeEffective {
+			panic("evicting non effective node")
+		}
 		n.state = nodeEvicted
 		n.rRemove()
 		n.derefNB()
