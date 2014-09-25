@@ -748,7 +748,7 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 		checksum:  ro.GetStrict(opt.StrictBlockChecksum),
 		fillCache: !ro.GetDontFillCache(),
 	}
-	return iterator.NewIndexedIterator(index, r.strictIter || ro.GetStrict(opt.StrictIterator), false)
+	return iterator.NewIndexedIterator(index, r.strictIter || ro.GetStrict(opt.StrictIterator), true)
 }
 
 // Find finds key/value pair whose key is greater than or equal to the
