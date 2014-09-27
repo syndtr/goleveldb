@@ -441,7 +441,7 @@ func (i *blockIter) Value() []byte {
 }
 
 func (i *blockIter) Release() {
-	if i.dir > dirReleased {
+	if i.dir != dirReleased {
 		i.block = nil
 		i.prevNode = nil
 		i.prevKeys = nil
@@ -460,9 +460,13 @@ func (i *blockIter) Release() {
 }
 
 func (i *blockIter) SetReleaser(releaser util.Releaser) {
-	if i.dir > dirReleased {
-		i.releaser = releaser
+	if i.dir == dirReleased {
+		panic(util.ErrReleased)
 	}
+	if i.releaser != nil && releaser != nil {
+		panic(util.ErrHasReleaser)
+	}
+	i.releaser = releaser
 }
 
 func (i *blockIter) Valid() bool {
@@ -513,13 +517,6 @@ type indexIter struct {
 }
 
 func (i *indexIter) Get() iterator.Iterator {
-	if i.blockIter.err != nil {
-		return iterator.NewEmptyIterator(i.blockIter.err)
-	} else if i.blockIter.dir == dirReleased {
-		i.blockIter.err = ErrIterReleased
-		return iterator.NewEmptyIterator(i.blockIter.err)
-	}
-
 	value := i.Value()
 	if value == nil {
 		return nil
