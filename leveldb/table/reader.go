@@ -548,6 +548,8 @@ type Reader struct {
 
 	dataEnd           int64
 	indexBH, filterBH blockHandle
+	indexBlock        *block
+	filterBlock       *filterBlock
 }
 
 func verifyChecksum(data []byte) bool {
@@ -696,6 +698,20 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 	return b, b, err
 }
 
+func (r *Reader) getIndexBlock(fillCache bool) (b *block, rel util.Releaser, err error) {
+	if r.indexBlock == nil {
+		return r.readBlockCached(r.indexBH, true, fillCache)
+	}
+	return r.indexBlock, util.NoopReleaser{}, nil
+}
+
+func (r *Reader) getFilterBlock(fillCache bool) (*filterBlock, util.Releaser, error) {
+	if r.filterBlock == nil {
+		return r.readFilterBlockCached(r.filterBH, fillCache)
+	}
+	return r.filterBlock, util.NoopReleaser{}, nil
+}
+
 func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, checksum, fillCache bool) iterator.Iterator {
 	b, rel, err := r.readBlockCached(dataBH, checksum, fillCache)
 	if err != nil {
@@ -735,12 +751,12 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 	}
 
 	fillCache := !ro.GetDontFillCache()
-	b, rel, err := r.readBlockCached(r.indexBH, true, fillCache)
+	indexBlock, rel, err := r.getIndexBlock(fillCache)
 	if err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
 	index := &indexIter{
-		blockIter: b.newIterator(slice, true, rel),
+		blockIter: indexBlock.newIterator(slice, true, rel),
 		slice:     slice,
 		checksum:  ro.GetStrict(opt.StrictBlockChecksum),
 		fillCache: !ro.GetDontFillCache(),
@@ -763,7 +779,7 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 		return
 	}
 
-	indexBlock, rel, err := r.readBlockCached(r.indexBH, true, true)
+	indexBlock, rel, err := r.getIndexBlock(true)
 	if err != nil {
 		return
 	}
@@ -784,7 +800,7 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 		return
 	}
 	if r.filter != nil {
-		filterBlock, rel, ferr := r.readFilterBlockCached(r.filterBH, true)
+		filterBlock, rel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
 			if !filterBlock.contains(dataBH.offset, key) {
 				rel.Release()
@@ -877,6 +893,14 @@ func (r *Reader) Release() {
 	if closer, ok := r.reader.(io.Closer); ok {
 		closer.Close()
 	}
+	if r.indexBlock != nil {
+		r.indexBlock.Release()
+		r.indexBlock = nil
+	}
+	if r.filterBlock != nil {
+		r.filterBlock.Release()
+		r.filterBlock = nil
+	}
 	r.reader = nil
 	r.cache = nil
 	r.bpool = nil
@@ -965,5 +989,22 @@ func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, bpool *util.Buf
 	}
 	metaIter.Release()
 	metaBlock.Release()
+
+	// Cache index and filter block locally, since we don't have global cache.
+	if cache == nil {
+		r.indexBlock, r.err = r.readBlock(r.indexBH, true)
+		if r.err != nil {
+			return r
+		}
+		if r.filter != nil {
+			r.filterBlock, err = r.readFilterBlock(r.filterBH)
+			if err != nil {
+				// Don't use filter then.
+				r.filter = nil
+				r.filterBH = blockHandle{}
+			}
+		}
+	}
+
 	return r
 }

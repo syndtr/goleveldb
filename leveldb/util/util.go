@@ -68,3 +68,7 @@ func (r *BasicReleaser) SetReleaser(releaser Releaser) {
 	}
 	r.releaser = releaser
 }
+
+type NoopReleaser struct{}
+
+func (NoopReleaser) Release() {}
