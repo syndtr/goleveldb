@@ -136,9 +136,7 @@ func (b *block) newIterator(slice *util.Range, inclLimit bool, cache util.Releas
 }
 
 func (b *block) Release() {
-	if b.tr.bpool != nil {
-		b.tr.bpool.Put(b.data)
-	}
+	b.tr.bpool.Put(b.data)
 	b.tr = nil
 	b.data = nil
 }
@@ -501,9 +499,7 @@ func (b *filterBlock) contains(offset uint64, key []byte) bool {
 }
 
 func (b *filterBlock) Release() {
-	if b.tr.bpool != nil {
-		b.tr.bpool.Put(b.data)
-	}
+	b.tr.bpool.Put(b.data)
 	b.tr = nil
 	b.data = nil
 }
@@ -820,9 +816,13 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 	}
 	// Don't use block buffer, no need to copy the buffer.
 	rkey = data.Key()
-	// Use block buffer, and since the buffer will be recycled, the buffer
-	// need to be copied.
-	value = append([]byte{}, data.Value()...)
+	if r.bpool == nil {
+		value = data.Value()
+	} else {
+		// Use block buffer, and since the buffer will be recycled, the buffer
+		// need to be copied.
+		value = append([]byte{}, data.Value()...)
+	}
 	return
 }
 
@@ -912,9 +912,6 @@ func (r *Reader) Release() {
 //
 // The returned table reader instance is goroutine-safe.
 func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, bpool *util.BufferPool, o *opt.Options) *Reader {
-	if bpool == nil {
-		bpool = util.NewBufferPool(o.GetBlockSize() + blockTrailerLen)
-	}
 	r := &Reader{
 		reader:     f,
 		cache:      cache,
