@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"container/list"
 	"errors"
 	"fmt"
 	"io"
@@ -46,7 +47,7 @@ type DB struct {
 
 	// Snapshot.
 	snapsMu   sync.Mutex
-	snapsRoot snapshotElement
+	snapsList *list.List
 
 	// Stats.
 	aliveSnaps, aliveIters int32
@@ -85,6 +86,8 @@ func openDB(s *session) (*DB, error) {
 		seq: s.stSeq,
 		// MemDB
 		memPool: make(chan *memdb.DB, 1),
+		// Snapshot
+		snapsList: list.New(),
 		// Write
 		writeC:       make(chan *Batch),
 		writeMergedC: make(chan bool),
@@ -103,7 +106,6 @@ func openDB(s *session) (*DB, error) {
 		// Close
 		closeC: make(chan struct{}),
 	}
-	db.initSnapshot()
 
 	if err := db.recoverJournal(); err != nil {
 		return nil, err
@@ -827,7 +829,6 @@ func (db *DB) Close() error {
 	db.journalWriter = nil
 	db.journalFile = nil
 	db.frozenJournalFile = nil
-	db.snapsRoot = snapshotElement{}
 	db.closer = nil
 
 	return err
