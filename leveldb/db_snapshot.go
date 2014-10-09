@@ -35,6 +35,8 @@ func (db *DB) acquireSnapshot() *snapshotElement {
 		if se.seq == seq {
 			se.ref++
 			return se
+		} else if seq < se.seq {
+			panic("leveldb: sequence number is not increasing")
 		}
 	}
 	se := &snapshotElement{seq: seq, ref: 1}
