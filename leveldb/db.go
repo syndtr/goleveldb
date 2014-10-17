@@ -611,7 +611,9 @@ func (db *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 		return
 	}
 
-	return db.get(key, db.getSeq(), ro)
+	se := db.acquireSnapshot()
+	defer db.releaseSnapshot(se)
+	return db.get(key, se.seq, ro)
 }
 
 // NewIterator returns an iterator for the latest snapshot of the
@@ -635,9 +637,11 @@ func (db *DB) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Itera
 		return iterator.NewEmptyIterator(err)
 	}
 
-	snap := db.newSnapshot()
-	defer snap.Release()
-	return snap.NewIterator(slice, ro)
+	se := db.acquireSnapshot()
+	defer db.releaseSnapshot(se)
+	// Iterator holds 'version' lock, 'version' is immutable so snapshot
+	// can be released after iterator created.
+	return db.newIterator(se.seq, slice, ro)
 }
 
 // GetSnapshot returns a latest snapshot of the underlying DB. A snapshot
