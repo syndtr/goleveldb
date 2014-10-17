@@ -798,12 +798,13 @@ func (db *DB) Close() error {
 	default:
 	}
 
+	// Signal all goroutines.
 	close(db.closeC)
 
-	// Wait for the close WaitGroup.
+	// Wait for all gorotines to exit.
 	db.closeW.Wait()
 
-	// Close journal.
+	// Lock writer and closes journal.
 	db.writeLockC <- struct{}{}
 	if db.journal != nil {
 		db.journal.Close()
