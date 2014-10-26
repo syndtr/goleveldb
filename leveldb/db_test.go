@@ -2022,3 +2022,23 @@ func TestDb_GoleveldbIssue74(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+func TestDb_GetProperties(t *testing.T) {
+	h := newDbHarness(t)
+	defer h.close()
+
+	_, err := h.db.GetProperty("leveldb.num-files-at-level")
+	if err == nil {
+		t.Error("GetProperty() failed to detect missing level")
+	}
+
+	_, err = h.db.GetProperty("leveldb.num-files-at-level0")
+	if err != nil {
+		t.Error("got unexpected error", err)
+	}
+
+	_, err = h.db.GetProperty("leveldb.num-files-at-level0x")
+	if err == nil {
+		t.Error("GetProperty() failed to detect invalid level")
+	}
+}

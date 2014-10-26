@@ -661,7 +661,7 @@ func (db *DB) GetSnapshot() (*Snapshot, error) {
 //
 // Property names:
 //	leveldb.num-files-at-level{n}
-//		Returns the number of filer at level 'n'.
+//		Returns the number of files at level 'n'.
 //	leveldb.stats
 //		Returns statistics of the underlying DB.
 //	leveldb.sstables
@@ -691,11 +691,12 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 	v := db.s.version()
 	defer v.release()
 
+	numFilesPrefix := "num-files-at-level"
 	switch {
-	case strings.HasPrefix(p, "num-files-at-level"):
+	case strings.HasPrefix(p, numFilesPrefix):
 		var level uint
 		var rest string
-		n, _ := fmt.Scanf("%d%s", &level, &rest)
+		n, _ := fmt.Sscanf(p[len(numFilesPrefix):], "%d%s", &level, &rest)
 		if n != 1 || level >= kNumLevels {
 			err = errors.New("leveldb: GetProperty: invalid property: " + name)
 		} else {
