@@ -2044,14 +2044,14 @@ func TestDb_GetProperties(t *testing.T) {
 	}
 }
 
-func TestDb_GoleveldbIssue72(t *testing.T) {
+func TestDb_GoleveldbIssue72and83(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
 		WriteBuffer:     1 * opt.MiB,
 		CachedOpenFiles: 3,
 	})
 	defer h.close()
 
-	const n, dur = 10000, 10 * time.Second
+	const n, wn, dur = 10000, 100, 30 * time.Second
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -2076,13 +2076,14 @@ func TestDb_GoleveldbIssue72(t *testing.T) {
 	wg.Add(3)
 	var done uint32
 	go func() {
+		i := 0
 		defer func() {
-			t.Logf("WRITER DONE")
+			t.Logf("WRITER DONE #%d", i)
 			wg.Done()
 		}()
 
 		b := new(Batch)
-		for i := 0; i < 100 && atomic.LoadUint32(&done) == 0; i++ {
+		for ; i < wn && atomic.LoadUint32(&done) == 0; i++ {
 			b.Reset()
 			for _, k1 := range keys {
 				k2 := randomData(2, i)
@@ -2104,12 +2105,23 @@ func TestDb_GoleveldbIssue72(t *testing.T) {
 		}()
 		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
 			snap := h.getSnapshot()
+			seq := snap.elem.seq
+			if seq == 0 {
+				snap.Release()
+				continue
+			}
 			iter := snap.NewIterator(util.BytesPrefix([]byte{1}), nil)
+			writei := int(snap.elem.seq/(n*2) - 1)
 			var k int
 			for ; iter.Next(); k++ {
+				k1 := iter.Key()
 				k2 := iter.Value()
+				kwritei := int(binary.LittleEndian.Uint32(k2[len(k2)-4:]))
+				if writei != kwritei {
+					t.Fatalf("READER0 #%d.%d W#%d invalid write iteration num: %d", i, k, writei, kwritei)
+				}
 				if _, err := snap.Get(k2, nil); err != nil {
-					t.Fatalf("READER0 #%d.%d snap.Get: %v", i, k, err)
+					t.Fatalf("READER0 #%d.%d W#%d snap.Get: %v\nk1: %x\n -> k2: %x", i, k, writei, err, k1, k2)
 				}
 			}
 			if err := iter.Error(); err != nil {
@@ -2118,7 +2130,7 @@ func TestDb_GoleveldbIssue72(t *testing.T) {
 			iter.Release()
 			snap.Release()
 			if k > 0 && k != n {
-				t.Fatalf("READER0 #%d short read %d != %d", i, k, n)
+				t.Fatalf("READER0 #%d W#%d short read, got=%d want=%d", i, writei, k, n)
 			}
 		}
 	}()
@@ -2131,14 +2143,23 @@ func TestDb_GoleveldbIssue72(t *testing.T) {
 		}()
 		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
 			iter := h.db.NewIterator(nil, nil)
+			seq := iter.(*dbIter).seq
+			if seq == 0 {
+				iter.Release()
+				continue
+			}
+			writei := int(seq/(n*2) - 1)
 			var k int
 			for ok := iter.Last(); ok; ok = iter.Prev() {
 				k++
 			}
 			if err := iter.Error(); err != nil {
-				t.Fatalf("READER1 #%d.%d db.Iterator: %v", i, k, err)
+				t.Fatalf("READER1 #%d.%d W#%d db.Iterator: %v", i, k, writei, err)
 			}
 			iter.Release()
+			if m := (writei+1)*n + n; k != m {
+				t.Fatalf("READER1 #%d W#%d short read, got=%d want=%d", i, writei, k, m)
+			}
 		}
 	}()
 
