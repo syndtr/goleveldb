@@ -8,6 +8,8 @@ package leveldb
 
 import (
 	"container/list"
+	crand "crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
@@ -1983,7 +1985,6 @@ func TestDb_GoleveldbIssue74(t *testing.T) {
 				t.Fatalf("#%d %d != %d", i, k, n)
 			}
 		}
-		t.Logf("writer done after %d iterations", i)
 	}()
 	go func() {
 		var i int
@@ -2041,4 +2042,106 @@ func TestDb_GetProperties(t *testing.T) {
 	if err == nil {
 		t.Error("GetProperty() failed to detect invalid level")
 	}
+}
+
+func TestDb_GoleveldbIssue72(t *testing.T) {
+	h := newDbHarnessWopt(t, &opt.Options{
+		WriteBuffer:     1 * opt.MiB,
+		CachedOpenFiles: 3,
+	})
+	defer h.close()
+
+	const n, dur = 10000, 10 * time.Second
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	randomData := func(prefix byte, i int) []byte {
+		data := make([]byte, 1+4+32+64+32)
+		_, err := crand.Reader.Read(data[1 : len(data)-4])
+		if err != nil {
+			panic(err)
+		}
+		data[0] = prefix
+		binary.LittleEndian.PutUint32(data[len(data)-4:], uint32(i))
+		return data
+	}
+
+	keys := make([][]byte, n)
+	for i := range keys {
+		keys[i] = randomData(1, 0)
+	}
+
+	until := time.Now().Add(dur)
+	wg := new(sync.WaitGroup)
+	wg.Add(3)
+	var done uint32
+	go func() {
+		defer func() {
+			t.Logf("WRITER DONE")
+			wg.Done()
+		}()
+
+		b := new(Batch)
+		for i := 0; i < 100 && atomic.LoadUint32(&done) == 0; i++ {
+			b.Reset()
+			for _, k1 := range keys {
+				k2 := randomData(2, i)
+				b.Put(k2, randomData(42, i))
+				b.Put(k1, k2)
+			}
+			if err := h.db.Write(b, h.wo); err != nil {
+				atomic.StoreUint32(&done, 1)
+				t.Fatalf("WRITER #%d db.Write: %v", i, err)
+			}
+		}
+	}()
+	go func() {
+		var i int
+		defer func() {
+			t.Logf("READER0 DONE #%d", i)
+			atomic.StoreUint32(&done, 1)
+			wg.Done()
+		}()
+		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
+			snap := h.getSnapshot()
+			iter := snap.NewIterator(util.BytesPrefix([]byte{1}), nil)
+			var k int
+			for ; iter.Next(); k++ {
+				k2 := iter.Value()
+				if _, err := snap.Get(k2, nil); err != nil {
+					t.Fatalf("READER0 #%d.%d snap.Get: %v", i, k, err)
+				}
+			}
+			if err := iter.Error(); err != nil {
+				t.Fatalf("READER0 #%d.%d W#%d snap.Iterator: %v", i, k, err)
+			}
+			iter.Release()
+			snap.Release()
+			if k > 0 && k != n {
+				t.Fatalf("READER0 #%d short read %d != %d", i, k, n)
+			}
+		}
+	}()
+	go func() {
+		var i int
+		defer func() {
+			t.Logf("READER1 DONE #%d", i)
+			atomic.StoreUint32(&done, 1)
+			wg.Done()
+		}()
+		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
+			iter := h.db.NewIterator(nil, nil)
+			var k int
+			for ok := iter.Last(); ok; ok = iter.Prev() {
+				k++
+			}
+			if err := iter.Error(); err != nil {
+				t.Fatalf("READER1 #%d.%d db.Iterator: %v", i, k, err)
+			}
+			iter.Release()
+		}
+	}()
+
+	wg.Wait()
+
 }
