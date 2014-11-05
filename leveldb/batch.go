@@ -112,6 +112,11 @@ func (b *Batch) Replay(r BatchReplay) error {
 	})
 }
 
+// Len returns number of records in the batch.
+func (b *Batch) Len() int {
+	return b.rLen
+}
+
 // Reset resets the batch.
 func (b *Batch) Reset() {
 	b.data = nil
@@ -136,10 +141,7 @@ func (b *Batch) append(p *Batch) {
 	}
 }
 
-func (b *Batch) len() int {
-	return b.rLen
-}
-
+// size returns sums of key/value pair length plus 8-bytes ikey.
 func (b *Batch) size() int {
 	return b.bLen
 }

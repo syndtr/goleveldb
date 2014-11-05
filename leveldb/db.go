@@ -505,7 +505,7 @@ func (db *DB) recoverJournal() error {
 			}
 
 			// Save sequence number.
-			db.seq = batch.seq + uint64(batch.len())
+			db.seq = batch.seq + uint64(batch.Len())
 
 			// Flush it if large enough.
 			if mem.Size() >= writeBuffer {

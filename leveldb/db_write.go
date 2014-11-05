@@ -120,7 +120,7 @@ func (db *DB) flush(n int) (mem *memDB, nn int, err error) {
 // It is safe to modify the contents of the arguments after Write returns.
 func (db *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 	err = db.ok()
-	if err != nil || b == nil || b.len() == 0 {
+	if err != nil || b == nil || b.Len() == 0 {
 		return
 	}
 
@@ -216,7 +216,7 @@ drain:
 	}
 
 	// Set last seq number.
-	db.addSeq(uint64(b.len()))
+	db.addSeq(uint64(b.Len()))
 
 	if b.size() >= memFree {
 		db.rotateMem(0)

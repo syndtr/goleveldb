@@ -35,8 +35,8 @@ func compareBatch(t *testing.T, b1, b2 *Batch) {
 	if b1.seq != b2.seq {
 		t.Errorf("invalid seq number want %d, got %d", b1.seq, b2.seq)
 	}
-	if b1.len() != b2.len() {
-		t.Fatalf("invalid record length want %d, got %d", b1.len(), b2.len())
+	if b1.Len() != b2.Len() {
+		t.Fatalf("invalid record length want %d, got %d", b1.Len(), b2.Len())
 	}
 	p1, p2 := new(testBatch), new(testBatch)
 	err := b1.Replay(p1)
