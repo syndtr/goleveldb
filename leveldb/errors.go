@@ -7,13 +7,11 @@
 package leveldb
 
 import (
-	"errors"
-
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 )
 
 var (
-	ErrNotFound         = util.ErrNotFound
+	ErrNotFound         = errors.ErrNotFound
 	ErrSnapshotReleased = errors.New("leveldb: snapshot released")
 	ErrIterReleased     = errors.New("leveldb: iterator released")
 	ErrClosed           = errors.New("leveldb: closed")

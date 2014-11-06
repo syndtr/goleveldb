@@ -8,7 +8,6 @@ package table
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	ErrNotFound       = util.ErrNotFound
+	ErrNotFound       = errors.ErrNotFound
 	ErrReaderReleased = errors.New("leveldb/table: reader released")
 	ErrIterReleased   = errors.New("leveldb/table: iterator released")
 )
