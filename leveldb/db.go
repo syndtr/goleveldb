@@ -324,7 +324,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		var tSeq uint64
 		var tgood, tcorrupted, blockerr int
 		var imin, imax []byte
-		tr := table.NewReader(reader, size, nil, bpool, o)
+		tr := table.NewReader(reader, size, storage.NewFileInfo(file), nil, bpool, o)
 		iter := tr.NewIterator(nil, nil)
 		iter.(iterator.ErrorCallbackSetter).SetErrorCallback(func(err error) {
 			s.logf("table@recovery found error @%d %q", file.Num(), err)

@@ -22,6 +22,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -30,6 +31,17 @@ var (
 	ErrReaderReleased = errors.New("leveldb/table: reader released")
 	ErrIterReleased   = errors.New("leveldb/table: iterator released")
 )
+
+type ErrCorrupted struct {
+	Pos    int64
+	Size   int64
+	Kind   string
+	Reason string
+}
+
+func (e *ErrCorrupted) Error() string {
+	return fmt.Sprintf("leveldb/table: corruption on %s (pos=%d): %s", e.Kind, e.Pos, e.Reason)
+}
 
 func max(x, y int) int {
 	if x > y {
@@ -40,6 +52,7 @@ func max(x, y int) int {
 
 type block struct {
 	bpool          *util.BufferPool
+	bh             blockHandle
 	data           []byte
 	restartsLen    int
 	restartsOffset int
@@ -77,7 +90,7 @@ func (b *block) restartOffset(index int) int {
 func (b *block) entry(offset int) (key, value []byte, nShared, n int, err error) {
 	if offset >= b.restartsOffset {
 		if offset != b.restartsOffset {
-			err = errors.New("leveldb/table: Reader: BlockEntry: invalid block (block entries offset not aligned)")
+			err = &ErrCorrupted{Reason: "entries offset not aligned"}
 		}
 		return
 	}
@@ -87,7 +100,7 @@ func (b *block) entry(offset int) (key, value []byte, nShared, n int, err error)
 	m := n0 + n1 + n2
 	n = m + int(v1) + int(v2)
 	if n0 <= 0 || n1 <= 0 || n2 <= 0 || offset+n > b.restartsOffset {
-		err = errors.New("leveldb/table: Reader: invalid block (block entries corrupted)")
+		err = &ErrCorrupted{Reason: "entries corrupted"}
 		return
 	}
 	key = b.data[offset+m : offset+m+int(v1)]
@@ -251,7 +264,7 @@ func (i *blockIter) Next() bool {
 	for i.offset < i.offsetRealStart {
 		key, value, nShared, n, err := i.block.entry(i.offset)
 		if err != nil {
-			i.sErr(err)
+			i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 			return false
 		}
 		if n == 0 {
@@ -265,13 +278,13 @@ func (i *blockIter) Next() bool {
 	if i.offset >= i.offsetLimit {
 		i.dir = dirEOI
 		if i.offset != i.offsetLimit {
-			i.sErr(errors.New("leveldb/table: Reader: Next: invalid block (block entries offset not aligned)"))
+			i.sErr(i.tr.newErrCorruptedBH(i.block.bh, "entries offset not aligned"))
 		}
 		return false
 	}
 	key, value, nShared, n, err := i.block.entry(i.offset)
 	if err != nil {
-		i.sErr(err)
+		i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 		return false
 	}
 	if n == 0 {
@@ -356,7 +369,7 @@ func (i *blockIter) Prev() bool {
 	for {
 		key, value, nShared, n, err := i.block.entry(offset)
 		if err != nil {
-			i.sErr(err)
+			i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 			return false
 		}
 		if offset >= i.offsetRealStart {
@@ -375,7 +388,7 @@ func (i *blockIter) Prev() bool {
 		// Stop if target offset reached.
 		if offset >= i.offset {
 			if offset != i.offset {
-				i.sErr(errors.New("leveldb/table: Reader: Prev: invalid block (block entries offset not aligned)"))
+				i.sErr(i.tr.newErrCorruptedBH(i.block.bh, "entries offset not aligned"))
 				return false
 			}
 
@@ -484,7 +497,7 @@ func (i *indexIter) Get() iterator.Iterator {
 	}
 	dataBH, n := decodeBlockHandle(value)
 	if n == 0 {
-		return iterator.NewEmptyIterator(errors.New("leveldb/table: Reader: invalid table (bad data block handle)"))
+		return iterator.NewEmptyIterator(i.tr.newErrCorruptedBH(i.tr.indexBH, "bad data block handle"))
 	}
 
 	var slice *util.Range
@@ -497,6 +510,7 @@ func (i *indexIter) Get() iterator.Iterator {
 // Reader is a table reader.
 type Reader struct {
 	mu     sync.RWMutex
+	fi     *storage.FileInfo
 	reader io.ReaderAt
 	cache  cache.Namespace
 	err    error
@@ -520,6 +534,35 @@ func verifyChecksum(data []byte) bool {
 	return checksum0 == checksum1
 }
 
+func (r *Reader) blockKind(bh blockHandle) string {
+	switch bh.offset {
+	case r.indexBH.offset:
+		return "index-block"
+	case r.filterBH.offset:
+		return "filter-block"
+	default:
+		return "data-block"
+	}
+}
+
+func (r *Reader) newErrCorrupted(pos, size int64, kind, reason string) error {
+	return &errors.ErrCorrupted{File: r.fi, Err: &ErrCorrupted{Pos: pos, Size: size, Kind: kind, Reason: reason}}
+}
+
+func (r *Reader) newErrCorruptedBH(bh blockHandle, reason string) error {
+	return r.newErrCorrupted(int64(bh.offset), int64(bh.length), r.blockKind(bh), reason)
+}
+
+func (r *Reader) fixErrCorruptedBH(bh blockHandle, err error) error {
+	if cerr, ok := err.(*ErrCorrupted); ok {
+		cerr.Pos = int64(bh.offset)
+		cerr.Size = int64(bh.length)
+		cerr.Kind = r.blockKind(bh)
+		return &errors.ErrCorrupted{File: r.fi, Err: cerr}
+	}
+	return err
+}
+
 func (r *Reader) readRawBlock(bh blockHandle, checksum bool) ([]byte, error) {
 	data := r.bpool.Get(int(bh.length + blockTrailerLen))
 	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
@@ -528,7 +571,7 @@ func (r *Reader) readRawBlock(bh blockHandle, checksum bool) ([]byte, error) {
 	if checksum || r.checksum {
 		if !verifyChecksum(data) {
 			r.bpool.Put(data)
-			return nil, errors.New("leveldb/table: Reader: invalid block (checksum mismatch)")
+			return nil, r.newErrCorruptedBH(bh, "checksum mismatch")
 		}
 	}
 	switch data[bh.length] {
@@ -547,7 +590,7 @@ func (r *Reader) readRawBlock(bh blockHandle, checksum bool) ([]byte, error) {
 		}
 	default:
 		r.bpool.Put(data)
-		return nil, fmt.Errorf("leveldb/table: Reader: unknown block compression type: %d", data[bh.length])
+		return nil, r.newErrCorruptedBH(bh, fmt.Sprintf("unknown compression type %#x", data[bh.length]))
 	}
 	return data, nil
 }
@@ -560,6 +603,7 @@ func (r *Reader) readBlock(bh blockHandle, checksum bool) (*block, error) {
 	restartsLen := int(binary.LittleEndian.Uint32(data[len(data)-4:]))
 	b := &block{
 		bpool:          r.bpool,
+		bh:             bh,
 		data:           data,
 		restartsLen:    restartsLen,
 		restartsOffset: len(data) - (restartsLen+1)*4,
@@ -586,12 +630,12 @@ func (r *Reader) readBlockCached(bh blockHandle, checksum, fillCache bool) (*blo
 			b, ok := ch.Value().(*block)
 			if !ok {
 				ch.Release()
-				return nil, nil, errors.New("leveldb/table: Reader: inconsistent block type")
+				return nil, nil, errors.New("leveldb/table: inconsistent block type")
 			}
 			if !b.checksum && (r.checksum || checksum) {
 				if !verifyChecksum(b.data) {
 					ch.Release()
-					return nil, nil, errors.New("leveldb/table: Reader: invalid block (checksum mismatch)")
+					return nil, nil, r.newErrCorruptedBH(bh, "checksum mismatch")
 				}
 				b.checksum = true
 			}
@@ -612,12 +656,12 @@ func (r *Reader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 	}
 	n := len(data)
 	if n < 5 {
-		return nil, errors.New("leveldb/table: Reader: invalid filter block (too short)")
+		return nil, r.newErrCorruptedBH(bh, "too short")
 	}
 	m := n - 5
 	oOffset := int(binary.LittleEndian.Uint32(data[m:]))
 	if oOffset > m {
-		return nil, errors.New("leveldb/table: Reader: invalid filter block (invalid offset)")
+		return nil, r.newErrCorruptedBH(bh, "invalid data-offsets offset")
 	}
 	b := &filterBlock{
 		bpool:      r.bpool,
@@ -647,7 +691,7 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 			b, ok := ch.Value().(*filterBlock)
 			if !ok {
 				ch.Release()
-				return nil, nil, errors.New("leveldb/table: Reader: inconsistent block type")
+				return nil, nil, errors.New("leveldb/table: inconsistent block type")
 			}
 			return b, ch, err
 		} else if err != nil {
@@ -726,7 +770,7 @@ func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Ran
 		}
 		bi.reset()
 		if bi.offsetStart > bi.offsetLimit {
-			bi.sErr(errors.New("leveldb/table: Reader: invalid slice range"))
+			bi.sErr(errors.New("leveldb/table: invalid slice range"))
 		}
 	}
 	return bi
@@ -798,7 +842,7 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 	}
 	dataBH, n := decodeBlockHandle(index.Value())
 	if n == 0 {
-		err = errors.New("leveldb/table: Reader: invalid table (bad data block handle)")
+		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
 		return
 	}
 	if r.filter != nil {
@@ -877,7 +921,7 @@ func (r *Reader) OffsetOf(key []byte) (offset int64, err error) {
 	if index.Seek(key) {
 		dataBH, n := decodeBlockHandle(index.Value())
 		if n == 0 {
-			err = errors.New("leveldb/table: Reader: invalid table (bad data block handle)")
+			r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
 			return
 		}
 		offset = int64(dataBH.offset)
@@ -914,11 +958,12 @@ func (r *Reader) Release() {
 }
 
 // NewReader creates a new initialized table reader for the file.
-// The cache and bpool is optional and can be nil.
+// The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is goroutine-safe.
-func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, bpool *util.BufferPool, o *opt.Options) *Reader {
+func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Namespace, bpool *util.BufferPool, o *opt.Options) *Reader {
 	r := &Reader{
+		fi:         fi,
 		reader:     f,
 		cache:      cache,
 		bpool:      bpool,
@@ -927,31 +972,32 @@ func NewReader(f io.ReaderAt, size int64, cache cache.Namespace, bpool *util.Buf
 		strictIter: o.GetStrict(opt.StrictIterator),
 	}
 	if f == nil {
-		r.err = errors.New("leveldb/table: Reader: nil file")
+		r.err = errors.New("leveldb/table: nil file")
 		return r
 	}
 	if size < footerLen {
-		r.err = errors.New("leveldb/table: Reader: invalid table (file size is too small)")
+		r.err = r.newErrCorrupted(0, size, "table", "too small")
 		return r
 	}
+	footerPos := size - footerLen
 	var footer [footerLen]byte
-	if _, err := r.reader.ReadAt(footer[:], size-footerLen); err != nil && err != io.EOF {
-		r.err = fmt.Errorf("leveldb/table: Reader: invalid table (could not read footer): %v", err)
+	if _, err := r.reader.ReadAt(footer[:], footerPos); err != nil && err != io.EOF {
+		r.err = fmt.Errorf("leveldb/table: could not read footer: %v", err)
 	}
 	if string(footer[footerLen-len(magic):footerLen]) != magic {
-		r.err = errors.New("leveldb/table: Reader: invalid table (bad magic number)")
+		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad magic number")
 		return r
 	}
 	// Decode the metaindex block handle.
 	metaBH, n := decodeBlockHandle(footer[:])
 	if n == 0 {
-		r.err = errors.New("leveldb/table: Reader: invalid table (bad metaindex block handle)")
+		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad metaindex block handle")
 		return r
 	}
 	// Decode the index block handle.
 	r.indexBH, n = decodeBlockHandle(footer[n:])
 	if n == 0 {
-		r.err = errors.New("leveldb/table: Reader: invalid table (bad index block handle)")
+		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad index block handle")
 		return r
 	}
 	// Read metaindex block.
