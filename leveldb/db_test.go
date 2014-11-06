@@ -505,10 +505,10 @@ func Test_FieldsAligned(t *testing.T) {
 	p1 := new(DB)
 	testAligned(t, "DB.seq", unsafe.Offsetof(p1.seq))
 	p2 := new(session)
-	testAligned(t, "session.stFileNum", unsafe.Offsetof(p2.stFileNum))
+	testAligned(t, "session.stNextFileNum", unsafe.Offsetof(p2.stNextFileNum))
 	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))
 	testAligned(t, "session.stPrevJournalNum", unsafe.Offsetof(p2.stPrevJournalNum))
-	testAligned(t, "session.stSeq", unsafe.Offsetof(p2.stSeq))
+	testAligned(t, "session.stSeqNum", unsafe.Offsetof(p2.stSeqNum))
 }
 
 func TestDb_Locking(t *testing.T) {

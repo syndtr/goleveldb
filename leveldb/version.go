@@ -340,7 +340,7 @@ func (v *version) needCompaction() bool {
 type versionStaging struct {
 	base   *version
 	tables [kNumLevels]struct {
-		added   map[uint64]ntRecord
+		added   map[uint64]atRecord
 		deleted map[uint64]struct{}
 	}
 }
@@ -367,7 +367,7 @@ func (p *versionStaging) commit(r *sessionRecord) {
 		tm := &(p.tables[r.level])
 
 		if tm.added == nil {
-			tm.added = make(map[uint64]ntRecord)
+			tm.added = make(map[uint64]atRecord)
 		}
 		tm.added[r.num] = r
 
@@ -402,7 +402,7 @@ func (p *versionStaging) finish() *version {
 
 		// New tables.
 		for _, r := range tm.added {
-			nt = append(nt, r.makeFile(p.base.s))
+			nt = append(nt, p.base.s.tableFileFromRecord(r))
 		}
 
 		// Sort tables.

@@ -49,14 +49,14 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 		v.addTable(3, big+300+i, big+400+i,
 			newIKey([]byte("foo"), big+500+1, tVal),
 			newIKey([]byte("zoo"), big+600+1, tDel))
-		v.deleteTable(4, big+700+i)
-		v.addCompactionPointer(int(i), newIKey([]byte("x"), big+900+1, tVal))
+		v.delTable(4, big+700+i)
+		v.addCompPtr(int(i), newIKey([]byte("x"), big+900+1, tVal))
 	}
 
 	v.setComparer("foo")
 	v.setJournalNum(big + 100)
 	v.setPrevJournalNum(big + 99)
-	v.setNextNum(big + 200)
-	v.setSeq(big + 1000)
+	v.setNextFileNum(big + 200)
+	v.setSeqNum(big + 1000)
 	test()
 }

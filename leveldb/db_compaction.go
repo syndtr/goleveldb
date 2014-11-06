@@ -100,7 +100,7 @@ func (c *cMem) reset() {
 
 func (c *cMem) commit(journal, seq uint64) error {
 	c.rec.setJournalNum(journal)
-	c.rec.setSeq(seq)
+	c.rec.setSeqNum(seq)
 
 	// Commit changes.
 	return c.s.commit(c.rec)
@@ -283,12 +283,12 @@ func (db *DB) memCompaction() {
 
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	rec := new(sessionRecord)
-	rec.addCompactionPointer(c.level, c.imax)
+	rec.addCompPtr(c.level, c.imax)
 
 	if !noTrivial && c.trivial() {
 		t := c.tables[0][0]
 		db.logf("table@move L%d@%d -> L%d", c.level, t.file.Num(), c.level+1)
-		rec.deleteTable(c.level, t.file.Num())
+		rec.delTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
 		db.compactionTransact("table@move", func(cnt *compactionTransactCounter) (err error) {
 			return db.s.commit(rec)
@@ -301,7 +301,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		for _, t := range tables {
 			stats[i].read += t.size
 			// Insert deleted tables into record
-			rec.deleteTable(c.level+i, t.file.Num())
+			rec.delTable(c.level+i, t.file.Num())
 		}
 	}
 	sourceSize := int(stats[0].read + stats[1].read)

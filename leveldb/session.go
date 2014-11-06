@@ -7,12 +7,13 @@
 package leveldb
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
 	"sync/atomic"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -20,13 +21,26 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+type ErrManifestCorrupted struct {
+	Field  string
+	Reason string
+}
+
+func (e *ErrManifestCorrupted) Error() string {
+	return fmt.Sprintf("leveldb: manifest corrupted (field '%s'): %s", e.Field, e.Reason)
+}
+
+func newErrManifestCorrupted(f storage.File, field, reason string) error {
+	return errors.NewErrCorrupted(f, &ErrManifestCorrupted{field, reason})
+}
+
 // session represent a persistent database session.
 type session struct {
 	// Need 64-bit alignment.
-	stFileNum        uint64 // current unused file number
+	stNextFileNum    uint64 // current unused file number
 	stJournalNum     uint64 // current journal file number; need external synchronization
 	stPrevJournalNum uint64 // prev journal file number; no longer used; for compatibility with older version of leveldb
-	stSeq            uint64 // last mem compacted seq; need external synchronization
+	stSeqNum         uint64 // last mem compacted seq; need external synchronization
 	stTempFileNum    uint64
 
 	stor     storage.Storage
@@ -39,9 +53,9 @@ type session struct {
 	manifestWriter storage.Writer
 	manifestFile   storage.File
 
-	stCptrs   [kNumLevels]iKey // compact pointers; need external synchronization
-	stVersion *version         // current version
-	vmu       sync.Mutex
+	stCompPtrs [kNumLevels]iKey // compaction pointers; need external synchronization
+	stVersion  *version         // current version
+	vmu        sync.Mutex
 }
 
 // Creates new initialized session instance.
@@ -100,23 +114,23 @@ func (s *session) recover() (err error) {
 			// Don't return os.ErrNotExist if the underlying storage contains
 			// other files that belong to LevelDB. So the DB won't get trashed.
 			if files, _ := s.stor.GetFiles(storage.TypeAll); len(files) > 0 {
-				err = ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest file missing")}
+				err = &errors.ErrCorrupted{File: &storage.FileInfo{Type: storage.TypeManifest}, Err: &errors.ErrMissingFiles{}}
 			}
 		}
 	}()
 
-	file, err := s.stor.GetManifest()
+	m, err := s.stor.GetManifest()
 	if err != nil {
 		return
 	}
 
-	reader, err := file.Open()
+	reader, err := m.Open()
 	if err != nil {
 		return
 	}
 	defer reader.Close()
 	strict := s.o.GetStrict(opt.StrictManifest)
-	jr := journal.NewReader(reader, dropper{s, file}, strict, true)
+	jr := journal.NewReader(reader, dropper{s, m}, strict, true)
 
 	staging := s.version_NB().newStaging()
 	rec := &sessionRecord{}
@@ -128,43 +142,46 @@ func (s *session) recover() (err error) {
 				err = nil
 				break
 			}
-			return
+			return errors.SetFile(err, m)
 		}
 
 		err = rec.decode(r)
 		if err == nil {
 			// save compact pointers
-			for _, r := range rec.compactionPointers {
-				s.stCptrs[r.level] = iKey(r.ikey)
+			for _, r := range rec.compPtrs {
+				s.stCompPtrs[r.level] = iKey(r.ikey)
 			}
 			// commit record to version staging
 			staging.commit(rec)
-		} else if strict {
-			return ErrCorrupted{Type: CorruptedManifest, Err: err}
 		} else {
-			s.logf("manifest error: %v (skipped)", err)
+			err = errors.SetFile(err, m)
+			if strict || !errors.IsCorrupted(err) {
+				return
+			} else {
+				s.logf("manifest error: %v (skipped)", errors.SetFile(err, m))
+			}
 		}
-		rec.resetCompactionPointers()
+		rec.resetCompPtrs()
 		rec.resetAddedTables()
 		rec.resetDeletedTables()
 	}
 
 	switch {
 	case !rec.has(recComparer):
-		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing comparer name")}
+		return newErrManifestCorrupted(m, "comparer", "missing")
 	case rec.comparer != s.icmp.uName():
-		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: comparer mismatch, " + "want '" + s.icmp.uName() + "', " + "got '" + rec.comparer + "'")}
-	case !rec.has(recNextNum):
-		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing next file number")}
+		return newErrManifestCorrupted(m, "comparer", fmt.Sprintf("mismatch: want '%s', got '%s'", s.icmp.uName(), rec.comparer))
+	case !rec.has(recNextFileNum):
+		return newErrManifestCorrupted(m, "next-file-num", "missing")
 	case !rec.has(recJournalNum):
-		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing journal file number")}
-	case !rec.has(recSeq):
-		return ErrCorrupted{Type: CorruptedManifest, Err: errors.New("leveldb: manifest missing seq number")}
+		return newErrManifestCorrupted(m, "journal-file-num", "missing")
+	case !rec.has(recSeqNum):
+		return newErrManifestCorrupted(m, "seq-num", "missing")
 	}
 
-	s.manifestFile = file
+	s.manifestFile = m
 	s.setVersion(staging.finish())
-	s.setFileNum(rec.nextNum)
+	s.setNextFileNum(rec.nextFileNum)
 	s.recordCommited(rec)
 	return nil
 }
@@ -197,7 +214,7 @@ func (s *session) pickCompaction() *compaction {
 	var t0 tFiles
 	if v.cScore >= 1 {
 		level = v.cLevel
-		cptr := s.stCptrs[level]
+		cptr := s.stCompPtrs[level]
 		tables := v.tables[level]
 		for _, t := range tables {
 			if cptr == nil || s.icmp.Compare(t.imax, cptr) > 0 {

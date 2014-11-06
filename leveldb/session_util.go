@@ -51,6 +51,10 @@ func (s *session) newTemp() storage.File {
 	return s.stor.GetFile(num, storage.TypeTemp)
 }
 
+func (s *session) tableFileFromRecord(r atRecord) *tFile {
+	return newTableFile(s.getTableFile(r.num), r.size, r.imin, r.imax)
+}
+
 // Session state.
 
 // Get current version.
@@ -80,42 +84,42 @@ func (s *session) setVersion(v *version) {
 }
 
 // Get current unused file number.
-func (s *session) fileNum() uint64 {
-	return atomic.LoadUint64(&s.stFileNum)
+func (s *session) nextFileNum() uint64 {
+	return atomic.LoadUint64(&s.stNextFileNum)
 }
 
-// Get current unused file number to num.
-func (s *session) setFileNum(num uint64) {
-	atomic.StoreUint64(&s.stFileNum, num)
+// Set current unused file number to num.
+func (s *session) setNextFileNum(num uint64) {
+	atomic.StoreUint64(&s.stNextFileNum, num)
 }
 
 // Mark file number as used.
 func (s *session) markFileNum(num uint64) {
-	num += 1
+	nextFileNum := num + 1
 	for {
-		old, x := s.stFileNum, num
+		old, x := s.stNextFileNum, nextFileNum
 		if old > x {
 			x = old
 		}
-		if atomic.CompareAndSwapUint64(&s.stFileNum, old, x) {
+		if atomic.CompareAndSwapUint64(&s.stNextFileNum, old, x) {
 			break
 		}
 	}
 }
 
 // Allocate a file number.
-func (s *session) allocFileNum() (num uint64) {
-	return atomic.AddUint64(&s.stFileNum, 1) - 1
+func (s *session) allocFileNum() uint64 {
+	return atomic.AddUint64(&s.stNextFileNum, 1) - 1
 }
 
 // Reuse given file number.
 func (s *session) reuseFileNum(num uint64) {
 	for {
-		old, x := s.stFileNum, num
+		old, x := s.stNextFileNum, num
 		if old != x+1 {
 			x = old
 		}
-		if atomic.CompareAndSwapUint64(&s.stFileNum, old, x) {
+		if atomic.CompareAndSwapUint64(&s.stNextFileNum, old, x) {
 			break
 		}
 	}
@@ -126,20 +130,20 @@ func (s *session) reuseFileNum(num uint64) {
 // Fill given session record obj with current states; need external
 // synchronization.
 func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
-	r.setNextNum(s.fileNum())
+	r.setNextFileNum(s.nextFileNum())
 
 	if snapshot {
 		if !r.has(recJournalNum) {
 			r.setJournalNum(s.stJournalNum)
 		}
 
-		if !r.has(recSeq) {
-			r.setSeq(s.stSeq)
+		if !r.has(recSeqNum) {
+			r.setSeqNum(s.stSeqNum)
 		}
 
-		for level, ik := range s.stCptrs {
+		for level, ik := range s.stCompPtrs {
 			if ik != nil {
-				r.addCompactionPointer(level, ik)
+				r.addCompPtr(level, ik)
 			}
 		}
 
@@ -158,12 +162,12 @@ func (s *session) recordCommited(r *sessionRecord) {
 		s.stPrevJournalNum = r.prevJournalNum
 	}
 
-	if r.has(recSeq) {
-		s.stSeq = r.seq
+	if r.has(recSeqNum) {
+		s.stSeqNum = r.seqNum
 	}
 
-	for _, p := range r.compactionPointers {
-		s.stCptrs[p.level] = iKey(p.ikey)
+	for _, p := range r.compPtrs {
+		s.stCompPtrs[p.level] = iKey(p.ikey)
 	}
 }
 

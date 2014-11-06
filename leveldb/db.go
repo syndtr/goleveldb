@@ -83,7 +83,7 @@ func openDB(s *session) (*DB, error) {
 	db := &DB{
 		s: s,
 		// Initial sequence
-		seq: s.stSeq,
+		seq: s.stSeqNum,
 		// MemDB
 		memPool: make(chan *memdb.DB, 1),
 		// Snapshot
@@ -403,7 +403,7 @@ func recoverTable(s *session, o *opt.Options) error {
 	}
 
 	// Set sequence number.
-	rec.setSeq(mSeq + 1)
+	rec.setSeqNum(mSeq + 1)
 
 	// Create new manifest.
 	if err := s.create(); err != nil {
