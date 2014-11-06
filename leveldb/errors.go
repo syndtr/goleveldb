@@ -16,21 +16,3 @@ var (
 	ErrIterReleased     = errors.New("leveldb: iterator released")
 	ErrClosed           = errors.New("leveldb: closed")
 )
-
-type CorruptionType int
-
-const (
-	CorruptedManifest CorruptionType = iota
-	MissingFiles
-)
-
-// ErrCorrupted is the type that wraps errors that indicate corruption in
-// the database.
-type ErrCorrupted struct {
-	Type CorruptionType
-	Err  error
-}
-
-func (e ErrCorrupted) Error() string {
-	return e.Err.Error()
-}
