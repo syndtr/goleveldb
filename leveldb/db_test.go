@@ -326,6 +326,8 @@ func (h *dbHarness) compactMem() {
 	t := h.t
 	db := h.db
 
+	t.Log("starting memdb compaction")
+
 	db.writeLockC <- struct{}{}
 	defer func() {
 		<-db.writeLockC
@@ -341,6 +343,8 @@ func (h *dbHarness) compactMem() {
 	if h.totalTables() == 0 {
 		t.Error("zero tables after mem compaction")
 	}
+
+	t.Log("memdb compaction done")
 }
 
 func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) {
@@ -355,6 +359,8 @@ func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) 
 		_max = []byte(max)
 	}
 
+	t.Logf("starting table range compaction: level=%d, min=%q, max=%q", level, min, max)
+
 	if err := db.compSendRange(db.tcompCmdC, level, _min, _max); err != nil {
 		if wanterr {
 			t.Log("CompactRangeAt: got error (expected): ", err)
@@ -364,6 +370,8 @@ func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) 
 	} else if wanterr {
 		t.Error("CompactRangeAt: expect error")
 	}
+
+	t.Log("table range compaction done")
 }
 
 func (h *dbHarness) compactRangeAt(level int, min, max string) {
@@ -373,6 +381,8 @@ func (h *dbHarness) compactRangeAt(level int, min, max string) {
 func (h *dbHarness) compactRange(min, max string) {
 	t := h.t
 	db := h.db
+
+	t.Logf("starting DB range compaction: min=%q, max=%q", min, max)
 
 	var r util.Range
 	if min != "" {
@@ -384,6 +394,8 @@ func (h *dbHarness) compactRange(min, max string) {
 	if err := db.CompactRange(r); err != nil {
 		t.Error("CompactRange: got error: ", err)
 	}
+
+	t.Log("DB range compaction done")
 }
 
 func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {

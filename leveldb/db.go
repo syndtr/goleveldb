@@ -61,14 +61,12 @@ type DB struct {
 	journalAckC  chan error
 
 	// Compaction.
-	tcompCmdC     chan cCmd
-	tcompPauseC   chan chan<- struct{}
-	tcompTriggerC chan struct{}
-	mcompCmdC     chan cCmd
-	mcompTriggerC chan struct{}
-	compErrC      chan error
-	compErrSetC   chan error
-	compStats     [kNumLevels]cStats
+	tcompCmdC   chan cCmd
+	tcompPauseC chan chan<- struct{}
+	mcompCmdC   chan cCmd
+	compErrC    chan error
+	compErrSetC chan error
+	compStats   [kNumLevels]cStats
 
 	// Close.
 	closeW sync.WaitGroup
@@ -96,13 +94,11 @@ func openDB(s *session) (*DB, error) {
 		journalC:     make(chan *Batch),
 		journalAckC:  make(chan error),
 		// Compaction
-		tcompCmdC:     make(chan cCmd),
-		tcompPauseC:   make(chan chan<- struct{}),
-		tcompTriggerC: make(chan struct{}, 1),
-		mcompCmdC:     make(chan cCmd),
-		mcompTriggerC: make(chan struct{}, 1),
-		compErrC:      make(chan error),
-		compErrSetC:   make(chan error),
+		tcompCmdC:   make(chan cCmd),
+		tcompPauseC: make(chan chan<- struct{}),
+		mcompCmdC:   make(chan cCmd),
+		compErrC:    make(chan error),
+		compErrSetC: make(chan error),
 		// Close
 		closeC: make(chan struct{}),
 	}
@@ -594,7 +590,7 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 	v.release()
 	if cSched {
 		// Trigger table compaction.
-		db.compTrigger(db.tcompTriggerC)
+		db.compSendTrigger(db.tcompCmdC)
 	}
 	return
 }

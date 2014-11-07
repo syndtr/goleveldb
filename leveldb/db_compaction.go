@@ -232,9 +232,9 @@ func (db *DB) memCompaction() {
 	}
 
 	// Pause table compaction.
-	ch := make(chan struct{})
+	resumeC := make(chan struct{})
 	select {
-	case db.tcompPauseC <- (chan<- struct{})(ch):
+	case db.tcompPauseC <- (chan<- struct{})(resumeC):
 	case _, _ = <-db.closeC:
 		return
 	}
@@ -272,13 +272,13 @@ func (db *DB) memCompaction() {
 
 	// Resume table compaction.
 	select {
-	case <-ch:
+	case <-resumeC:
 	case _, _ = <-db.closeC:
 		return
 	}
 
 	// Trigger table compaction.
-	db.compTrigger(db.mcompTriggerC)
+	db.compSendTrigger(db.tcompCmdC)
 }
 
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
@@ -538,10 +538,12 @@ type cIdle struct {
 }
 
 func (r cIdle) ack(err error) {
-	defer func() {
-		recover()
-	}()
-	r.ackC <- err
+	if r.ackC != nil {
+		defer func() {
+			recover()
+		}()
+		r.ackC <- err
+	}
 }
 
 type cRange struct {
@@ -559,6 +561,7 @@ func (r cRange) ack(err error) {
 	}
 }
 
+// This will trigger auto compation and/or wait for all compaction to be done.
 func (db *DB) compSendIdle(compC chan<- cCmd) (err error) {
 	ch := make(chan error)
 	defer close(ch)
@@ -580,6 +583,15 @@ func (db *DB) compSendIdle(compC chan<- cCmd) (err error) {
 	return err
 }
 
+// This will trigger auto compaction but will not wait for it.
+func (db *DB) compSendTrigger(compC chan<- cCmd) {
+	select {
+	case compC <- cIdle{}:
+	default:
+	}
+}
+
+// Send range compaction request.
 func (db *DB) compSendRange(compC chan<- cCmd, level int, min, max []byte) (err error) {
 	ch := make(chan error)
 	defer close(ch)
@@ -601,13 +613,6 @@ func (db *DB) compSendRange(compC chan<- cCmd, level int, min, max []byte) (err 
 	return err
 }
 
-func (db *DB) compTrigger(compTriggerC chan struct{}) {
-	select {
-	case compTriggerC <- struct{}{}:
-	default:
-	}
-}
-
 func (db *DB) mCompaction() {
 	var x cCmd
 
@@ -626,11 +631,14 @@ func (db *DB) mCompaction() {
 	for {
 		select {
 		case x = <-db.mcompCmdC:
-			db.memCompaction()
-			x.ack(nil)
-			x = nil
-		case <-db.mcompTriggerC:
-			db.memCompaction()
+			switch x.(type) {
+			case cIdle:
+				db.memCompaction()
+				x.ack(nil)
+				x = nil
+			default:
+				panic("leveldb: unknown command")
+			}
 		case _, _ = <-db.closeC:
 			return
 		}
@@ -661,7 +669,6 @@ func (db *DB) tCompaction() {
 		if db.tableNeedCompaction() {
 			select {
 			case x = <-db.tcompCmdC:
-			case <-db.tcompTriggerC:
 			case ch := <-db.tcompPauseC:
 				db.pauseCompaction(ch)
 				continue
@@ -677,7 +684,6 @@ func (db *DB) tCompaction() {
 			ackQ = ackQ[:0]
 			select {
 			case x = <-db.tcompCmdC:
-			case <-db.tcompTriggerC:
 			case ch := <-db.tcompPauseC:
 				db.pauseCompaction(ch)
 				continue
@@ -692,6 +698,8 @@ func (db *DB) tCompaction() {
 			case cRange:
 				db.tableRangeCompaction(cmd.level, cmd.min, cmd.max)
 				x.ack(nil)
+			default:
+				panic("leveldb: unknown command")
 			}
 			x = nil
 		}

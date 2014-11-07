@@ -59,7 +59,7 @@ func (db *DB) rotateMem(n int) (mem *memDB, err error) {
 	}
 
 	// Schedule memdb compaction.
-	db.compTrigger(db.mcompTriggerC)
+	db.compSendTrigger(db.mcompCmdC)
 	return
 }
 
