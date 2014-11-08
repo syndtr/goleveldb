@@ -58,10 +58,10 @@ func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *d
 	if slice != nil {
 		islice = &util.Range{}
 		if slice.Start != nil {
-			islice.Start = newIKey(slice.Start, kMaxSeq, tSeek)
+			islice.Start = newIkey(slice.Start, kMaxSeq, ktSeek)
 		}
 		if slice.Limit != nil {
-			islice.Limit = newIKey(slice.Limit, kMaxSeq, tSeek)
+			islice.Limit = newIkey(slice.Limit, kMaxSeq, ktSeek)
 		}
 	}
 	rawIter := db.newRawIterator(islice, ro)
@@ -161,7 +161,7 @@ func (i *dbIter) Seek(key []byte) bool {
 		return false
 	}
 
-	ikey := newIKey(key, i.seq, tSeek)
+	ikey := newIkey(key, i.seq, ktSeek)
 	if i.iter.Seek(ikey) {
 		i.dir = dirSOI
 		return i.next()
@@ -173,15 +173,14 @@ func (i *dbIter) Seek(key []byte) bool {
 
 func (i *dbIter) next() bool {
 	for {
-		ukey, seq, t, ok := parseIkey(i.iter.Key())
-		if ok {
+		if ukey, seq, kt, kerr := parseIkey(i.iter.Key()); kerr == nil {
 			if seq <= i.seq {
-				switch t {
-				case tDel:
+				switch kt {
+				case ktDel:
 					// Skip deleted key.
 					i.key = append(i.key[:0], ukey...)
 					i.dir = dirForward
-				case tVal:
+				case ktVal:
 					if i.dir == dirSOI || i.icmp.uCompare(ukey, i.key) > 0 {
 						i.key = append(i.key[:0], ukey...)
 						i.value = append(i.value[:0], i.iter.Value()...)
@@ -191,7 +190,7 @@ func (i *dbIter) next() bool {
 				}
 			}
 		} else if i.strict {
-			i.setErr(errInvalidIkey)
+			i.setErr(kerr)
 			break
 		}
 		if !i.iter.Next() {
@@ -224,20 +223,19 @@ func (i *dbIter) prev() bool {
 	del := true
 	if i.iter.Valid() {
 		for {
-			ukey, seq, t, ok := parseIkey(i.iter.Key())
-			if ok {
+			if ukey, seq, kt, kerr := parseIkey(i.iter.Key()); kerr == nil {
 				if seq <= i.seq {
 					if !del && i.icmp.uCompare(ukey, i.key) < 0 {
 						return true
 					}
-					del = (t == tDel)
+					del = (kt == ktDel)
 					if !del {
 						i.key = append(i.key[:0], ukey...)
 						i.value = append(i.value[:0], i.iter.Value()...)
 					}
 				}
 			} else if i.strict {
-				i.setErr(errInvalidIkey)
+				i.setErr(kerr)
 				return false
 			}
 			if !i.iter.Prev() {
@@ -266,13 +264,12 @@ func (i *dbIter) Prev() bool {
 		return i.Last()
 	case dirForward:
 		for i.iter.Prev() {
-			ukey, _, _, ok := parseIkey(i.iter.Key())
-			if ok {
+			if ukey, _, _, kerr := parseIkey(i.iter.Key()); kerr == nil {
 				if i.icmp.uCompare(ukey, i.key) < 0 {
 					goto cont
 				}
 			} else if i.strict {
-				i.setErr(errInvalidIkey)
+				i.setErr(kerr)
 				return false
 			}
 		}

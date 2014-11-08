@@ -149,7 +149,7 @@ func (tf tFiles) overlaps(icmp *iComparer, umin, umax []byte, unsorted bool) boo
 	i := 0
 	if len(umin) > 0 {
 		// Find the earliest possible internal key for min.
-		i = tf.searchMax(icmp, newIKey(umin, kMaxSeq, tSeek))
+		i = tf.searchMax(icmp, newIkey(umin, kMaxSeq, ktSeek))
 	}
 	if i >= len(tf) {
 		// Beginning of range is after all files, so no overlap.

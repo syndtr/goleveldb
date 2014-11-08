@@ -15,7 +15,7 @@ import (
 )
 
 type tbRec struct {
-	t          vType
+	kt         kType
 	key, value []byte
 }
 
@@ -24,11 +24,11 @@ type testBatch struct {
 }
 
 func (p *testBatch) Put(key, value []byte) {
-	p.rec = append(p.rec, &tbRec{tVal, key, value})
+	p.rec = append(p.rec, &tbRec{ktVal, key, value})
 }
 
 func (p *testBatch) Delete(key []byte) {
-	p.rec = append(p.rec, &tbRec{tDel, key, nil})
+	p.rec = append(p.rec, &tbRec{ktDel, key, nil})
 }
 
 func compareBatch(t *testing.T, b1, b2 *Batch) {
@@ -49,13 +49,13 @@ func compareBatch(t *testing.T, b1, b2 *Batch) {
 	}
 	for i := range p1.rec {
 		r1, r2 := p1.rec[i], p2.rec[i]
-		if r1.t != r2.t {
-			t.Errorf("invalid type on record '%d' want %d, got %d", i, r1.t, r2.t)
+		if r1.kt != r2.kt {
+			t.Errorf("invalid type on record '%d' want %d, got %d", i, r1.kt, r2.kt)
 		}
 		if !bytes.Equal(r1.key, r2.key) {
 			t.Errorf("invalid key on record '%d' want %s, got %s", i, string(r1.key), string(r2.key))
 		}
-		if r1.t == tVal {
+		if r1.kt == ktVal {
 			if !bytes.Equal(r1.value, r2.value) {
 				t.Errorf("invalid value on record '%d' want %s, got %s", i, string(r1.value), string(r2.value))
 			}

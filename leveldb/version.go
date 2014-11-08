@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"errors"
 	"sync/atomic"
 	"unsafe"
 
@@ -130,10 +129,11 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions) (value []byte, tcomp bool,
 		tset  *tSet
 		tseek bool
 
-		l0found bool
-		l0seq   uint64
-		l0vt    vType
-		l0val   []byte
+		// Level-0.
+		zfound bool
+		zseq   uint64
+		zkt    kType
+		zval   []byte
 	)
 
 	err = ErrNotFound
@@ -150,55 +150,52 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions) (value []byte, tcomp bool,
 			}
 		}
 
-		ikey__, val_, err_ := v.s.tops.find(t, ikey, ro)
-		switch err_ {
+		fikey, fval, ferr := v.s.tops.find(t, ikey, ro)
+		switch ferr {
 		case nil:
 		case ErrNotFound:
 			return true
 		default:
-			err = err_
+			err = ferr
 			return false
 		}
 
-		ikey_ := iKey(ikey__)
-		if seq, vt, ok := ikey_.parseNum(); ok {
-			if v.s.icmp.uCompare(ukey, ikey_.ukey()) != 0 {
-				return true
-			}
-
-			if level == 0 {
-				if seq >= l0seq {
-					l0found = true
-					l0seq = seq
-					l0vt = vt
-					l0val = val_
+		if fukey, fseq, fkt, fkerr := parseIkey(fikey); fkerr == nil {
+			if v.s.icmp.uCompare(ukey, fukey) == 0 {
+				if level == 0 {
+					if fseq >= zseq {
+						zfound = true
+						zseq = fseq
+						zkt = fkt
+						zval = fval
+					}
+				} else {
+					switch fkt {
+					case ktVal:
+						value = fval
+						err = nil
+					case ktDel:
+					default:
+						panic("leveldb: invalid iKey type")
+					}
+					return false
 				}
-			} else {
-				switch vt {
-				case tVal:
-					value = val_
-					err = nil
-				case tDel:
-				default:
-					panic("leveldb: invalid internal key type")
-				}
-				return false
 			}
 		} else {
-			err = errors.New("leveldb: internal key corrupted")
+			err = fkerr
 			return false
 		}
 
 		return true
 	}, func(level int) bool {
-		if l0found {
-			switch l0vt {
-			case tVal:
-				value = l0val
+		if zfound {
+			switch zkt {
+			case ktVal:
+				value = zval
 				err = nil
-			case tDel:
+			case ktDel:
 			default:
-				panic("leveldb: invalid internal key type")
+				panic("leveldb: invalid iKey type")
 			}
 			return false
 		}

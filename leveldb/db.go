@@ -8,7 +8,6 @@ package leveldb
 
 import (
 	"container/list"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
@@ -117,14 +117,14 @@ func openDB(s *session) (*DB, error) {
 		return nil, err
 	}
 
-	// Don't include compaction error goroutine into wait group.
+	// Doesn't need to be included in the wait group.
 	go db.compactionError()
+	go db.mpoolDrain()
 
 	db.closeW.Add(3)
 	go db.tCompaction()
 	go db.mCompaction()
 	go db.jWriter()
-	go db.mpoolDrain()
 
 	s.logf("db@open done T·%v", time.Since(start))
 
@@ -330,8 +330,8 @@ func recoverTable(s *session, o *opt.Options) error {
 		// Scan the table.
 		for iter.Next() {
 			key := iter.Key()
-			_, seq, _, ok := parseIkey(key)
-			if !ok {
+			_, seq, _, kerr := parseIkey(key)
+			if kerr != nil {
 				tcorrupted++
 				continue
 			}
@@ -562,7 +562,7 @@ func (db *DB) recoverJournal() error {
 }
 
 func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
-	ikey := newIKey(key, seq, tSeek)
+	ikey := newIkey(key, seq, ktSeek)
 
 	em, fm := db.getMems()
 	for _, m := range [...]*memDB{em, fm} {
@@ -573,9 +573,13 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 
 		mk, mv, me := m.mdb.Find(ikey)
 		if me == nil {
-			ukey, _, t, ok := parseIkey(mk)
-			if ok && db.s.icmp.uCompare(ukey, key) == 0 {
-				if t == tDel {
+			ukey, _, kt, kerr := parseIkey(mk)
+			if kerr != nil {
+				// Shouldn't have had happen.
+				panic(kerr)
+			}
+			if db.s.icmp.uCompare(ukey, key) == 0 {
+				if kt == ktDel {
 					return nil, ErrNotFound
 				}
 				return append([]byte{}, mv...), nil
@@ -755,8 +759,8 @@ func (db *DB) SizeOf(ranges []util.Range) (Sizes, error) {
 
 	sizes := make(Sizes, 0, len(ranges))
 	for _, r := range ranges {
-		imin := newIKey(r.Start, kMaxSeq, tSeek)
-		imax := newIKey(r.Limit, kMaxSeq, tSeek)
+		imin := newIkey(r.Start, kMaxSeq, ktSeek)
+		imax := newIkey(r.Limit, kMaxSeq, ktSeek)
 		start, err := v.offsetOf(imin)
 		if err != nil {
 			return nil, err

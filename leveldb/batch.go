@@ -48,20 +48,20 @@ func (b *Batch) grow(n int) {
 	b.data = data[:off]
 }
 
-func (b *Batch) appendRec(t vType, key, value []byte) {
+func (b *Batch) appendRec(kt kType, key, value []byte) {
 	n := 1 + binary.MaxVarintLen32 + len(key)
-	if t == tVal {
+	if kt == ktVal {
 		n += binary.MaxVarintLen32 + len(value)
 	}
 	b.grow(n)
 	off := len(b.data)
 	data := b.data[:off+n]
-	data[off] = byte(t)
+	data[off] = byte(kt)
 	off += 1
 	off += binary.PutUvarint(data[off:], uint64(len(key)))
 	copy(data[off:], key)
 	off += len(key)
-	if t == tVal {
+	if kt == ktVal {
 		off += binary.PutUvarint(data[off:], uint64(len(value)))
 		copy(data[off:], value)
 		off += len(value)
@@ -75,13 +75,13 @@ func (b *Batch) appendRec(t vType, key, value []byte) {
 // Put appends 'put operation' of the given key/value pair to the batch.
 // It is safe to modify the contents of the argument after Put returns.
 func (b *Batch) Put(key, value []byte) {
-	b.appendRec(tVal, key, value)
+	b.appendRec(ktVal, key, value)
 }
 
 // Delete appends 'delete operation' of the given key to the batch.
 // It is safe to modify the contents of the argument after Delete returns.
 func (b *Batch) Delete(key []byte) {
-	b.appendRec(tDel, key, nil)
+	b.appendRec(ktDel, key, nil)
 }
 
 // Dump dumps batch contents. The returned slice can be loaded into the
@@ -102,11 +102,11 @@ func (b *Batch) Load(data []byte) error {
 
 // Replay replays batch contents.
 func (b *Batch) Replay(r BatchReplay) error {
-	return b.decodeRec(func(i int, t vType, key, value []byte) {
-		switch t {
-		case tVal:
+	return b.decodeRec(func(i int, kt kType, key, value []byte) {
+		switch kt {
+		case ktVal:
 			r.Put(key, value)
-		case tDel:
+		case ktDel:
 			r.Delete(key)
 		}
 	})
@@ -168,15 +168,15 @@ func (b *Batch) decode(data []byte) error {
 	return nil
 }
 
-func (b *Batch) decodeRec(f func(i int, t vType, key, value []byte)) error {
+func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) error {
 	off := kBatchHdrLen
 	for i := 0; i < b.rLen; i++ {
 		if off >= len(b.data) {
 			return errors.New("leveldb: invalid batch record length")
 		}
 
-		t := vType(b.data[off])
-		if t > tVal {
+		kt := kType(b.data[off])
+		if kt > ktVal {
 			return errors.New("leveldb: invalid batch record type in batch")
 		}
 		off += 1
@@ -190,7 +190,7 @@ func (b *Batch) decodeRec(f func(i int, t vType, key, value []byte)) error {
 		off += int(x)
 
 		var value []byte
-		if t == tVal {
+		if kt == ktVal {
 			x, n := binary.Uvarint(b.data[off:])
 			off += n
 			if n <= 0 || off+int(x) > len(b.data) {
@@ -200,22 +200,22 @@ func (b *Batch) decodeRec(f func(i int, t vType, key, value []byte)) error {
 			off += int(x)
 		}
 
-		f(i, t, key, value)
+		f(i, kt, key, value)
 	}
 
 	return nil
 }
 
 func (b *Batch) memReplay(to *memdb.DB) error {
-	return b.decodeRec(func(i int, t vType, key, value []byte) {
-		ikey := newIKey(key, b.seq+uint64(i), t)
+	return b.decodeRec(func(i int, kt kType, key, value []byte) {
+		ikey := newIkey(key, b.seq+uint64(i), kt)
 		to.Put(ikey, value)
 	})
 }
 
 func (b *Batch) revertMemReplay(to *memdb.DB) error {
-	return b.decodeRec(func(i int, t vType, key, value []byte) {
-		ikey := newIKey(key, b.seq+uint64(i), t)
+	return b.decodeRec(func(i int, kt kType, key, value []byte) {
+		ikey := newIkey(key, b.seq+uint64(i), kt)
 		to.Delete(ikey)
 	})
 }

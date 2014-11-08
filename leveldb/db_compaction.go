@@ -308,16 +308,22 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	minSeq := db.minSeq()
 	db.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.level, len(c.tables[0]), c.level+1, len(c.tables[1]), shortenb(sourceSize), minSeq)
 
-	var snapUkey []byte
-	var snapHasUkey bool
-	var snapSeq uint64
-	var snapIter int
-	var snapDropCnt int
-	var dropCnt int
+	var (
+		snapHasLastUkey bool
+		snapLastUkey    []byte
+		snapLastSeq     uint64
+		snapIter        int
+		snapKerrCnt     int
+		snapDropCnt     int
+
+		kerrCnt int
+		dropCnt int
+	)
 	db.compactionTransact("table@build", func(cnt *compactionTransactCounter) (err error) {
-		ukey := append([]byte{}, snapUkey...)
-		hasUkey := snapHasUkey
-		lseq := snapSeq
+		hasLastUkey := snapHasLastUkey // The key might has zero length, so this is necessary.
+		lastUkey := append([]byte{}, snapLastUkey...)
+		lastSeq := snapLastSeq
+		kerrCnt = snapKerrCnt
 		dropCnt = snapDropCnt
 		snapSched := snapIter == 0
 
@@ -353,9 +359,11 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 				continue
 			}
 
-			ikey := iKey(iter.Key())
+			ikey := iter.Key()
+			ukey, seq, kt, kerr := parseIkey(ikey)
 
-			if c.shouldStopBefore(ikey) && tw != nil {
+			// Skip this if key is corrupted.
+			if kerr == nil && c.shouldStopBefore(ikey) && tw != nil {
 				err = finish()
 				if err != nil {
 					return
@@ -367,32 +375,28 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 			// Scheduled for snapshot, snapshot will used to retry compaction
 			// if error occured.
 			if snapSched {
-				snapUkey = append(snapUkey[:0], ukey...)
-				snapHasUkey = hasUkey
-				snapSeq = lseq
+				snapHasLastUkey = hasLastUkey
+				snapLastUkey = append(snapLastUkey[:0], lastUkey...)
+				snapLastSeq = lastSeq
 				snapIter = i
+				snapKerrCnt = kerrCnt
 				snapDropCnt = dropCnt
 				snapSched = false
 			}
 
-			if seq, vt, ok := ikey.parseNum(); !ok {
-				// Don't drop error keys
-				ukey = ukey[:0]
-				hasUkey = false
-				lseq = kMaxSeq
-			} else {
-				if !hasUkey || db.s.icmp.uCompare(ikey.ukey(), ukey) != 0 {
-					// First occurrence of this user key
-					ukey = append(ukey[:0], ikey.ukey()...)
-					hasUkey = true
-					lseq = kMaxSeq
+			if kerr == nil {
+				if !hasLastUkey || db.s.icmp.uCompare(lastUkey, ukey) != 0 {
+					// First occurrence of this user key.
+					hasLastUkey = true
+					lastUkey = append(lastUkey[:0], ukey...)
+					lastSeq = kMaxSeq
 				}
 
-				drop := false
-				if lseq <= minSeq {
+				switch {
+				case lastSeq <= minSeq:
 					// Dropped because newer entry for same user key exist
-					drop = true // (A)
-				} else if vt == tDel && seq <= minSeq && c.baseLevelForKey(ukey) {
+					fallthrough // (A)
+				case kt == ktDel && seq <= minSeq && c.baseLevelForKey(lastUkey):
 					// For this user key:
 					// (1) there is no data in higher levels
 					// (2) data in lower levels will have larger seq numbers
@@ -400,14 +404,18 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 					//     smaller seq numbers will be dropped in the next
 					//     few iterations of this loop (by rule (A) above).
 					// Therefore this deletion marker is obsolete and can be dropped.
-					drop = true
-				}
-
-				lseq = seq
-				if drop {
+					lastSeq = seq
 					dropCnt++
 					continue
+				default:
+					lastSeq = seq
 				}
+			} else {
+				// Don't drop corrupted keys
+				hasLastUkey = false
+				lastUkey = lastUkey[:0]
+				lastSeq = kMaxSeq
+				kerrCnt++
 			}
 
 			// Create new table if not already
@@ -478,7 +486,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	}, nil)
 
 	resultSize := int(stats[1].write)
-	db.logf("table@compaction committed F%s S%s D·%d T·%v", sint(len(rec.addedTables)-len(rec.deletedTables)), sshortenb(resultSize-sourceSize), dropCnt, stats[1].duration)
+	db.logf("table@compaction committed F%s S%s Ke·%d D·%d T·%v", sint(len(rec.addedTables)-len(rec.deletedTables)), sshortenb(resultSize-sourceSize), kerrCnt, dropCnt, stats[1].duration)
 
 	// Save compaction stats
 	for i := range stats {

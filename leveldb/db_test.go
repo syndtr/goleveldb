@@ -151,7 +151,10 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 	t := h.t
 	db := h.db
 
-	var res uint64
+	var (
+		maxOverlaps uint64
+		maxLevel    int
+	)
 	v := db.s.version()
 	for i, tt := range v.tables[1 : len(v.tables)-1] {
 		level := i + 1
@@ -159,15 +162,18 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 		for _, t := range tt {
 			r := next.getOverlaps(nil, db.s.icmp, t.imin.ukey(), t.imax.ukey(), false)
 			sum := r.size()
-			if sum > res {
-				res = sum
+			if sum > maxOverlaps {
+				maxOverlaps = sum
+				maxLevel = level
 			}
 		}
 	}
 	v.release()
 
-	if res > want {
-		t.Errorf("next level overlapping bytes is more than %d, got=%d", want, res)
+	if maxOverlaps > want {
+		t.Errorf("next level most overlapping bytes is more than %d, got=%d level=%d", want, maxOverlaps, maxLevel)
+	} else {
+		t.Logf("next level most overlapping bytes is %d, level=%d want=%d", maxOverlaps, maxLevel, want)
 	}
 }
 
@@ -240,7 +246,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	db := h.db
 	s := db.s
 
-	ikey := newIKey([]byte(key), kMaxSeq, tVal)
+	ikey := newIkey([]byte(key), kMaxSeq, ktVal)
 	iter := db.newRawIterator(nil, nil)
 	if !iter.Seek(ikey) && iter.Error() != nil {
 		t.Error("AllEntries: error during seek, err: ", iter.Error())
@@ -249,19 +255,18 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	res := "[ "
 	first := true
 	for iter.Valid() {
-		rkey := iKey(iter.Key())
-		if _, t, ok := rkey.parseNum(); ok {
-			if s.icmp.uCompare(ikey.ukey(), rkey.ukey()) != 0 {
+		if ukey, _, kt, kerr := parseIkey(iter.Key()); kerr == nil {
+			if s.icmp.uCompare(ikey.ukey(), ukey) != 0 {
 				break
 			}
 			if !first {
 				res += ", "
 			}
 			first = false
-			switch t {
-			case tVal:
+			switch kt {
+			case ktVal:
 				res += string(iter.Value())
-			case tDel:
+			case ktDel:
 				res += "DEL"
 			}
 		} else {
@@ -1014,6 +1019,7 @@ func TestDb_SparseMerge(t *testing.T) {
 	h.put("C", "vc2")
 	h.compactMem()
 
+	h.waitCompaction()
 	h.maxNextLevelOverlappingBytes(20 * 1048576)
 	h.compactRangeAt(0, "", "")
 	h.waitCompaction()
