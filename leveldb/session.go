@@ -132,7 +132,7 @@ func (s *session) recover() (err error) {
 	strict := s.o.GetStrict(opt.StrictManifest)
 	jr := journal.NewReader(reader, dropper{s, m}, strict, true)
 
-	staging := s.version_NB().newStaging()
+	staging := s.stVersion.newStaging()
 	rec := &sessionRecord{}
 	for {
 		var r io.Reader
@@ -188,8 +188,11 @@ func (s *session) recover() (err error) {
 
 // Commit session; need external synchronization.
 func (s *session) commit(r *sessionRecord) (err error) {
+	v := s.version()
+	defer v.release()
+
 	// spawn new version based on current version
-	nv := s.version_NB().spawn(r)
+	nv := v.spawn(r)
 
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
@@ -208,7 +211,7 @@ func (s *session) commit(r *sessionRecord) (err error) {
 
 // Pick a compaction based on current state; need external synchronization.
 func (s *session) pickCompaction() *compaction {
-	v := s.version_NB()
+	v := s.version()
 
 	var level int
 	var t0 tFiles
@@ -231,16 +234,17 @@ func (s *session) pickCompaction() *compaction {
 			level = ts.level
 			t0 = append(t0, ts.table)
 		} else {
+			v.release()
 			return nil
 		}
 	}
 
-	c := &compaction{s: s, v: v, level: level}
 	if level == 0 {
 		imin, imax := t0.getRange(s.icmp)
 		t0 = v.tables[0].getOverlaps(t0[:0], s.icmp, imin.ukey(), imax.ukey(), true)
 	}
 
+	c := &compaction{s: s, v: v, level: level}
 	c.tables[0] = t0
 	c.expand()
 	return c
@@ -248,10 +252,11 @@ func (s *session) pickCompaction() *compaction {
 
 // Create compaction from given level and range; need external synchronization.
 func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
-	v := s.version_NB()
+	v := s.version()
 
 	t0 := v.tables[level].getOverlaps(nil, s.icmp, umin, umax, level == 0)
 	if len(t0) == 0 {
+		v.release()
 		return nil
 	}
 
@@ -291,8 +296,15 @@ type compaction struct {
 	seenKey         bool
 	overlappedBytes uint64
 	imin, imax      iKey
+	tPtrs           [kNumLevels]int
+	released        bool
+}
 
-	tPtrs [kNumLevels]int
+func (c *compaction) release() {
+	if !c.released {
+		c.released = true
+		c.v.release()
+	}
 }
 
 // Expand compacted tables; need external synchronization.

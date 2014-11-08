@@ -57,7 +57,8 @@ func (s *session) tableFileFromRecord(r atRecord) *tFile {
 
 // Session state.
 
-// Get current version.
+// Get current version. This will incr version ref, must call
+// version.release (exactly once) after use.
 func (s *session) version() *version {
 	s.vmu.Lock()
 	defer s.vmu.Unlock()
@@ -65,19 +66,14 @@ func (s *session) version() *version {
 	return s.stVersion
 }
 
-// Get current version; no barrier.
-func (s *session) version_NB() *version {
-	return s.stVersion
-}
-
 // Set current version to v.
 func (s *session) setVersion(v *version) {
 	s.vmu.Lock()
-	v.ref = 1
+	v.ref = 1 // Holds by session.
 	if old := s.stVersion; old != nil {
-		v.ref++
+		v.ref++ // Holds by old version.
 		old.next = v
-		old.release_NB()
+		old.releaseNB()
 	}
 	s.stVersion = v
 	s.vmu.Unlock()
@@ -182,7 +178,8 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	jw := journal.NewWriter(writer)
 
 	if v == nil {
-		v = s.version_NB()
+		v = s.version()
+		defer v.release()
 	}
 	if rec == nil {
 		rec = new(sessionRecord)

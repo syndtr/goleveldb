@@ -84,7 +84,9 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 
 	// Pick level.
 	if level < 0 {
-		level = s.version_NB().pickLevel(t.imin.ukey(), t.imax.ukey())
+		v := s.version()
+		level = v.pickLevel(t.imin.ukey(), t.imax.ukey())
+		v.release()
 	}
 	c.rec.addTableFile(level, t)
 
@@ -282,6 +284,8 @@ func (db *DB) memCompaction() {
 }
 
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
+	defer c.release()
+
 	rec := new(sessionRecord)
 	rec.addCompPtr(c.level, c.imax)
 
@@ -502,14 +506,14 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) {
 			db.tableCompaction(c, true)
 		}
 	} else {
-		v := db.s.version_NB()
-
+		v := db.s.version()
 		m := 1
 		for i, t := range v.tables[1:] {
 			if t.overlaps(db.s.icmp, umin, umax, false) {
 				m = i + 1
 			}
 		}
+		v.release()
 
 		for level := 0; level < m; level++ {
 			if c := db.s.getCompactionRange(level, umin, umax); c != nil {
@@ -526,7 +530,9 @@ func (db *DB) tableAutoCompaction() {
 }
 
 func (db *DB) tableNeedCompaction() bool {
-	return db.s.version_NB().needCompaction()
+	v := db.s.version()
+	defer v.release()
+	return v.needCompaction()
 }
 
 func (db *DB) pauseCompaction(ch chan<- struct{}) {

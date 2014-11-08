@@ -37,7 +37,9 @@ func (db *DB) logf(format string, v ...interface{}) { db.s.logf(format, v...) }
 
 // Check and clean files.
 func (db *DB) checkAndCleanFiles() error {
-	v := db.s.version_NB()
+	v := db.s.version()
+	defer v.release()
+
 	tablesMap := make(map[uint64]bool)
 	for _, tables := range v.tables {
 		for _, t := range tables {

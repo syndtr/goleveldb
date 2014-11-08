@@ -46,11 +46,12 @@ type version struct {
 
 	cSeek unsafe.Pointer
 
-	ref  int
+	ref int
+	// Succeeding version.
 	next *version
 }
 
-func (v *version) release_NB() {
+func (v *version) releaseNB() {
 	v.ref--
 	if v.ref > 0 {
 		return
@@ -76,13 +77,13 @@ func (v *version) release_NB() {
 		}
 	}
 
-	v.next.release_NB()
+	v.next.releaseNB()
 	v.next = nil
 }
 
 func (v *version) release() {
 	v.s.vmu.Lock()
-	v.release_NB()
+	v.releaseNB()
 	v.s.vmu.Unlock()
 }
 
@@ -426,7 +427,7 @@ func (vr *versionReleaser) Release() {
 	v := vr.v
 	v.s.vmu.Lock()
 	if !vr.once {
-		v.release_NB()
+		v.releaseNB()
 		vr.once = true
 	}
 	v.s.vmu.Unlock()
