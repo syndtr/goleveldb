@@ -26,7 +26,10 @@ func newErrBatchCorrupted(reason string) error {
 	return errors.NewErrCorrupted(nil, &ErrBatchCorrupted{reason})
 }
 
-const kBatchHdrLen = 8 + 4
+const (
+	batchHdrLen  = 8 + 4
+	batchGrowRec = 3000
+)
 
 type BatchReplay interface {
 	Put(key, value []byte)
@@ -44,16 +47,24 @@ type Batch struct {
 func (b *Batch) grow(n int) {
 	off := len(b.data)
 	if off == 0 {
-		// include headers
-		off = kBatchHdrLen
-		n += off
+		off = batchHdrLen
+		if b.data != nil {
+			b.data = b.data[:off]
+		}
 	}
-	if cap(b.data)-off >= n {
-		return
+	if cap(b.data)-off < n {
+		if b.data == nil {
+			b.data = make([]byte, off, off+n)
+		} else {
+			odata := b.data
+			div := 1
+			if b.rLen > batchGrowRec {
+				div = b.rLen / batchGrowRec
+			}
+			b.data = make([]byte, off, off+n+(off-batchHdrLen)/div)
+			copy(b.data, odata)
+		}
 	}
-	data := make([]byte, 2*cap(b.data)+n)
-	copy(data, b.data)
-	b.data = data[:off]
 }
 
 func (b *Batch) appendRec(kt kType, key, value []byte) {
@@ -127,7 +138,7 @@ func (b *Batch) Len() int {
 
 // Reset resets the batch.
 func (b *Batch) Reset() {
-	b.data = nil
+	b.data = b.data[:0]
 	b.seq = 0
 	b.rLen = 0
 	b.bLen = 0
@@ -140,8 +151,8 @@ func (b *Batch) init(sync bool) {
 
 func (b *Batch) append(p *Batch) {
 	if p.rLen > 0 {
-		b.grow(len(p.data) - kBatchHdrLen)
-		b.data = append(b.data, p.data[kBatchHdrLen:]...)
+		b.grow(len(p.data) - batchHdrLen)
+		b.data = append(b.data, p.data[batchHdrLen:]...)
 		b.rLen += p.rLen
 	}
 	if p.sync {
@@ -163,7 +174,7 @@ func (b *Batch) encode() []byte {
 }
 
 func (b *Batch) decode(prevSeq uint64, data []byte) error {
-	if len(data) < kBatchHdrLen {
+	if len(data) < batchHdrLen {
 		return newErrBatchCorrupted("too short")
 	}
 
@@ -176,14 +187,14 @@ func (b *Batch) decode(prevSeq uint64, data []byte) error {
 		return newErrBatchCorrupted("invalid records length")
 	}
 	// No need to be precise at this point, it won't be used anyway
-	b.bLen = len(data) - kBatchHdrLen
+	b.bLen = len(data) - batchHdrLen
 	b.data = data
 
 	return nil
 }
 
-func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) error {
-	off := kBatchHdrLen
+func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) (err error) {
+	off := batchHdrLen
 	for i := 0; i < b.rLen; i++ {
 		if off >= len(b.data) {
 			return newErrBatchCorrupted("invalid records length")
@@ -202,7 +213,6 @@ func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) error {
 		}
 		key := b.data[off : off+int(x)]
 		off += int(x)
-
 		var value []byte
 		if kt == ktVal {
 			x, n := binary.Uvarint(b.data[off:])
