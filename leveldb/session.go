@@ -416,7 +416,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 				its = append(its, c.s.tops.newIterator(t, nil, ro))
 			}
 		} else {
-			it := iterator.NewIndexedIterator(tables.newIndexIterator(c.s.tops, c.s.icmp, nil, ro), strict, true)
+			it := iterator.NewIndexedIterator(tables.newIndexIterator(c.s.tops, c.s.icmp, nil, ro), strict)
 			its = append(its, it)
 		}
 	}

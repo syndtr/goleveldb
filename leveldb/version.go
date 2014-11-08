@@ -220,7 +220,7 @@ func (v *version) getIterators(slice *util.Range, ro *opt.ReadOptions) (its []it
 			continue
 		}
 
-		it := iterator.NewIndexedIterator(tables.newIndexIterator(v.s.tops, v.s.icmp, slice, ro), strict, true)
+		it := iterator.NewIndexedIterator(tables.newIndexIterator(v.s.tops, v.s.icmp, slice, ro), strict)
 		its = append(its, it)
 	}
 
