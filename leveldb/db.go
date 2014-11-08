@@ -482,22 +482,26 @@ func (db *DB) recoverJournal() error {
 				if err == io.EOF {
 					break
 				}
-				return err
+				return errors.SetFile(err, file)
 			}
 
 			buf.Reset()
 			if _, err := buf.ReadFrom(r); err != nil {
 				if err == io.ErrUnexpectedEOF {
+					// This is error returned due to corruption, with strict == false.
 					continue
 				} else {
-					return err
+					return errors.SetFile(err, file)
 				}
 			}
-			if err := batch.decode(buf.Bytes()); err != nil {
-				return err
-			}
-			if err := batch.memReplay(mem); err != nil {
-				return err
+			if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mem); err != nil {
+				if strict || !errors.IsCorrupted(err) {
+					return errors.SetFile(err, file)
+				} else {
+					db.s.logf("journal error: %v (skipped)", err)
+					// We won't apply sequence number as it might be corrupted.
+					continue
+				}
 			}
 
 			// Save sequence number.

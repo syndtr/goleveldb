@@ -75,7 +75,7 @@ func TestBatch_EncodeDecode(t *testing.T) {
 	b1.Delete([]byte("k"))
 	buf := b1.encode()
 	b2 := new(Batch)
-	err := b2.decode(buf)
+	err := b2.decode(0, buf)
 	if err != nil {
 		t.Error("error when decoding batch: ", err)
 	}

@@ -8,15 +8,23 @@ package leveldb
 
 import (
 	"encoding/binary"
-	"errors"
+	"fmt"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 )
 
-var (
-	errBatchTooShort  = errors.New("leveldb: batch is too short")
-	errBatchBadRecord = errors.New("leveldb: bad record in batch")
-)
+type ErrBatchCorrupted struct {
+	Reason string
+}
+
+func (e *ErrBatchCorrupted) Error() string {
+	return fmt.Sprintf("leveldb: batch corrupted: %s", e.Reason)
+}
+
+func newErrBatchCorrupted(reason string) error {
+	return errors.NewErrCorrupted(nil, &ErrBatchCorrupted{reason})
+}
 
 const kBatchHdrLen = 8 + 4
 
@@ -97,7 +105,7 @@ func (b *Batch) Dump() []byte {
 // The given slice will not be copied and will be used as batch buffer, so
 // it is not safe to modify the contents of the slice.
 func (b *Batch) Load(data []byte) error {
-	return b.decode(data)
+	return b.decode(0, data)
 }
 
 // Replay replays batch contents.
@@ -154,13 +162,19 @@ func (b *Batch) encode() []byte {
 	return b.data
 }
 
-func (b *Batch) decode(data []byte) error {
+func (b *Batch) decode(prevSeq uint64, data []byte) error {
 	if len(data) < kBatchHdrLen {
-		return errBatchTooShort
+		return newErrBatchCorrupted("too short")
 	}
 
 	b.seq = binary.LittleEndian.Uint64(data)
+	if b.seq < prevSeq {
+		return newErrBatchCorrupted("invalid sequence number")
+	}
 	b.rLen = int(binary.LittleEndian.Uint32(data[8:]))
+	if b.rLen < 0 {
+		return newErrBatchCorrupted("invalid records length")
+	}
 	// No need to be precise at this point, it won't be used anyway
 	b.bLen = len(data) - kBatchHdrLen
 	b.data = data
@@ -172,19 +186,19 @@ func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) error {
 	off := kBatchHdrLen
 	for i := 0; i < b.rLen; i++ {
 		if off >= len(b.data) {
-			return errors.New("leveldb: invalid batch record length")
+			return newErrBatchCorrupted("invalid records length")
 		}
 
 		kt := kType(b.data[off])
 		if kt > ktVal {
-			return errors.New("leveldb: invalid batch record type in batch")
+			return newErrBatchCorrupted("bad record: invalid type")
 		}
 		off += 1
 
 		x, n := binary.Uvarint(b.data[off:])
 		off += n
 		if n <= 0 || off+int(x) > len(b.data) {
-			return errBatchBadRecord
+			return newErrBatchCorrupted("bad record: invalid key length")
 		}
 		key := b.data[off : off+int(x)]
 		off += int(x)
@@ -194,7 +208,7 @@ func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) error {
 			x, n := binary.Uvarint(b.data[off:])
 			off += n
 			if n <= 0 || off+int(x) > len(b.data) {
-				return errBatchBadRecord
+				return newErrBatchCorrupted("bad record: invalid value length")
 			}
 			value = b.data[off : off+int(x)]
 			off += int(x)
@@ -211,6 +225,13 @@ func (b *Batch) memReplay(to *memdb.DB) error {
 		ikey := newIkey(key, b.seq+uint64(i), kt)
 		to.Put(ikey, value)
 	})
+}
+
+func (b *Batch) memDecodeAndReplay(prevSeq uint64, data []byte, to *memdb.DB) error {
+	if err := b.decode(prevSeq, data); err != nil {
+		return err
+	}
+	return b.memReplay(to)
 }
 
 func (b *Batch) revertMemReplay(to *memdb.DB) error {
