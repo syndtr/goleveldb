@@ -68,6 +68,9 @@ const (
 // Strict is the DB strict level.
 type Strict uint
 
+// CompactionFilter callback, removes the key/value pair if true is returned
+type CompactionFilter func(key, value []byte) bool
+
 const (
 	// If present then a corrupted or invalid chunk or block in manifest
 	// journal will cause an error istead of being dropped.
@@ -131,6 +134,12 @@ type Options struct {
 	//
 	// The default value is 500.
 	CachedOpenFiles int
+
+	// CompactionFilter defines callback function which can filter key/value
+	// pairs and remove them from the DB during compaction
+	//
+	// The default value is nil.
+	CompactionFilter CompactionFilter
 
 	// Comparer defines a total ordering over the space of []byte keys: a 'less
 	// than' relationship. The same comparison algorithm must be used for reads
@@ -220,6 +229,13 @@ func (o *Options) GetCachedOpenFiles() int {
 		return 0
 	}
 	return o.CachedOpenFiles
+}
+
+func (o *Options) GetCompactionFilter() CompactionFilter {
+	if o == nil {
+		return nil
+	}
+	return o.CompactionFilter
 }
 
 func (o *Options) GetComparer() comparer.Comparer {

@@ -1625,6 +1625,22 @@ func TestDb_ManualCompaction(t *testing.T) {
 	h.tablesPerLevel("0,0,1")
 }
 
+func TestDb_CompactionFilter(t *testing.T) {
+	h := newDbHarness(t)
+	defer h.close()
+
+	if kMaxMemCompactLevel != 2 {
+		t.Fatal("fix test to reflect the config")
+	}
+
+	h.db.s.o.CompactionFilter = func(k, v []byte) bool { return string(k) == "q" }
+	h.putMulti(3, "p", "q")
+
+	h.compactRange("", "")
+	h.getVal("p", "begin")
+	h.get("q", false)
+}
+
 func TestDb_BloomFilter(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{
 		BlockCache: opt.NoCache,

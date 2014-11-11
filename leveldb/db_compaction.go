@@ -330,6 +330,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		kerrCnt = snapKerrCnt
 		dropCnt = snapDropCnt
 		snapSched := snapIter == 0
+		filter := db.s.o.CompactionFilter
 
 		var tw *tWriter
 		finish := func() error {
@@ -440,8 +441,16 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 				}
 			}
 
+			ival := iter.Value()
+
+			// Apply compaction filter
+			if filter != nil && filter(ukey, ival) {
+				dropCnt++
+				continue
+			}
+
 			// Write key/value into table
-			err = tw.append(ikey, iter.Value())
+			err = tw.append(ikey, ival)
 			if err != nil {
 				return
 			}
