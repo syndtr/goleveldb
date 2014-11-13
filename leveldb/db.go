@@ -57,6 +57,8 @@ type DB struct {
 	writeMergedC chan bool
 	writeLockC   chan struct{}
 	writeAckC    chan error
+	writeDelay   time.Duration
+	writeDelayN  int
 	journalC     chan *Batch
 	journalAckC  chan error
 
@@ -846,6 +848,10 @@ func (db *DB) Close() error {
 	if db.journal != nil {
 		db.journal.Close()
 		db.journalWriter.Close()
+	}
+
+	if db.writeDelayN > 0 {
+		db.logf("db@write was delayed N·%d T·%v", db.writeDelayN, db.writeDelay)
 	}
 
 	// Close session.
