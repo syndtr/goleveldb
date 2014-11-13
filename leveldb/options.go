@@ -12,11 +12,16 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-func (s *session) setOptions(o *opt.Options) {
-	s.o = &opt.Options{}
+func dupOptions(o *opt.Options) *opt.Options {
+	newo := &opt.Options{}
 	if o != nil {
-		*s.o = *o
+		*newo = *o
 	}
+	return newo
+}
+
+func (s *session) setOptions(o *opt.Options) {
+	s.o = dupOptions(o)
 	// Alternative filters.
 	if filters := o.GetAltFilters(); len(filters) > 0 {
 		s.o.AltFilters = make([]filter.Filter, len(filters))

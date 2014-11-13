@@ -133,6 +133,8 @@ func (db *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 			return <-db.writeAckC
 		}
 	case db.writeLockC <- struct{}{}:
+	case err = <-db.compPerErrC:
+		return
 	case _, _ = <-db.closeC:
 		return ErrClosed
 	}
@@ -188,20 +190,19 @@ drain:
 	if b.size() >= (128 << 10) {
 		// Push the write batch to the journal writer
 		select {
-		case _, _ = <-db.closeC:
-			err = ErrClosed
-			return
 		case db.journalC <- b:
 			// Write into memdb
 			if berr := b.memReplay(mem.mdb); berr != nil {
 				panic(berr)
 			}
-		}
-		// Wait for journal writer
-		select {
+		case err = <-db.compPerErrC:
+			return
 		case _, _ = <-db.closeC:
 			err = ErrClosed
 			return
+		}
+		// Wait for journal writer
+		select {
 		case err = <-db.journalAckC:
 			if err != nil {
 				// Revert memdb if error detected
@@ -210,6 +211,9 @@ drain:
 				}
 				return
 			}
+		case _, _ = <-db.closeC:
+			err = ErrClosed
+			return
 		}
 	} else {
 		err = db.writeJournal(b)
@@ -274,6 +278,8 @@ func (db *DB) CompactRange(r util.Range) error {
 	// Lock writer.
 	select {
 	case db.writeLockC <- struct{}{}:
+	case err := <-db.compPerErrC:
+		return err
 	case _, _ = <-db.closeC:
 		return ErrClosed
 	}

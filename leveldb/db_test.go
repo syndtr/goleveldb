@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"bytes"
 	"container/list"
 	crand "crypto/rand"
 	"encoding/binary"
@@ -23,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -1287,14 +1289,14 @@ func TestDb_CompactionTableOpenError(t *testing.T) {
 		t.Errorf("total tables is %d, want %d", n, im)
 	}
 
-	h.stor.SetOpenErr(storage.TypeTable)
+	h.stor.SetEmuErr(storage.TypeTable, tsOpOpen)
 	go h.db.CompactRange(util.Range{})
 	if err := h.db.compSendIdle(h.db.tcompCmdC); err != nil {
 		t.Log("compaction error: ", err)
 	}
 	h.closeDB0()
 	h.openDB()
-	h.stor.SetOpenErr(0)
+	h.stor.SetEmuErr(0, tsOpOpen)
 
 	for i := 0; i < im; i++ {
 		for j := 0; j < jm; j++ {
@@ -1431,17 +1433,17 @@ func TestDb_ManifestWriteError(t *testing.T) {
 			v.release()
 
 			if i == 0 {
-				h.stor.SetWriteErr(storage.TypeManifest)
+				h.stor.SetEmuErr(storage.TypeManifest, tsOpWrite)
 			} else {
-				h.stor.SetSyncErr(storage.TypeManifest)
+				h.stor.SetEmuErr(storage.TypeManifest, tsOpSync)
 			}
 
 			// Merging compaction (will fail)
 			h.compactRangeAtErr(kMaxMemCompactLevel, "", "", true)
 
 			h.db.Close()
-			h.stor.SetWriteErr(0)
-			h.stor.SetSyncErr(0)
+			h.stor.SetEmuErr(0, tsOpWrite)
+			h.stor.SetEmuErr(0, tsOpSync)
 
 			// Should not lose data
 			h.openDB()
@@ -2182,5 +2184,117 @@ func TestDb_GoleveldbIssue72and83(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
 
+func TestDb_TransientError(t *testing.T) {
+	h := newDbHarnessWopt(t, &opt.Options{
+		WriteBuffer:              128 * opt.KiB,
+		CachedOpenFiles:          3,
+		DisableCompactionBackoff: true,
+	})
+	defer h.close()
+
+	const (
+		nSnap = 20
+		nKey  = 10000
+	)
+
+	var (
+		snaps [nSnap]*Snapshot
+		b     = &Batch{}
+	)
+	for i := range snaps {
+		vtail := fmt.Sprintf("VAL%030d", i)
+		b.Reset()
+		for k := 0; k < nKey; k++ {
+			key := fmt.Sprintf("KEY%8d", k)
+			b.Put([]byte(key), []byte(key+vtail))
+		}
+		h.stor.SetEmuRandErr(storage.TypeTable, tsOpOpen, tsOpRead, tsOpReadAt)
+		if err := h.db.Write(b, nil); err != nil {
+			t.Logf("WRITE #%d error: %v", i, err)
+			h.stor.SetEmuRandErr(0, tsOpOpen, tsOpRead, tsOpReadAt, tsOpWrite)
+			for {
+				if err := h.db.Write(b, nil); err == nil {
+					break
+				} else if errors.IsCorrupted(err) {
+					t.Fatalf("WRITE #%d corrupted: %v", i, err)
+				}
+			}
+		}
+
+		snaps[i] = h.db.newSnapshot()
+		b.Reset()
+		for k := 0; k < nKey; k++ {
+			key := fmt.Sprintf("KEY%8d", k)
+			b.Delete([]byte(key))
+		}
+		h.stor.SetEmuRandErr(storage.TypeTable, tsOpOpen, tsOpRead, tsOpReadAt)
+		if err := h.db.Write(b, nil); err != nil {
+			t.Logf("WRITE #%d  error: %v", i, err)
+			h.stor.SetEmuRandErr(0, tsOpOpen, tsOpRead, tsOpReadAt)
+			for {
+				if err := h.db.Write(b, nil); err == nil {
+					break
+				} else if errors.IsCorrupted(err) {
+					t.Fatalf("WRITE #%d corrupted: %v", i, err)
+				}
+			}
+		}
+	}
+	h.stor.SetEmuRandErr(0, tsOpOpen, tsOpRead, tsOpReadAt)
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	rnd := rand.New(rand.NewSource(0xecafdaed))
+	wg := &sync.WaitGroup{}
+	for i, snap := range snaps {
+		wg.Add(2)
+
+		go func(i int, snap *Snapshot, sk []int) {
+			defer wg.Done()
+
+			vtail := fmt.Sprintf("VAL%030d", i)
+			for _, k := range sk {
+				key := fmt.Sprintf("KEY%8d", k)
+				xvalue, err := snap.Get([]byte(key), nil)
+				if err != nil {
+					t.Fatalf("READER_GET #%d K%d error: %v", i, k, err)
+				}
+				value := key + vtail
+				if !bytes.Equal([]byte(value), xvalue) {
+					t.Fatalf("READER_GET #%d K%d invalid value: want %q, got %q", i, k, value, xvalue)
+				}
+			}
+		}(i, snap, rnd.Perm(nKey))
+
+		go func(i int, snap *Snapshot) {
+			defer wg.Done()
+
+			vtail := fmt.Sprintf("VAL%030d", i)
+			iter := snap.NewIterator(nil, nil)
+			defer iter.Release()
+			for k := 0; k < nKey; k++ {
+				if !iter.Next() {
+					if err := iter.Error(); err != nil {
+						t.Fatalf("READER_ITER #%d K%d error: %v", i, k, err)
+					} else {
+						t.Fatalf("READER_ITER #%d K%d eoi", i, k)
+					}
+				}
+				key := fmt.Sprintf("KEY%8d", k)
+				xkey := iter.Key()
+				if !bytes.Equal([]byte(key), xkey) {
+					t.Fatalf("READER_ITER #%d K%d invalid key: want %q, got %q", i, k, key, xkey)
+				}
+				value := key + vtail
+				xvalue := iter.Value()
+				if !bytes.Equal([]byte(value), xvalue) {
+					t.Fatalf("READER_ITER #%d K%d invalid value: want %q, got %q", i, k, value, xvalue)
+				}
+			}
+		}(i, snap)
+	}
+
+	wg.Wait()
 }

@@ -402,8 +402,12 @@ func (c *compaction) newIterator() iterator.Iterator {
 	// Options.
 	ro := &opt.ReadOptions{
 		DontFillCache: true,
+		Strict:        opt.StrictOverride,
 	}
-	strict := c.s.o.GetStrict(opt.StrictIterator)
+	strict := c.s.o.GetStrict(opt.StrictCompaction)
+	if strict {
+		ro.Strict |= opt.StrictReader
+	}
 
 	for i, tables := range c.tables {
 		if len(tables) == 0 {
@@ -421,5 +425,5 @@ func (c *compaction) newIterator() iterator.Iterator {
 		}
 	}
 
-	return iterator.NewMergedIterator(its, c.s.icmp, true)
+	return iterator.NewMergedIterator(its, c.s.icmp, strict)
 }

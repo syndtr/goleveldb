@@ -214,7 +214,7 @@ func (v *version) getIterators(slice *util.Range, ro *opt.ReadOptions) (its []it
 		its = append(its, it)
 	}
 
-	strict := v.s.o.GetStrict(opt.StrictIterator) || ro.GetStrict(opt.StrictIterator)
+	strict := opt.GetStrict(v.s.o, ro, opt.StrictReader)
 	for _, tables := range v.tables[1:] {
 		if len(tables) == 0 {
 			continue

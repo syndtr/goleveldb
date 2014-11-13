@@ -65,34 +65,47 @@ const (
 	nCompression
 )
 
-// Strict is the DB strict level.
+// Strict is the DB 'strict level'.
 type Strict uint
 
 const (
 	// If present then a corrupted or invalid chunk or block in manifest
-	// journal will cause an error istead of being dropped.
+	// journal will cause an error instead of being dropped.
+	// This will prevent database with corrupted manifest to be opened.
 	StrictManifest Strict = 1 << iota
-
-	// If present then a corrupted or invalid chunk or block in journal
-	// will cause an error istead of being dropped.
-	StrictJournal
 
 	// If present then journal chunk checksum will be verified.
 	StrictJournalChecksum
 
-	// If present then an invalid key/value pair will cause an error
-	// instead of being skipped.
-	StrictIterator
+	// If present then a corrupted or invalid chunk or block in journal
+	// will cause an error instead of being dropped.
+	// This will prevent database with corrupted journal to be opened.
+	StrictJournal
 
 	// If present then 'sorted table' block checksum will be verified.
+	// This has effect on both 'read operation' and compaction.
 	StrictBlockChecksum
 
+	// If present then a corrupted 'sorted table' will fails compaction.
+	// The database will enter read-only mode.
+	StrictCompaction
+
+	// If present then a corrupted 'sorted table' will halts 'read operation'.
+	StrictReader
+
+	// If present then leveldb.Recover will drop corrupted 'sorted table'.
+	StrictRecovery
+
+	// This only applicable for ReadOptions, if present then this ReadOptions
+	// 'strict level' will override global ones.
+	StrictOverride
+
 	// StrictAll enables all strict flags.
-	StrictAll = StrictManifest | StrictJournal | StrictJournalChecksum | StrictIterator | StrictBlockChecksum
+	StrictAll = StrictManifest | StrictJournalChecksum | StrictJournal | StrictBlockChecksum | StrictCompaction | StrictReader
 
 	// DefaultStrict is the default strict flags. Specify any strict flags
 	// will override default strict flags as whole (i.e. not OR'ed).
-	DefaultStrict = StrictJournalChecksum | StrictIterator | StrictBlockChecksum
+	DefaultStrict = StrictJournalChecksum | StrictBlockChecksum | StrictCompaction | StrictReader
 
 	// NoStrict disables all strict flags. Override default strict flags.
 	NoStrict = ^StrictAll
@@ -143,6 +156,11 @@ type Options struct {
 	//
 	// The default value (DefaultCompression) uses snappy compression.
 	Compression Compression
+
+	// DisableCompactionBackoff allows disable compaction retry backoff.
+	//
+	// The default value is false.
+	DisableCompactionBackoff bool
 
 	// ErrorIfExist defines whether an error should returned if the DB already
 	// exist.
@@ -236,6 +254,13 @@ func (o *Options) GetCompression() Compression {
 	return o.Compression
 }
 
+func (o *Options) GetDisableCompactionBackoff() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableCompactionBackoff
+}
+
 func (o *Options) GetErrorIfExist() bool {
 	if o == nil {
 		return false
@@ -281,8 +306,8 @@ type ReadOptions struct {
 	// The default value is false.
 	DontFillCache bool
 
-	// Strict overrides global DB strict level. Only StrictIterator and
-	// StrictBlockChecksum that does have effects here.
+	// Strict will be OR'ed with global DB 'strict level' unless StrictOverride
+	// is present. Currently only StrictReader that has effect here.
 	Strict Strict
 }
 
@@ -323,4 +348,12 @@ func (wo *WriteOptions) GetSync() bool {
 		return false
 	}
 	return wo.Sync
+}
+
+func GetStrict(o *Options, ro *ReadOptions, strict Strict) bool {
+	if ro.GetStrict(StrictOverride) {
+		return ro.GetStrict(strict)
+	} else {
+		return o.GetStrict(strict) || ro.GetStrict(strict)
+	}
 }

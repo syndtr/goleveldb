@@ -337,7 +337,13 @@ func (t *tOps) open(f *tFile) (ch cache.Handle, err error) {
 		if bc := t.s.o.GetBlockCache(); bc != nil {
 			bcacheNS = bc.GetNamespace(num)
 		}
-		return 1, table.NewReader(r, int64(f.size), storage.NewFileInfo(f.file), bcacheNS, t.bpool, t.s.o)
+		var tr *table.Reader
+		tr, err = table.NewReader(r, int64(f.size), storage.NewFileInfo(f.file), bcacheNS, t.bpool, t.s.o)
+		if err != nil {
+			r.Close()
+			return 0, nil
+		}
+		return 1, tr
 	})
 	if ch == nil && err == nil {
 		err = ErrClosed

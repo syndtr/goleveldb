@@ -7,11 +7,12 @@
 package leveldb
 
 import (
-	"errors"
 	"sync"
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 var (
@@ -109,12 +110,20 @@ func (c *cMem) commit(journal, seq uint64) error {
 }
 
 func (db *DB) compactionError() {
-	var err error
+	var (
+		err     error
+		wlocked bool
+	)
 noerr:
+	// No error.
 	for {
 		select {
 		case err = <-db.compErrSetC:
-			if err != nil {
+			switch {
+			case err == nil:
+			case errors.IsCorrupted(err):
+				goto hasperr
+			default:
 				goto haserr
 			}
 		case _, _ = <-db.closeC:
@@ -122,14 +131,36 @@ noerr:
 		}
 	}
 haserr:
+	// Transient error.
 	for {
 		select {
 		case db.compErrC <- err:
 		case err = <-db.compErrSetC:
-			if err == nil {
+			switch {
+			case err == nil:
 				goto noerr
+			case errors.IsCorrupted(err):
+				goto hasperr
+			default:
 			}
 		case _, _ = <-db.closeC:
+			return
+		}
+	}
+hasperr:
+	// Persistent error.
+	for {
+		select {
+		case db.compErrC <- err:
+		case db.compPerErrC <- err:
+		case db.writeLockC <- struct{}{}:
+			// Hold write lock, so that write won't pass-through.
+			wlocked = true
+		case _, _ = <-db.closeC:
+			if wlocked {
+				// We should release the lock or Close will hang.
+				<-db.writeLockC
+			}
 			return
 		}
 	}
@@ -158,9 +189,13 @@ func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactC
 		backoffMax = 8 * time.Second
 		backoffMul = 2 * time.Second
 	)
-	backoff := backoffMin
-	backoffT := time.NewTimer(backoff)
-	lastCnt := compactionTransactCounter(0)
+	var (
+		backoff  = backoffMin
+		backoffT = time.NewTimer(backoff)
+		lastCnt  = compactionTransactCounter(0)
+
+		disableBackoff = db.s.o.GetDisableCompactionBackoff()
+	)
 	for n := 0; ; n++ {
 		// Check wether the DB is closed.
 		if db.isClosed() {
@@ -173,10 +208,18 @@ func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactC
 		// Execute.
 		cnt := compactionTransactCounter(0)
 		err := exec(&cnt)
+		if err != nil {
+			db.logf("%s error I·%d %q", name, cnt, err)
+		}
 
 		// Set compaction error status.
 		select {
 		case db.compErrSetC <- err:
+		case perr := <-db.compPerErrC:
+			if err != nil {
+				db.logf("%s exiting (persistent error %q)", name, perr)
+				db.compactionExitTransact()
+			}
 		case _, _ = <-db.closeC:
 			db.logf("%s exiting", name)
 			db.compactionExitTransact()
@@ -184,27 +227,32 @@ func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactC
 		if err == nil {
 			return
 		}
-		db.logf("%s error I·%d %q", name, cnt, err)
-
-		// Reset backoff duration if counter is advancing.
-		if cnt > lastCnt {
-			backoff = backoffMin
-			lastCnt = cnt
-		}
-
-		// Backoff.
-		backoffT.Reset(backoff)
-		if backoff < backoffMax {
-			backoff *= backoffMul
-			if backoff > backoffMax {
-				backoff = backoffMax
-			}
-		}
-		select {
-		case <-backoffT.C:
-		case _, _ = <-db.closeC:
-			db.logf("%s exiting", name)
+		if errors.IsCorrupted(err) {
+			db.logf("%s exiting (corruption detected)", name)
 			db.compactionExitTransact()
+		}
+
+		if !disableBackoff {
+			// Reset backoff duration if counter is advancing.
+			if cnt > lastCnt {
+				backoff = backoffMin
+				lastCnt = cnt
+			}
+
+			// Backoff.
+			backoffT.Reset(backoff)
+			if backoff < backoffMax {
+				backoff *= backoffMul
+				if backoff > backoffMax {
+					backoff = backoffMax
+				}
+			}
+			select {
+			case <-backoffT.C:
+			case _, _ = <-db.closeC:
+				db.logf("%s exiting", name)
+				db.compactionExitTransact()
+			}
 		}
 	}
 }
@@ -237,6 +285,9 @@ func (db *DB) memCompaction() {
 	resumeC := make(chan struct{})
 	select {
 	case db.tcompPauseC <- (chan<- struct{})(resumeC):
+	case <-db.compPerErrC:
+		close(resumeC)
+		resumeC = nil
 	case _, _ = <-db.closeC:
 		return
 	}
@@ -273,10 +324,13 @@ func (db *DB) memCompaction() {
 	db.dropFrozenMem()
 
 	// Resume table compaction.
-	select {
-	case <-resumeC:
-	case _, _ = <-db.closeC:
-		return
+	if resumeC != nil {
+		select {
+		case <-resumeC:
+			close(resumeC)
+		case _, _ = <-db.closeC:
+			return
+		}
 	}
 
 	// Trigger table compaction.
@@ -323,6 +377,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		kerrCnt int
 		dropCnt int
 	)
+	strict := db.s.o.GetStrict(opt.StrictCompaction)
 	db.compactionTransact("table@build", func(cnt *compactionTransactCounter) (err error) {
 		hasLastUkey := snapHasLastUkey // The key might has zero length, so this is necessary.
 		lastUkey := append([]byte{}, snapLastUkey...)
@@ -415,6 +470,10 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 					lastSeq = seq
 				}
 			} else {
+				if strict {
+					return kerr
+				}
+
 				// Don't drop corrupted keys
 				hasLastUkey = false
 				lastUkey = lastUkey[:0]

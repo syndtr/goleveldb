@@ -65,6 +65,7 @@ type DB struct {
 	tcompPauseC chan chan<- struct{}
 	mcompCmdC   chan cCmd
 	compErrC    chan error
+	compPerErrC chan error
 	compErrSetC chan error
 	compStats   [kNumLevels]cStats
 
@@ -98,6 +99,7 @@ func openDB(s *session) (*DB, error) {
 		tcompPauseC: make(chan chan<- struct{}),
 		mcompCmdC:   make(chan cCmd),
 		compErrC:    make(chan error),
+		compPerErrC: make(chan error),
 		compErrSetC: make(chan error),
 		// Close
 		closeC: make(chan struct{}),
@@ -251,6 +253,10 @@ func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
 }
 
 func recoverTable(s *session, o *opt.Options) error {
+	o = dupOptions(o)
+	// Mask StrictReader, lets StrictRecovery doing its job.
+	o.Strict &= ^opt.StrictReader
+
 	// Get all tables and sort it by file number.
 	tableFiles_, err := s.getFiles(storage.TypeTable)
 	if err != nil {
@@ -259,10 +265,16 @@ func recoverTable(s *session, o *opt.Options) error {
 	tableFiles := files(tableFiles_)
 	tableFiles.sort()
 
-	var mSeq uint64
-	var good, corrupted int
-	rec := new(sessionRecord)
-	bpool := util.NewBufferPool(o.GetBlockSize() + 5)
+	var (
+		mSeq                                                              uint64
+		recoveredKey, goodKey, corruptedKey, corruptedBlock, droppedTable int
+
+		// We will drop corrupted table.
+		strict = o.GetStrict(opt.StrictRecovery)
+
+		rec   = new(sessionRecord)
+		bpool = util.NewBufferPool(o.GetBlockSize() + 5)
+	)
 	buildTable := func(iter iterator.Iterator) (tmp storage.File, size int64, err error) {
 		tmp = s.newTemp()
 		writer, err := tmp.Create()
@@ -317,14 +329,21 @@ func recoverTable(s *session, o *opt.Options) error {
 			return err
 		}
 
-		var tSeq uint64
-		var tgood, tcorrupted, blockerr int
-		var imin, imax []byte
-		tr := table.NewReader(reader, size, storage.NewFileInfo(file), nil, bpool, o)
+		var (
+			tSeq                                     uint64
+			tgoodKey, tcorruptedKey, tcorruptedBlock int
+			imin, imax                               []byte
+		)
+		tr, err := table.NewReader(reader, size, storage.NewFileInfo(file), nil, bpool, o)
+		if err != nil {
+			return err
+		}
 		iter := tr.NewIterator(nil, nil)
 		iter.(iterator.ErrorCallbackSetter).SetErrorCallback(func(err error) {
-			s.logf("table@recovery found error @%d %q", file.Num(), err)
-			blockerr++
+			if errors.IsCorrupted(err) {
+				s.logf("table@recovery block corruption @%d %q", file.Num(), err)
+				tcorruptedBlock++
+			}
 		})
 
 		// Scan the table.
@@ -332,10 +351,10 @@ func recoverTable(s *session, o *opt.Options) error {
 			key := iter.Key()
 			_, seq, _, kerr := parseIkey(key)
 			if kerr != nil {
-				tcorrupted++
+				tcorruptedKey++
 				continue
 			}
-			tgood++
+			tgoodKey++
 			if seq > tSeq {
 				tSeq = seq
 			}
@@ -350,8 +369,18 @@ func recoverTable(s *session, o *opt.Options) error {
 		}
 		iter.Release()
 
-		if tgood > 0 {
-			if tcorrupted > 0 || blockerr > 0 {
+		goodKey += tgoodKey
+		corruptedKey += tcorruptedKey
+		corruptedBlock += tcorruptedBlock
+
+		if strict && (tcorruptedKey > 0 || tcorruptedBlock > 0) {
+			droppedTable++
+			s.logf("table@recovery dropped @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", file.Num(), tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
+			return nil
+		}
+
+		if tgoodKey > 0 {
+			if tcorruptedKey > 0 || tcorruptedBlock > 0 {
 				// Rebuild the table.
 				s.logf("table@recovery rebuilding @%d", file.Num())
 				iter := tr.NewIterator(nil, nil)
@@ -369,15 +398,14 @@ func recoverTable(s *session, o *opt.Options) error {
 			if tSeq > mSeq {
 				mSeq = tSeq
 			}
+			recoveredKey += tgoodKey
 			// Add table to level 0.
 			rec.addTable(0, file.Num(), uint64(size), imin, imax)
-			s.logf("table@recovery recovered @%d N·%d C·%d B·%d S·%d Q·%d", file.Num(), tgood, tcorrupted, blockerr, size, tSeq)
+			s.logf("table@recovery recovered @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", file.Num(), tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
 		} else {
-			s.logf("table@recovery unrecoverable @%d C·%d B·%d S·%d", file.Num(), tcorrupted, blockerr, size)
+			droppedTable++
+			s.logf("table@recovery unrecoverable @%d Ck·%d Cb·%d S·%d", file.Num(), tcorruptedKey, tcorruptedBlock, size)
 		}
-
-		good += tgood
-		corrupted += tcorrupted
 
 		return nil
 	}
@@ -395,7 +423,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			}
 		}
 
-		s.logf("table@recovery recovered F·%d N·%d C·%d Q·%d", len(tableFiles), good, corrupted, mSeq)
+		s.logf("table@recovery recovered F·%d N·%d Gk·%d Ck·%d Q·%d", len(tableFiles), recoveredKey, goodKey, corruptedKey, mSeq)
 	}
 
 	// Set sequence number.
