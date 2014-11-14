@@ -11,6 +11,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
+	"math"
 )
 
 const (
@@ -20,12 +21,24 @@ const (
 )
 
 const (
-	DefaultBlockCacheSize       = 8 * MiB
-	DefaultBlockRestartInterval = 16
-	DefaultBlockSize            = 4 * KiB
-	DefaultCompressionType      = SnappyCompression
-	DefaultCachedOpenFiles      = 500
-	DefaultWriteBuffer          = 4 * MiB
+	DefaultBlockCacheSize                = 8 * MiB
+	DefaultBlockRestartInterval          = 16
+	DefaultBlockSize                     = 4 * KiB
+	DefaultCompactionExpandLimitFactor   = 1
+	DefaultCompactionGPOverlapsFactor    = 10
+	DefaultCompactionL0Trigger           = 4
+	DefaultCompactionSourceLimitFactor   = 1
+	DefaultCompactionTableSize           = 2 * MiB
+	DefaultCompactionTableSizeMultiplier = 1.0
+	DefaultCompactionTotalSize           = 10 * MiB
+	DefaultCompactionTotalSizeMultiplier = 10.0
+	DefaultCompressionType               = SnappyCompression
+	DefaultCachedOpenFiles               = 500
+	DefaultMaxMemCompationLevel          = 2
+	DefaultNumLevel                      = 7
+	DefaultWriteBuffer                   = 4 * MiB
+	DefaultWriteL0PauseTrigger           = 12
+	DefaultWriteL0SlowdownTrigger        = 8
 )
 
 type noCache struct{}
@@ -145,6 +158,73 @@ type Options struct {
 	// The default value is 500.
 	CachedOpenFiles int
 
+	// CompactionExpandLimitFactor limits compaction size after expanded.
+	// This will be multiplied by table size limit at compaction target level.
+	//
+	// The default value is 25.
+	CompactionExpandLimitFactor int
+
+	// CompactionGPOverlapsFactor limits overlaps in grandparent (Level + 2) that a
+	// single 'sorted table' generates.
+	// This will be multiplied by table size limit at grandparent level.
+	//
+	// The default value is 10.
+	CompactionGPOverlapsFactor int
+
+	// CompactionL0Trigger defines number of 'sorted table' at level-0 that will
+	// trigger compaction.
+	//
+	// The default value is 4.
+	CompactionL0Trigger int
+
+	// CompactionSourceLimitFactor limits compaction source size. This doesn't apply to
+	// level-0.
+	// This will be multiplied by table size limit at compaction target level.
+	//
+	// The default value is 1.
+	CompactionSourceLimitFactor int
+
+	// CompactionTableSize limits size of 'sorted table' that compaction generates.
+	// The limits for each level will be calculated as:
+	//   CompactionTableSize * (CompactionTableSizeMultiplier ^ Level)
+	// The multiplier for each level can also fine-tuned using CompactionTableSizeMultiplierPerLevel.
+	//
+	// The default value is 2MiB.
+	CompactionTableSize int
+
+	// CompactionTableSizeMultiplier defines multiplier for CompactionTableSize.
+	//
+	// The default value is 1.
+	CompactionTableSizeMultiplier float64
+
+	// CompactionTableSizeMultiplierPerLevel defines per-level multiplier for
+	// CompactionTableSize.
+	// Use zero to skip a level.
+	//
+	// The default value is nil.
+	CompactionTableSizeMultiplierPerLevel []float64
+
+	// CompactionTotalSize limits total size of 'sorted table' for each level.
+	// The limits for each level will be calculated as:
+	//   CompactionTotalSize * (CompactionTotalSizeMultiplier ^ Level)
+	// The multiplier for each level can also fine-tuned using
+	// CompactionTotalSizeMultiplierPerLevel.
+	//
+	// The default value is 10MiB.
+	CompactionTotalSize int
+
+	// CompactionTotalSizeMultiplier defines multiplier for CompactionTotalSize.
+	//
+	// The default value is 10.
+	CompactionTotalSizeMultiplier float64
+
+	// CompactionTotalSizeMultiplierPerLevel defines per-level multiplier for
+	// CompactionTotalSize.
+	// Use zero to skip a level.
+	//
+	// The default value is nil.
+	CompactionTotalSizeMultiplierPerLevel []float64
+
 	// Comparer defines a total ordering over the space of []byte keys: a 'less
 	// than' relationship. The same comparison algorithm must be used for reads
 	// and writes over the lifetime of the DB.
@@ -190,6 +270,19 @@ type Options struct {
 	// The default value is nil.
 	Filter filter.Filter
 
+	// MaxMemCompationLevel defines maximum level a newly compacted 'memdb'
+	// will be pushed into if doesn't creates overlap. This should less than
+	// NumLevel. Use -1 for level-0.
+	//
+	// The default is 2.
+	MaxMemCompationLevel int
+
+	// NumLevel defines number of database level. The level shouldn't changed
+	// between opens, or the database will panic.
+	//
+	// The default is 7.
+	NumLevel int
+
 	// Strict defines the DB strict level.
 	Strict Strict
 
@@ -201,6 +294,18 @@ type Options struct {
 	//
 	// The default value is 4MiB.
 	WriteBuffer int
+
+	// WriteL0StopTrigger defines number of 'sorted table' at level-0 that will
+	// pause write.
+	//
+	// The default value is 12.
+	WriteL0PauseTrigger int
+
+	// WriteL0SlowdownTrigger defines number of 'sorted table' at level-0 that
+	// will trigger write slowdown.
+	//
+	// The default value is 8.
+	WriteL0SlowdownTrigger int
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -238,6 +343,79 @@ func (o *Options) GetCachedOpenFiles() int {
 		return 0
 	}
 	return o.CachedOpenFiles
+}
+
+func (o *Options) GetCompactionExpandLimit(level int) int {
+	factor := DefaultCompactionExpandLimitFactor
+	if o != nil && o.CompactionExpandLimitFactor > 0 {
+		factor = o.CompactionExpandLimitFactor
+	}
+	return o.GetCompactionTableSize(level+1) * factor
+}
+
+func (o *Options) GetCompactionGPOverlaps(level int) int {
+	factor := DefaultCompactionGPOverlapsFactor
+	if o != nil && o.CompactionGPOverlapsFactor > 0 {
+		factor = o.CompactionGPOverlapsFactor
+	}
+	return o.GetCompactionTableSize(level+2) * factor
+}
+
+func (o *Options) GetCompactionL0Trigger() int {
+	if o == nil || o.CompactionL0Trigger == 0 {
+		return DefaultCompactionL0Trigger
+	}
+	return o.CompactionL0Trigger
+}
+
+func (o *Options) GetCompactionSourceLimit(level int) int {
+	factor := DefaultCompactionSourceLimitFactor
+	if o != nil && o.CompactionSourceLimitFactor > 0 {
+		factor = o.CompactionSourceLimitFactor
+	}
+	return o.GetCompactionTableSize(level+1) * factor
+}
+
+func (o *Options) GetCompactionTableSize(level int) int {
+	var (
+		base = DefaultCompactionTableSize
+		mult float64
+	)
+	if o != nil {
+		if o.CompactionTableSize > 0 {
+			base = o.CompactionTableSize
+		}
+		if len(o.CompactionTableSizeMultiplierPerLevel) > level && o.CompactionTableSizeMultiplierPerLevel[level] > 0 {
+			mult = o.CompactionTableSizeMultiplierPerLevel[level]
+		} else if o.CompactionTableSizeMultiplier > 0 {
+			mult = math.Pow(o.CompactionTableSizeMultiplier, float64(level))
+		}
+	}
+	if mult == 0 {
+		mult = math.Pow(DefaultCompactionTableSizeMultiplier, float64(level))
+	}
+	return int(float64(base) * mult)
+}
+
+func (o *Options) GetCompactionTotalSize(level int) int64 {
+	var (
+		base = DefaultCompactionTotalSize
+		mult float64
+	)
+	if o != nil {
+		if o.CompactionTotalSize > 0 {
+			base = o.CompactionTotalSize
+		}
+		if len(o.CompactionTotalSizeMultiplierPerLevel) > level && o.CompactionTotalSizeMultiplierPerLevel[level] > 0 {
+			mult = o.CompactionTotalSizeMultiplierPerLevel[level]
+		} else if o.CompactionTotalSizeMultiplier > 0 {
+			mult = math.Pow(o.CompactionTotalSizeMultiplier, float64(level))
+		}
+	}
+	if mult == 0 {
+		mult = math.Pow(DefaultCompactionTotalSizeMultiplier, float64(level))
+	}
+	return int64(float64(base) * mult)
 }
 
 func (o *Options) GetComparer() comparer.Comparer {
@@ -282,6 +460,28 @@ func (o *Options) GetFilter() filter.Filter {
 	return o.Filter
 }
 
+func (o *Options) GetMaxMemCompationLevel() int {
+	level := DefaultMaxMemCompationLevel
+	if o != nil {
+		if o.MaxMemCompationLevel > 0 {
+			level = o.MaxMemCompationLevel
+		} else if o.MaxMemCompationLevel == -1 {
+			level = 0
+		}
+	}
+	if level >= o.GetNumLevel() {
+		return o.GetNumLevel() - 1
+	}
+	return level
+}
+
+func (o *Options) GetNumLevel() int {
+	if o == nil || o.NumLevel <= 0 {
+		return DefaultNumLevel
+	}
+	return o.NumLevel
+}
+
 func (o *Options) GetStrict(strict Strict) bool {
 	if o == nil || o.Strict == 0 {
 		return DefaultStrict&strict != 0
@@ -294,6 +494,20 @@ func (o *Options) GetWriteBuffer() int {
 		return DefaultWriteBuffer
 	}
 	return o.WriteBuffer
+}
+
+func (o *Options) GetWriteL0PauseTrigger() int {
+	if o == nil || o.WriteL0PauseTrigger == 0 {
+		return DefaultWriteL0PauseTrigger
+	}
+	return o.WriteL0PauseTrigger
+}
+
+func (o *Options) GetWriteL0SlowdownTrigger() int {
+	if o == nil || o.WriteL0SlowdownTrigger == 0 {
+		return DefaultWriteL0SlowdownTrigger
+	}
+	return o.WriteL0SlowdownTrigger
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The

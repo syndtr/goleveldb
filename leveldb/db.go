@@ -69,7 +69,7 @@ type DB struct {
 	compErrC    chan error
 	compPerErrC chan error
 	compErrSetC chan error
-	compStats   [kNumLevels]cStats
+	compStats   []cStats
 
 	// Close.
 	closeW sync.WaitGroup
@@ -103,6 +103,7 @@ func openDB(s *session) (*DB, error) {
 		compErrC:    make(chan error),
 		compPerErrC: make(chan error),
 		compErrSetC: make(chan error),
+		compStats:   make([]cStats, s.o.GetNumLevel()),
 		// Close
 		closeC: make(chan struct{}),
 	}
@@ -274,7 +275,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		// We will drop corrupted table.
 		strict = o.GetStrict(opt.StrictRecovery)
 
-		rec   = new(sessionRecord)
+		rec   = &sessionRecord{numLevel: o.GetNumLevel()}
 		bpool = util.NewBufferPool(o.GetBlockSize() + 5)
 	)
 	buildTable := func(iter iterator.Iterator) (tmp storage.File, size int64, err error) {
@@ -731,7 +732,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		var level uint
 		var rest string
 		n, _ := fmt.Sscanf(p[len(numFilesPrefix):], "%d%s", &level, &rest)
-		if n != 1 || level >= kNumLevels {
+		if n != 1 || int(level) >= db.s.o.GetNumLevel() {
 			err = errors.New("leveldb: GetProperty: invalid property: " + name)
 		} else {
 			value = fmt.Sprint(v.tLen(int(level)))

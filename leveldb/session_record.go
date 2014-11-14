@@ -52,6 +52,8 @@ type dtRecord struct {
 }
 
 type sessionRecord struct {
+	numLevel int
+
 	hasRec         int
 	comparer       string
 	journalNum     uint64
@@ -236,7 +238,7 @@ func (p *sessionRecord) readLevel(field string, r io.ByteReader) int {
 	if p.err != nil {
 		return 0
 	}
-	if x >= kNumLevels {
+	if x >= uint64(p.numLevel) {
 		p.err = errors.NewErrCorrupted(nil, &ErrManifestCorrupted{field, "invalid level number"})
 		return 0
 	}

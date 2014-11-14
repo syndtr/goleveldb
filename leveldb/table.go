@@ -289,7 +289,7 @@ func (t *tOps) create() (*tWriter, error) {
 		t:    t,
 		file: file,
 		w:    fw,
-		tw:   table.NewWriter(fw, t.s.o),
+		tw:   table.NewWriter(fw, t.s.o.Options),
 	}, nil
 }
 
@@ -338,7 +338,7 @@ func (t *tOps) open(f *tFile) (ch cache.Handle, err error) {
 			bcacheNS = bc.GetNamespace(num)
 		}
 		var tr *table.Reader
-		tr, err = table.NewReader(r, int64(f.size), storage.NewFileInfo(f.file), bcacheNS, t.bpool, t.s.o)
+		tr, err = table.NewReader(r, int64(f.size), storage.NewFileInfo(f.file), bcacheNS, t.bpool, t.s.o.Options)
 		if err != nil {
 			r.Close()
 			return 0, nil

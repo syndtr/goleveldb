@@ -48,7 +48,7 @@ func (db *DB) newRawIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 		i = append(i, fmi)
 	}
 	i = append(i, ti...)
-	strict := opt.GetStrict(db.s.o, ro, opt.StrictReader)
+	strict := opt.GetStrict(db.s.o.Options, ro, opt.StrictReader)
 	mi := iterator.NewMergedIterator(i, db.s.icmp, strict)
 	mi.SetReleaser(&versionReleaser{v: v})
 	return mi
@@ -71,7 +71,7 @@ func (db *DB) newIterator(seq uint64, slice *util.Range, ro *opt.ReadOptions) *d
 		icmp:   db.s.icmp,
 		iter:   rawIter,
 		seq:    seq,
-		strict: opt.GetStrict(db.s.o, ro, opt.StrictReader),
+		strict: opt.GetStrict(db.s.o.Options, ro, opt.StrictReader),
 		key:    make([]byte, 0),
 		value:  make([]byte, 0),
 	}

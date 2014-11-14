@@ -9,6 +9,8 @@ package leveldb
 import (
 	"bytes"
 	"testing"
+
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 func decodeEncode(v *sessionRecord) (res bool, err error) {
@@ -17,7 +19,7 @@ func decodeEncode(v *sessionRecord) (res bool, err error) {
 	if err != nil {
 		return
 	}
-	v2 := new(sessionRecord)
+	v2 := &sessionRecord{numLevel: opt.DefaultNumLevel}
 	err = v.decode(b)
 	if err != nil {
 		return
@@ -32,7 +34,7 @@ func decodeEncode(v *sessionRecord) (res bool, err error) {
 
 func TestSessionRecord_EncodeDecode(t *testing.T) {
 	big := uint64(1) << 50
-	v := new(sessionRecord)
+	v := &sessionRecord{numLevel: opt.DefaultNumLevel}
 	i := uint64(0)
 	test := func() {
 		res, err := decodeEncode(v)

@@ -45,7 +45,7 @@ type session struct {
 
 	stor     storage.Storage
 	storLock util.Releaser
-	o        *opt.Options
+	o        *cachedOptions
 	icmp     *iComparer
 	tops     *tOps
 
@@ -53,8 +53,8 @@ type session struct {
 	manifestWriter storage.Writer
 	manifestFile   storage.File
 
-	stCompPtrs [kNumLevels]iKey // compaction pointers; need external synchronization
-	stVersion  *version         // current version
+	stCompPtrs []iKey   // compaction pointers; need external synchronization
+	stVersion  *version // current version
 	vmu        sync.Mutex
 }
 
@@ -68,12 +68,13 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 		return
 	}
 	s = &session{
-		stor:     stor,
-		storLock: storLock,
+		stor:       stor,
+		storLock:   storLock,
+		stCompPtrs: make([]iKey, o.GetNumLevel()),
 	}
 	s.setOptions(o)
 	s.tops = newTableOps(s, s.o.GetCachedOpenFiles())
-	s.setVersion(&version{s: s})
+	s.setVersion(newVersion(s))
 	s.log("log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed")
 	return
 }
@@ -133,7 +134,7 @@ func (s *session) recover() (err error) {
 	jr := journal.NewReader(reader, dropper{s, m}, strict, true)
 
 	staging := s.stVersion.newStaging()
-	rec := &sessionRecord{}
+	rec := &sessionRecord{numLevel: s.o.GetNumLevel()}
 	for {
 		var r io.Reader
 		r, err = jr.Next()
@@ -244,7 +245,13 @@ func (s *session) pickCompaction() *compaction {
 		t0 = v.tables[0].getOverlaps(t0[:0], s.icmp, imin.ukey(), imax.ukey(), true)
 	}
 
-	c := &compaction{s: s, v: v, level: level}
+	c := &compaction{
+		s:             s,
+		v:             v,
+		level:         level,
+		maxGPOverlaps: uint64(s.o.GetCompactionGPOverlaps(level)),
+		tPtrs:         make([]int, v.s.o.GetNumLevel()),
+	}
 	c.tables[0] = t0
 	c.expand()
 	return c
@@ -265,7 +272,7 @@ func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
 	// and we must not pick one file and drop another older file if the
 	// two files overlap.
 	if level > 0 {
-		limit := uint64(kMaxTableSize)
+		limit := uint64(v.s.o.GetCompactionSourceLimit(level))
 		total := uint64(0)
 		for i, t := range t0 {
 			total += t.size
@@ -277,7 +284,13 @@ func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
 		}
 	}
 
-	c := &compaction{s: s, v: v, level: level}
+	c := &compaction{
+		s:             s,
+		v:             v,
+		level:         level,
+		maxGPOverlaps: uint64(s.o.GetCompactionGPOverlaps(level)),
+		tPtrs:         make([]int, v.s.o.GetNumLevel()),
+	}
 	c.tables[0] = t0
 	c.expand()
 	return c
@@ -288,16 +301,17 @@ type compaction struct {
 	s *session
 	v *version
 
-	level  int
-	tables [2]tFiles
+	level         int
+	tables        [2]tFiles
+	maxGPOverlaps uint64
 
-	gp              tFiles
-	gpidx           int
-	seenKey         bool
-	overlappedBytes uint64
-	imin, imax      iKey
-	tPtrs           [kNumLevels]int
-	released        bool
+	gp                tFiles
+	gpidx             int
+	seenKey           bool
+	gpOverlappedBytes uint64
+	imin, imax        iKey
+	tPtrs             []int
+	released          bool
 }
 
 func (c *compaction) release() {
@@ -309,8 +323,8 @@ func (c *compaction) release() {
 
 // Expand compacted tables; need external synchronization.
 func (c *compaction) expand() {
-	level := c.level
-	vt0, vt1 := c.v.tables[level], c.v.tables[level+1]
+	limit := uint64(c.s.o.GetCompactionExpandLimit(c.level))
+	vt0, vt1 := c.v.tables[c.level], c.v.tables[c.level+1]
 
 	t0, t1 := c.tables[0], c.tables[1]
 	imin, imax := t0.getRange(c.s.icmp)
@@ -321,13 +335,13 @@ func (c *compaction) expand() {
 	// See if we can grow the number of inputs in "level" without
 	// changing the number of "level+1" files we pick up.
 	if len(t1) > 0 {
-		exp0 := vt0.getOverlaps(nil, c.s.icmp, amin.ukey(), amax.ukey(), level == 0)
-		if len(exp0) > len(t0) && t1.size()+exp0.size() < kExpCompactionMaxBytes {
+		exp0 := vt0.getOverlaps(nil, c.s.icmp, amin.ukey(), amax.ukey(), c.level == 0)
+		if len(exp0) > len(t0) && t1.size()+exp0.size() < limit {
 			xmin, xmax := exp0.getRange(c.s.icmp)
 			exp1 := vt1.getOverlaps(nil, c.s.icmp, xmin.ukey(), xmax.ukey(), false)
 			if len(exp1) == len(t1) {
 				c.s.logf("table@compaction expanding L%d+L%d (F·%d S·%s)+(F·%d S·%s) -> (F·%d S·%s)+(F·%d S·%s)",
-					level, level+1, len(t0), shortenb(int(t0.size())), len(t1), shortenb(int(t1.size())),
+					c.level, c.level+1, len(t0), shortenb(int(t0.size())), len(t1), shortenb(int(t1.size())),
 					len(exp0), shortenb(int(exp0.size())), len(exp1), shortenb(int(exp1.size())))
 				imin, imax = xmin, xmax
 				t0, t1 = exp0, exp1
@@ -338,8 +352,8 @@ func (c *compaction) expand() {
 
 	// Compute the set of grandparent files that overlap this compaction
 	// (parent == level+1; grandparent == level+2)
-	if level+2 < kNumLevels {
-		c.gp = c.v.tables[level+2].getOverlaps(c.gp, c.s.icmp, amin.ukey(), amax.ukey(), false)
+	if c.level+2 < c.s.o.GetNumLevel() {
+		c.gp = c.v.tables[c.level+2].getOverlaps(c.gp, c.s.icmp, amin.ukey(), amax.ukey(), false)
 	}
 
 	c.tables[0], c.tables[1] = t0, t1
@@ -348,7 +362,7 @@ func (c *compaction) expand() {
 
 // Check whether compaction is trivial.
 func (c *compaction) trivial() bool {
-	return len(c.tables[0]) == 1 && len(c.tables[1]) == 0 && c.gp.size() <= kMaxGrandParentOverlapBytes
+	return len(c.tables[0]) == 1 && len(c.tables[1]) == 0 && c.gp.size() <= c.maxGPOverlaps
 }
 
 func (c *compaction) baseLevelForKey(ukey []byte) bool {
@@ -376,14 +390,14 @@ func (c *compaction) shouldStopBefore(ikey iKey) bool {
 			break
 		}
 		if c.seenKey {
-			c.overlappedBytes += gp.size
+			c.gpOverlappedBytes += gp.size
 		}
 	}
 	c.seenKey = true
 
-	if c.overlappedBytes > kMaxGrandParentOverlapBytes {
+	if c.gpOverlappedBytes > c.maxGPOverlaps {
 		// Too much overlap for current output; start new output.
-		c.overlappedBytes = 0
+		c.gpOverlappedBytes = 0
 		return true
 	}
 	return false

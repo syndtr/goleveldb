@@ -77,12 +77,12 @@ func (db *DB) flush(n int) (mem *memDB, nn int, err error) {
 		}()
 		nn = mem.mdb.Free()
 		switch {
-		case v.tLen(0) >= kL0_SlowdownWritesTrigger && !delayed:
+		case v.tLen(0) >= db.s.o.GetWriteL0SlowdownTrigger() && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
 		case nn >= n:
 			return false
-		case v.tLen(0) >= kL0_StopWritesTrigger:
+		case v.tLen(0) >= db.s.o.GetWriteL0PauseTrigger():
 			delayed = true
 			err = db.compSendIdle(db.tcompCmdC)
 			if err != nil {

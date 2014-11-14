@@ -963,7 +963,7 @@ func TestDb_RepeatedWritesToSameKey(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
 	defer h.close()
 
-	maxTables := kNumLevels + kL0_StopWritesTrigger
+	maxTables := h.o.GetNumLevel() + h.o.GetWriteL0PauseTrigger()
 
 	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
@@ -981,7 +981,7 @@ func TestDb_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
 
 	h.reopenDB()
 
-	maxTables := kNumLevels + kL0_StopWritesTrigger
+	maxTables := h.o.GetNumLevel() + h.o.GetWriteL0PauseTrigger()
 
 	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
@@ -997,7 +997,7 @@ func TestDb_SparseMerge(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
 	defer h.close()
 
-	h.putMulti(kNumLevels, "A", "Z")
+	h.putMulti(h.o.GetNumLevel(), "A", "Z")
 
 	// Suppose there is:
 	//    small amount of data with prefix A
@@ -1192,7 +1192,7 @@ func TestDb_HiddenValuesAreRemoved(t *testing.T) {
 
 		h.put("foo", "v1")
 		h.compactMem()
-		m := kMaxMemCompactLevel
+		m := h.o.GetMaxMemCompationLevel()
 		v := s.version()
 		num := v.tLen(m)
 		v.release()
@@ -1236,7 +1236,7 @@ func TestDb_DeletionMarkers2(t *testing.T) {
 
 	h.put("foo", "v1")
 	h.compactMem()
-	m := kMaxMemCompactLevel
+	m := h.o.GetMaxMemCompationLevel()
 	v := s.version()
 	num := v.tLen(m)
 	v.release()
@@ -1307,7 +1307,7 @@ func TestDb_CompactionTableOpenError(t *testing.T) {
 
 func TestDb_OverlapInLevel0(t *testing.T) {
 	trun(t, func(h *dbHarness) {
-		if kMaxMemCompactLevel != 2 {
+		if h.o.GetMaxMemCompationLevel() != 2 {
 			t.Fatal("fix test to reflect the config")
 		}
 
@@ -1427,7 +1427,7 @@ func TestDb_ManifestWriteError(t *testing.T) {
 			h.compactMem()
 			h.getVal("foo", "bar")
 			v := h.db.s.version()
-			if n := v.tLen(kMaxMemCompactLevel); n != 1 {
+			if n := v.tLen(h.o.GetMaxMemCompationLevel()); n != 1 {
 				t.Errorf("invalid total tables, want=1 got=%d", n)
 			}
 			v.release()
@@ -1439,7 +1439,7 @@ func TestDb_ManifestWriteError(t *testing.T) {
 			}
 
 			// Merging compaction (will fail)
-			h.compactRangeAtErr(kMaxMemCompactLevel, "", "", true)
+			h.compactRangeAtErr(h.o.GetMaxMemCompationLevel(), "", "", true)
 
 			h.db.Close()
 			h.stor.SetEmuErr(0, tsOpWrite)
@@ -1593,7 +1593,7 @@ func TestDb_ManualCompaction(t *testing.T) {
 	h := newDbHarness(t)
 	defer h.close()
 
-	if kMaxMemCompactLevel != 2 {
+	if h.o.GetMaxMemCompationLevel() != 2 {
 		t.Fatal("fix test to reflect the config")
 	}
 
@@ -1877,7 +1877,7 @@ func TestDb_DeletionMarkersOnMemdb(t *testing.T) {
 }
 
 func TestDb_LeveldbIssue178(t *testing.T) {
-	nKeys := (kMaxTableSize / 30) * 5
+	nKeys := (opt.DefaultCompactionTableSize / 30) * 5
 	key1 := func(i int) string {
 		return fmt.Sprintf("my_key_%d", i)
 	}

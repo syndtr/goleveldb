@@ -69,7 +69,7 @@ type cMem struct {
 }
 
 func newCMem(s *session) *cMem {
-	return &cMem{s: s, rec: new(sessionRecord)}
+	return &cMem{s: s, rec: &sessionRecord{numLevel: s.o.GetNumLevel()}}
 }
 
 func (c *cMem) flush(mem *memdb.DB, level int) error {
@@ -98,7 +98,7 @@ func (c *cMem) flush(mem *memdb.DB, level int) error {
 }
 
 func (c *cMem) reset() {
-	c.rec = new(sessionRecord)
+	c.rec = &sessionRecord{numLevel: c.s.o.GetNumLevel()}
 }
 
 func (c *cMem) commit(journal, seq uint64) error {
@@ -340,7 +340,7 @@ func (db *DB) memCompaction() {
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	defer c.release()
 
-	rec := new(sessionRecord)
+	rec := &sessionRecord{numLevel: db.s.o.GetNumLevel()}
 	rec.addCompPtr(c.level, c.imax)
 
 	if !noTrivial && c.trivial() {
@@ -376,8 +376,10 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 
 		kerrCnt int
 		dropCnt int
+
+		strict    = db.s.o.GetStrict(opt.StrictCompaction)
+		tableSize = db.s.o.GetCompactionTableSize(c.level + 1)
 	)
-	strict := db.s.o.GetStrict(opt.StrictCompaction)
 	db.compactionTransact("table@build", func(cnt *compactionTransactCounter) (err error) {
 		hasLastUkey := snapHasLastUkey // The key might has zero length, so this is necessary.
 		lastUkey := append([]byte{}, snapLastUkey...)
@@ -506,7 +508,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 			}
 
 			// Finish table if it is big enough
-			if tw.tw.BytesLen() >= kMaxTableSize {
+			if tw.tw.BytesLen() >= tableSize {
 				err = finish()
 				if err != nil {
 					return
