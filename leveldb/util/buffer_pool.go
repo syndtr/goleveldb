@@ -20,16 +20,12 @@ type buffer struct {
 
 // BufferPool is a 'buffer pool'.
 type BufferPool struct {
-	pool       [6]chan []byte
-	size       [5]uint32
-	sizeMiss   [5]uint32
-	sizeHalf   [5]uint32
-	baseline   [4]int
-	baselinex0 int
-	baselinex1 int
-	baseline0  int
-	baseline1  int
-	baseline2  int
+	pool      [6]chan []byte
+	size      [5]uint32
+	sizeMiss  [5]uint32
+	sizeHalf  [5]uint32
+	baseline  [4]int
+	baseline0 int
 
 	mu     sync.RWMutex
 	closed bool
