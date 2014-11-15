@@ -24,7 +24,7 @@ const (
 	DefaultBlockCacheSize                = 8 * MiB
 	DefaultBlockRestartInterval          = 16
 	DefaultBlockSize                     = 4 * KiB
-	DefaultCompactionExpandLimitFactor   = 1
+	DefaultCompactionExpandLimitFactor   = 25
 	DefaultCompactionGPOverlapsFactor    = 10
 	DefaultCompactionL0Trigger           = 4
 	DefaultCompactionSourceLimitFactor   = 1

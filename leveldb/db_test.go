@@ -2259,11 +2259,11 @@ func TestDb_TransientError(t *testing.T) {
 				key := fmt.Sprintf("KEY%8d", k)
 				xvalue, err := snap.Get([]byte(key), nil)
 				if err != nil {
-					t.Fatalf("READER_GET #%d K%d error: %v", i, k, err)
+					t.Fatalf("READER_GET #%d SEQ=%d K%d error: %v", i, snap.elem.seq, k, err)
 				}
 				value := key + vtail
 				if !bytes.Equal([]byte(value), xvalue) {
-					t.Fatalf("READER_GET #%d K%d invalid value: want %q, got %q", i, k, value, xvalue)
+					t.Fatalf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap.elem.seq, k, value, xvalue)
 				}
 			}
 		}(i, snap, rnd.Perm(nKey))
