@@ -2145,7 +2145,7 @@ func TestDb_GoleveldbIssue72and83(t *testing.T) {
 				}
 			}
 			if err := iter.Error(); err != nil {
-				t.Fatalf("READER0 #%d.%d W#%d snap.Iterator: %v", i, k, err)
+				t.Fatalf("READER0 #%d.%d W#%d snap.Iterator: %v", i, k, writei, err)
 			}
 			iter.Release()
 			snap.Release()
@@ -2496,7 +2496,7 @@ func TestDb_TableCompactionBuilder(t *testing.T) {
 	for level, want := range []bool{false, true, false, true, false} {
 		got := len(v.tables[level]) > 0
 		if want != got {
-			t.Fatalf("invalid level-%d tables len: want %v, got %v", want, got)
+			t.Fatalf("invalid level-%d tables len: want %v, got %v", level, want, got)
 		}
 	}
 	for i, f := range v.tables[1][:len(v.tables[1])-1] {
