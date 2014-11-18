@@ -172,12 +172,17 @@ func (cnt *compactionTransactCounter) incr() {
 	*cnt++
 }
 
-func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactCounter) error, rollback func() error) {
+type compactionTransactInterface interface {
+	run(cnt *compactionTransactCounter) error
+	revert() error
+}
+
+func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 	defer func() {
 		if x := recover(); x != nil {
-			if x == errCompactionTransactExiting && rollback != nil {
-				if err := rollback(); err != nil {
-					db.logf("%s rollback error %q", name, err)
+			if x == errCompactionTransactExiting {
+				if err := t.revert(); err != nil {
+					db.logf("%s revert error %q", name, err)
 				}
 			}
 			panic(x)
@@ -207,7 +212,7 @@ func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactC
 
 		// Execute.
 		cnt := compactionTransactCounter(0)
-		err := exec(&cnt)
+		err := t.run(&cnt)
 		if err != nil {
 			db.logf("%s error I·%d %q", name, cnt, err)
 		}
@@ -257,6 +262,26 @@ func (db *DB) compactionTransact(name string, exec func(cnt *compactionTransactC
 	}
 }
 
+type compactionTransactFunc struct {
+	runFunc    func(cnt *compactionTransactCounter) error
+	revertFunc func() error
+}
+
+func (t *compactionTransactFunc) run(cnt *compactionTransactCounter) error {
+	return t.runFunc(cnt)
+}
+
+func (t *compactionTransactFunc) revert() error {
+	if t.revertFunc != nil {
+		return t.revertFunc()
+	}
+	return nil
+}
+
+func (db *DB) compactionTransactFunc(name string, run func(cnt *compactionTransactCounter) error, revert func() error) {
+	db.compactionTransact(name, &compactionTransactFunc{run, revert})
+}
+
 func (db *DB) compactionExitTransact() {
 	panic(errCompactionTransactExiting)
 }
@@ -292,13 +317,13 @@ func (db *DB) memCompaction() {
 		return
 	}
 
-	db.compactionTransact("mem@flush", func(cnt *compactionTransactCounter) (err error) {
+	db.compactionTransactFunc("mem@flush", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.flush(mem.mdb, -1)
 	}, func() error {
 		for _, r := range c.rec.addedTables {
-			db.logf("mem@flush rollback @%d", r.num)
+			db.logf("mem@flush revert @%d", r.num)
 			f := db.s.getTableFile(r.num)
 			if err := f.Remove(); err != nil {
 				return err
@@ -307,7 +332,7 @@ func (db *DB) memCompaction() {
 		return nil
 	})
 
-	db.compactionTransact("mem@commit", func(cnt *compactionTransactCounter) (err error) {
+	db.compactionTransactFunc("mem@commit", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		defer stats.stopTimer()
 		return c.commit(db.journalFile.Num(), db.frozenSeq)
@@ -337,6 +362,198 @@ func (db *DB) memCompaction() {
 	db.compSendTrigger(db.tcompCmdC)
 }
 
+type tableCompactionBuilder struct {
+	db           *DB
+	s            *session
+	c            *compaction
+	rec          *sessionRecord
+	stat0, stat1 *cStatsStaging
+
+	snapHasLastUkey bool
+	snapLastUkey    []byte
+	snapLastSeq     uint64
+	snapIter        int
+	snapKerrCnt     int
+	snapDropCnt     int
+
+	kerrCnt int
+	dropCnt int
+
+	minSeq    uint64
+	strict    bool
+	tableSize int
+
+	tw *tWriter
+}
+
+func (b *tableCompactionBuilder) appendKV(key, value []byte) error {
+	// Create new table if not already.
+	if b.tw == nil {
+		// Check for pause event.
+		if b.db != nil {
+			select {
+			case ch := <-b.db.tcompPauseC:
+				b.db.pauseCompaction(ch)
+			case _, _ = <-b.db.closeC:
+				b.db.compactionExitTransact()
+			default:
+			}
+		}
+
+		// Create new table.
+		var err error
+		b.tw, err = b.s.tops.create()
+		if err != nil {
+			return err
+		}
+	}
+
+	// Write key/value into table.
+	return b.tw.append(key, value)
+}
+
+func (b *tableCompactionBuilder) needFlush() bool {
+	return b.tw.tw.BytesLen() >= b.tableSize
+}
+
+func (b *tableCompactionBuilder) flush() error {
+	t, err := b.tw.finish()
+	if err != nil {
+		return err
+	}
+	b.rec.addTableFile(b.c.level+1, t)
+	b.stat1.write += t.size
+	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.level+1, t.file.Num(), b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
+	b.tw = nil
+	return nil
+}
+
+func (b *tableCompactionBuilder) cleanup() {
+	if b.tw != nil {
+		b.tw.drop()
+		b.tw = nil
+	}
+}
+
+func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
+	snapResumed := b.snapIter > 0
+	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
+	lastUkey := append([]byte{}, b.snapLastUkey...)
+	lastSeq := b.snapLastSeq
+	b.kerrCnt = b.snapKerrCnt
+	b.dropCnt = b.snapDropCnt
+	// Restore compaction state.
+	b.c.restore()
+
+	defer b.cleanup()
+
+	b.stat1.startTimer()
+	defer b.stat1.stopTimer()
+
+	iter := b.c.newIterator()
+	defer iter.Release()
+	for i := 0; iter.Next(); i++ {
+		// Incr transact counter.
+		cnt.incr()
+
+		// Skip until last state.
+		if i < b.snapIter {
+			continue
+		}
+
+		resumed := false
+		if snapResumed {
+			resumed = true
+			snapResumed = false
+		}
+
+		ikey := iter.Key()
+		ukey, seq, kt, kerr := parseIkey(ikey)
+
+		if kerr == nil {
+			shouldStop := !resumed && b.c.shouldStopBefore(ikey)
+
+			if !hasLastUkey || b.s.icmp.uCompare(lastUkey, ukey) != 0 {
+				// First occurrence of this user key.
+
+				// Only rotate tables if ukey doesn't hop across.
+				if b.tw != nil && (shouldStop || b.needFlush()) {
+					if err := b.flush(); err != nil {
+						return err
+					}
+
+					// Creates snapshot of the state.
+					b.c.save()
+					b.snapHasLastUkey = hasLastUkey
+					b.snapLastUkey = append(b.snapLastUkey[:0], lastUkey...)
+					b.snapLastSeq = lastSeq
+					b.snapIter = i
+					b.snapKerrCnt = b.kerrCnt
+					b.snapDropCnt = b.dropCnt
+				}
+
+				hasLastUkey = true
+				lastUkey = append(lastUkey[:0], ukey...)
+				lastSeq = kMaxSeq
+			}
+
+			switch {
+			case lastSeq <= b.minSeq:
+				// Dropped because newer entry for same user key exist
+				fallthrough // (A)
+			case kt == ktDel && seq <= b.minSeq && b.c.baseLevelForKey(lastUkey):
+				// For this user key:
+				// (1) there is no data in higher levels
+				// (2) data in lower levels will have larger seq numbers
+				// (3) data in layers that are being compacted here and have
+				//     smaller seq numbers will be dropped in the next
+				//     few iterations of this loop (by rule (A) above).
+				// Therefore this deletion marker is obsolete and can be dropped.
+				lastSeq = seq
+				b.dropCnt++
+				continue
+			default:
+				lastSeq = seq
+			}
+		} else {
+			if b.strict {
+				return kerr
+			}
+
+			// Don't drop corrupted keys.
+			hasLastUkey = false
+			lastUkey = lastUkey[:0]
+			lastSeq = kMaxSeq
+			b.kerrCnt++
+		}
+
+		if err := b.appendKV(ikey, iter.Value()); err != nil {
+			return err
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		return err
+	}
+
+	// Finish last table.
+	if b.tw != nil && !b.tw.empty() {
+		return b.flush()
+	}
+	return nil
+}
+
+func (b *tableCompactionBuilder) revert() error {
+	for _, at := range b.rec.addedTables {
+		b.s.logf("table@build revert @%d", at.num)
+		f := b.s.getTableFile(at.num)
+		if err := f.Remove(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	defer c.release()
 
@@ -348,7 +565,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		db.logf("table@move L%d@%d -> L%d", c.level, t.file.Num(), c.level+1)
 		rec.delTable(c.level, t.file.Num())
 		rec.addTableFile(c.level+1, t)
-		db.compactionTransact("table@move", func(cnt *compactionTransactCounter) (err error) {
+		db.compactionTransactFunc("table@move", func(cnt *compactionTransactCounter) (err error) {
 			return db.s.commit(rec)
 		}, nil)
 		return
@@ -366,192 +583,27 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	minSeq := db.minSeq()
 	db.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.level, len(c.tables[0]), c.level+1, len(c.tables[1]), shortenb(sourceSize), minSeq)
 
-	var (
-		snapHasLastUkey bool
-		snapLastUkey    []byte
-		snapLastSeq     uint64
-		snapIter        int
-		snapKerrCnt     int
-		snapDropCnt     int
-
-		kerrCnt int
-		dropCnt int
-
-		strict    = db.s.o.GetStrict(opt.StrictCompaction)
-		tableSize = db.s.o.GetCompactionTableSize(c.level + 1)
-	)
-	db.compactionTransact("table@build", func(cnt *compactionTransactCounter) (err error) {
-		hasLastUkey := snapHasLastUkey // The key might has zero length, so this is necessary.
-		lastUkey := append([]byte{}, snapLastUkey...)
-		lastSeq := snapLastSeq
-		kerrCnt = snapKerrCnt
-		dropCnt = snapDropCnt
-		snapSched := snapIter == 0
-
-		var tw *tWriter
-		finish := func() error {
-			t, err := tw.finish()
-			if err != nil {
-				return err
-			}
-			rec.addTableFile(c.level+1, t)
-			stats[1].write += t.size
-			db.logf("table@build created L%d@%d N·%d S·%s %q:%q", c.level+1, t.file.Num(), tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
-			return nil
-		}
-
-		defer func() {
-			stats[1].stopTimer()
-			if tw != nil {
-				tw.drop()
-				tw = nil
-			}
-		}()
-
-		stats[1].startTimer()
-		iter := c.newIterator()
-		defer iter.Release()
-		for i := 0; iter.Next(); i++ {
-			// Incr transact counter.
-			cnt.incr()
-
-			// Skip until last state.
-			if i < snapIter {
-				continue
-			}
-
-			ikey := iter.Key()
-			ukey, seq, kt, kerr := parseIkey(ikey)
-
-			// Skip this if key is corrupted.
-			if kerr == nil && c.shouldStopBefore(ikey) && tw != nil {
-				err = finish()
-				if err != nil {
-					return
-				}
-				snapSched = true
-				tw = nil
-			}
-
-			// Scheduled for snapshot, snapshot will used to retry compaction
-			// if error occured.
-			if snapSched {
-				snapHasLastUkey = hasLastUkey
-				snapLastUkey = append(snapLastUkey[:0], lastUkey...)
-				snapLastSeq = lastSeq
-				snapIter = i
-				snapKerrCnt = kerrCnt
-				snapDropCnt = dropCnt
-				snapSched = false
-			}
-
-			if kerr == nil {
-				if !hasLastUkey || db.s.icmp.uCompare(lastUkey, ukey) != 0 {
-					// First occurrence of this user key.
-					hasLastUkey = true
-					lastUkey = append(lastUkey[:0], ukey...)
-					lastSeq = kMaxSeq
-				}
-
-				switch {
-				case lastSeq <= minSeq:
-					// Dropped because newer entry for same user key exist
-					fallthrough // (A)
-				case kt == ktDel && seq <= minSeq && c.baseLevelForKey(lastUkey):
-					// For this user key:
-					// (1) there is no data in higher levels
-					// (2) data in lower levels will have larger seq numbers
-					// (3) data in layers that are being compacted here and have
-					//     smaller seq numbers will be dropped in the next
-					//     few iterations of this loop (by rule (A) above).
-					// Therefore this deletion marker is obsolete and can be dropped.
-					lastSeq = seq
-					dropCnt++
-					continue
-				default:
-					lastSeq = seq
-				}
-			} else {
-				if strict {
-					return kerr
-				}
-
-				// Don't drop corrupted keys
-				hasLastUkey = false
-				lastUkey = lastUkey[:0]
-				lastSeq = kMaxSeq
-				kerrCnt++
-			}
-
-			// Create new table if not already
-			if tw == nil {
-				// Check for pause event.
-				select {
-				case ch := <-db.tcompPauseC:
-					db.pauseCompaction(ch)
-				case _, _ = <-db.closeC:
-					db.compactionExitTransact()
-				default:
-				}
-
-				// Create new table.
-				tw, err = db.s.tops.create()
-				if err != nil {
-					return
-				}
-			}
-
-			// Write key/value into table
-			err = tw.append(ikey, iter.Value())
-			if err != nil {
-				return
-			}
-
-			// Finish table if it is big enough
-			if tw.tw.BytesLen() >= tableSize {
-				err = finish()
-				if err != nil {
-					return
-				}
-				snapSched = true
-				tw = nil
-			}
-		}
-
-		err = iter.Error()
-		if err != nil {
-			return
-		}
-
-		// Finish last table
-		if tw != nil && !tw.empty() {
-			err = finish()
-			if err != nil {
-				return
-			}
-			tw = nil
-		}
-		return
-	}, func() error {
-		for _, r := range rec.addedTables {
-			db.logf("table@build rollback @%d", r.num)
-			f := db.s.getTableFile(r.num)
-			if err := f.Remove(); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	b := &tableCompactionBuilder{
+		db:        db,
+		s:         db.s,
+		c:         c,
+		rec:       rec,
+		stat1:     &stats[1],
+		minSeq:    minSeq,
+		strict:    db.s.o.GetStrict(opt.StrictCompaction),
+		tableSize: db.s.o.GetCompactionTableSize(c.level + 1),
+	}
+	db.compactionTransact("table@build", b)
 
 	// Commit changes
-	db.compactionTransact("table@commit", func(cnt *compactionTransactCounter) (err error) {
+	db.compactionTransactFunc("table@commit", func(cnt *compactionTransactCounter) (err error) {
 		stats[1].startTimer()
 		defer stats[1].stopTimer()
 		return db.s.commit(rec)
 	}, nil)
 
 	resultSize := int(stats[1].write)
-	db.logf("table@compaction committed F%s S%s Ke·%d D·%d T·%v", sint(len(rec.addedTables)-len(rec.deletedTables)), sshortenb(resultSize-sourceSize), kerrCnt, dropCnt, stats[1].duration)
+	db.logf("table@compaction committed F%s S%s Ke·%d D·%d T·%v", sint(len(rec.addedTables)-len(rec.deletedTables)), sshortenb(resultSize-sourceSize), b.kerrCnt, b.dropCnt, stats[1].duration)
 
 	// Save compaction stats
 	for i := range stats {

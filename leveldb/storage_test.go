@@ -37,7 +37,7 @@ var (
 	tsNum     = 0
 )
 
-type tsOp int
+type tsOp uint
 
 const (
 	tsOpOpen tsOp = iota
@@ -132,7 +132,7 @@ func (tw tsWriter) Sync() (err error) {
 
 func (tw tsWriter) Close() (err error) {
 	err = tw.Writer.Close()
-	tw.tf.close("reader", err)
+	tw.tf.close("writer", err)
 	return
 }
 
@@ -264,20 +264,23 @@ type testStorage struct {
 	readCnt       uint64
 	readCntEn     storage.FileType
 
-	emuErr        [tsOpNum]storage.FileType
-	emuRandErr    [tsOpNum]storage.FileType
-	emuRandErrMap map[uint64]tsOp
-	emuRandRand   *rand.Rand
+	emuErr         [tsOpNum]storage.FileType
+	emuErrOnce     [tsOpNum]storage.FileType
+	emuRandErr     [tsOpNum]storage.FileType
+	emuRandErrProb int
+	emuErrOnceMap  map[uint64]uint
+	emuRandRand    *rand.Rand
 }
 
 func (ts *testStorage) shouldErr(tf tsFile, op tsOp) bool {
 	if ts.emuErr[op]&tf.Type() != 0 {
 		return true
-	} else if ts.emuRandErr[op]&tf.Type() != 0 {
-		eop := ts.emuRandErrMap[tf.x()]
-		if eop&op == 0 && ts.emuRandRand.Int()%0x999 == 0 {
-			ts.emuRandErrMap[tf.x()] = eop | op
-			ts.t.Logf("I: random emulated error: file=%d type=%v op=%v", tf.Num(), tf.Type(), op)
+	} else if ts.emuRandErr[op]&tf.Type() != 0 || ts.emuErrOnce[op]&tf.Type() != 0 {
+		sop := uint(1) << op
+		eop := ts.emuErrOnceMap[tf.x()]
+		if eop&sop == 0 && (ts.emuRandRand.Int()%ts.emuRandErrProb == 0 || ts.emuErrOnce[op]&tf.Type() != 0) {
+			ts.emuErrOnceMap[tf.x()] = eop | sop
+			ts.t.Logf("I: emulated error: file=%d type=%v op=%v", tf.Num(), tf.Type(), op)
 			return true
 		}
 	}
@@ -292,11 +295,25 @@ func (ts *testStorage) SetEmuErr(t storage.FileType, ops ...tsOp) {
 	ts.mu.Unlock()
 }
 
+func (ts *testStorage) SetEmuErrOnce(t storage.FileType, ops ...tsOp) {
+	ts.mu.Lock()
+	for _, op := range ops {
+		ts.emuErrOnce[op] = t
+	}
+	ts.mu.Unlock()
+}
+
 func (ts *testStorage) SetEmuRandErr(t storage.FileType, ops ...tsOp) {
 	ts.mu.Lock()
 	for _, op := range ops {
 		ts.emuRandErr[op] = t
 	}
+	ts.mu.Unlock()
+}
+
+func (ts *testStorage) SetEmuRandErrProb(prob int) {
+	ts.mu.Lock()
+	ts.emuRandErrProb = prob
 	ts.mu.Unlock()
 }
 
@@ -488,12 +505,13 @@ func newTestStorage(t *testing.T) *testStorage {
 		stor = storage.NewMemStorage()
 	}
 	ts := &testStorage{
-		t:             t,
-		Storage:       stor,
-		closeFn:       closeFn,
-		opens:         make(map[uint64]bool),
-		emuRandErrMap: make(map[uint64]tsOp),
-		emuRandRand:   rand.New(rand.NewSource(0xfacedead)),
+		t:              t,
+		Storage:        stor,
+		closeFn:        closeFn,
+		opens:          make(map[uint64]bool),
+		emuErrOnceMap:  make(map[uint64]uint),
+		emuRandErrProb: 0x999,
+		emuRandRand:    rand.New(rand.NewSource(0xfacedead)),
 	}
 	ts.cond.L = &ts.mu
 	return ts

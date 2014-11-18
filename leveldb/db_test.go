@@ -2298,3 +2298,271 @@ func TestDb_TransientError(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestDb_UkeyShouldntHopAcrossTable(t *testing.T) {
+	h := newDbHarnessWopt(t, &opt.Options{
+		WriteBuffer:                 112 * opt.KiB,
+		CompactionTableSize:         90 * opt.KiB,
+		CompactionExpandLimitFactor: 1,
+	})
+	defer h.close()
+
+	const (
+		nSnap = 190
+		nKey  = 140
+	)
+
+	var (
+		snaps [nSnap]*Snapshot
+		b     = &Batch{}
+	)
+	for i := range snaps {
+		vtail := fmt.Sprintf("VAL%030d", i)
+		b.Reset()
+		for k := 0; k < nKey; k++ {
+			key := fmt.Sprintf("KEY%08d", k)
+			b.Put([]byte(key), []byte(key+vtail))
+		}
+		if err := h.db.Write(b, nil); err != nil {
+			t.Fatalf("WRITE #%d error: %v", i, err)
+		}
+
+		snaps[i] = h.db.newSnapshot()
+		b.Reset()
+		for k := 0; k < nKey; k++ {
+			key := fmt.Sprintf("KEY%08d", k)
+			b.Delete([]byte(key))
+		}
+		if err := h.db.Write(b, nil); err != nil {
+			t.Fatalf("WRITE #%d  error: %v", i, err)
+		}
+	}
+
+	h.compactMem()
+
+	h.waitCompaction()
+	for level, tables := range h.db.s.stVersion.tables {
+		for _, table := range tables {
+			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
+		}
+	}
+
+	h.compactRangeAt(0, "", "")
+	h.waitCompaction()
+	for level, tables := range h.db.s.stVersion.tables {
+		for _, table := range tables {
+			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
+		}
+	}
+	h.compactRangeAt(1, "", "")
+	h.waitCompaction()
+	for level, tables := range h.db.s.stVersion.tables {
+		for _, table := range tables {
+			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
+		}
+	}
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	wg := &sync.WaitGroup{}
+	for i, snap := range snaps {
+		wg.Add(1)
+
+		go func(i int, snap *Snapshot) {
+			defer wg.Done()
+
+			vtail := fmt.Sprintf("VAL%030d", i)
+			for k := 0; k < nKey; k++ {
+				key := fmt.Sprintf("KEY%08d", k)
+				xvalue, err := snap.Get([]byte(key), nil)
+				if err != nil {
+					t.Fatalf("READER_GET #%d SEQ=%d K%d error: %v", i, snap.elem.seq, k, err)
+				}
+				value := key + vtail
+				if !bytes.Equal([]byte(value), xvalue) {
+					t.Fatalf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap.elem.seq, k, value, xvalue)
+				}
+			}
+		}(i, snap)
+	}
+
+	wg.Wait()
+}
+
+func TestDb_TableCompactionBuilder(t *testing.T) {
+	stor := newTestStorage(t)
+	defer stor.Close()
+
+	const nSeq = 99
+
+	o := &opt.Options{
+		WriteBuffer:                 112 * opt.KiB,
+		CompactionTableSize:         43 * opt.KiB,
+		CompactionExpandLimitFactor: 1,
+		CompactionGPOverlapsFactor:  1,
+		BlockCache:                  opt.NoCache,
+	}
+	s, err := newSession(stor, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.create(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	var (
+		seq        uint64
+		targetSize = 5 * o.CompactionTableSize
+		value      = bytes.Repeat([]byte{'0'}, 100)
+	)
+	for i := 0; i < 2; i++ {
+		tw, err := s.tops.create()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k := 0; tw.tw.BytesLen() < targetSize; k++ {
+			key := []byte(fmt.Sprintf("%09d", k))
+			seq += nSeq - 1
+			for x := uint64(0); x < nSeq; x++ {
+				if err := tw.append(newIkey(key, seq-x, ktVal), value); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		tf, err := tw.finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := &sessionRecord{numLevel: s.o.GetNumLevel()}
+		rec.addTableFile(i, tf)
+		if err := s.commit(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Build grandparent.
+	v := s.version()
+	c := newCompaction(s, v, 1, append(tFiles{}, v.tables[1]...))
+	rec := &sessionRecord{numLevel: s.o.GetNumLevel()}
+	b := &tableCompactionBuilder{
+		s:         s,
+		c:         c,
+		rec:       rec,
+		stat1:     new(cStatsStaging),
+		minSeq:    0,
+		strict:    true,
+		tableSize: o.CompactionTableSize/3 + 961,
+	}
+	if err := b.run(new(compactionTransactCounter)); err != nil {
+		t.Fatal(err)
+	}
+	for _, t := range c.tables[0] {
+		rec.delTable(c.level, t.file.Num())
+	}
+	if err := s.commit(rec); err != nil {
+		t.Fatal(err)
+	}
+	c.release()
+
+	// Build level-1.
+	v = s.version()
+	c = newCompaction(s, v, 0, append(tFiles{}, v.tables[0]...))
+	rec = &sessionRecord{numLevel: s.o.GetNumLevel()}
+	b = &tableCompactionBuilder{
+		s:         s,
+		c:         c,
+		rec:       rec,
+		stat1:     new(cStatsStaging),
+		minSeq:    0,
+		strict:    true,
+		tableSize: o.CompactionTableSize,
+	}
+	if err := b.run(new(compactionTransactCounter)); err != nil {
+		t.Fatal(err)
+	}
+	for _, t := range c.tables[0] {
+		rec.delTable(c.level, t.file.Num())
+	}
+	// Move grandparent to level-3
+	for _, t := range v.tables[2] {
+		rec.delTable(2, t.file.Num())
+		rec.addTableFile(3, t)
+	}
+	if err := s.commit(rec); err != nil {
+		t.Fatal(err)
+	}
+	c.release()
+
+	v = s.version()
+	for level, want := range []bool{false, true, false, true, false} {
+		got := len(v.tables[level]) > 0
+		if want != got {
+			t.Fatalf("invalid level-%d tables len: want %v, got %v", want, got)
+		}
+	}
+	for i, f := range v.tables[1][:len(v.tables[1])-1] {
+		nf := v.tables[1][i+1]
+		if bytes.Equal(f.imax.ukey(), nf.imin.ukey()) {
+			t.Fatalf("KEY %q hop across table %d .. %d", f.imax.ukey(), f.file.Num(), nf.file.Num())
+		}
+	}
+	v.release()
+
+	// Compaction with transient error.
+	v = s.version()
+	c = newCompaction(s, v, 1, append(tFiles{}, v.tables[1]...))
+	rec = &sessionRecord{numLevel: s.o.GetNumLevel()}
+	b = &tableCompactionBuilder{
+		s:         s,
+		c:         c,
+		rec:       rec,
+		stat1:     new(cStatsStaging),
+		minSeq:    0,
+		strict:    true,
+		tableSize: o.CompactionTableSize,
+	}
+	stor.SetEmuErrOnce(storage.TypeTable, tsOpSync)
+	stor.SetEmuRandErr(storage.TypeTable, tsOpRead, tsOpReadAt, tsOpWrite)
+	stor.SetEmuRandErrProb(0xf0)
+	for {
+		if err := b.run(new(compactionTransactCounter)); err != nil {
+			t.Logf("(expected) b.run: %v", err)
+		} else {
+			break
+		}
+	}
+	if err := s.commit(rec); err != nil {
+		t.Fatal(err)
+	}
+	c.release()
+
+	stor.SetEmuErrOnce(0, tsOpSync)
+	stor.SetEmuRandErr(0, tsOpRead, tsOpReadAt, tsOpWrite)
+
+	v = s.version()
+	if len(v.tables[1]) != len(v.tables[2]) {
+		t.Fatalf("invalid tables length, want %d, got %d", len(v.tables[1]), len(v.tables[2]))
+	}
+	for i, f0 := range v.tables[1] {
+		f1 := v.tables[2][i]
+		iter0 := s.tops.newIterator(f0, nil, nil)
+		iter1 := s.tops.newIterator(f1, nil, nil)
+		for j := 0; true; j++ {
+			next0 := iter0.Next()
+			next1 := iter1.Next()
+			if next0 != next1 {
+				t.Fatalf("#%d.%d invalid eoi: want %v, got %v", i, j, next0, next1)
+			}
+			key0 := iter0.Key()
+			key1 := iter1.Key()
+			if !bytes.Equal(key0, key1) {
+				t.Fatalf("#%d.%d invalid key: want %q, got %q", i, j, key0, key1)
+			}
+			if next0 == false {
+				break
+			}
+		}
+		iter0.Release()
+		iter1.Release()
+	}
+	v.release()
+}

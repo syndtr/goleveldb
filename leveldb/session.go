@@ -240,21 +240,7 @@ func (s *session) pickCompaction() *compaction {
 		}
 	}
 
-	if level == 0 {
-		imin, imax := t0.getRange(s.icmp)
-		t0 = v.tables[0].getOverlaps(t0[:0], s.icmp, imin.ukey(), imax.ukey(), true)
-	}
-
-	c := &compaction{
-		s:             s,
-		v:             v,
-		level:         level,
-		maxGPOverlaps: uint64(s.o.GetCompactionGPOverlaps(level)),
-		tPtrs:         make([]int, v.s.o.GetNumLevel()),
-	}
-	c.tables[0] = t0
-	c.expand()
-	return c
+	return newCompaction(s, v, level, t0)
 }
 
 // Create compaction from given level and range; need external synchronization.
@@ -284,15 +270,20 @@ func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
 		}
 	}
 
+	return newCompaction(s, v, level, t0)
+}
+
+func newCompaction(s *session, v *version, level int, t0 tFiles) *compaction {
 	c := &compaction{
 		s:             s,
 		v:             v,
 		level:         level,
+		tables:        [2]tFiles{t0, nil},
 		maxGPOverlaps: uint64(s.o.GetCompactionGPOverlaps(level)),
-		tPtrs:         make([]int, v.s.o.GetNumLevel()),
+		tPtrs:         make([]int, s.o.GetNumLevel()),
 	}
-	c.tables[0] = t0
 	c.expand()
+	c.save()
 	return c
 }
 
@@ -306,12 +297,31 @@ type compaction struct {
 	maxGPOverlaps uint64
 
 	gp                tFiles
-	gpidx             int
+	gpi               int
 	seenKey           bool
 	gpOverlappedBytes uint64
 	imin, imax        iKey
 	tPtrs             []int
 	released          bool
+
+	snapGPI               int
+	snapSeenKey           bool
+	snapGPOverlappedBytes uint64
+	snapTPtrs             []int
+}
+
+func (c *compaction) save() {
+	c.snapGPI = c.gpi
+	c.snapSeenKey = c.seenKey
+	c.snapGPOverlappedBytes = c.gpOverlappedBytes
+	c.snapTPtrs = append(c.snapTPtrs[:0], c.tPtrs...)
+}
+
+func (c *compaction) restore() {
+	c.gpi = c.snapGPI
+	c.seenKey = c.snapSeenKey
+	c.gpOverlappedBytes = c.snapGPOverlappedBytes
+	c.tPtrs = append(c.tPtrs[:0], c.snapTPtrs...)
 }
 
 func (c *compaction) release() {
@@ -328,6 +338,11 @@ func (c *compaction) expand() {
 
 	t0, t1 := c.tables[0], c.tables[1]
 	imin, imax := t0.getRange(c.s.icmp)
+	// We expand t0 here just incase ukey hop across tables.
+	t0 = vt0.getOverlaps(t0, c.s.icmp, imin.ukey(), imax.ukey(), c.level == 0)
+	if len(t0) != len(c.tables[0]) {
+		imin, imax = t0.getRange(c.s.icmp)
+	}
 	t1 = vt1.getOverlaps(t1, c.s.icmp, imin.ukey(), imax.ukey(), false)
 	// Get entire range covered by compaction.
 	amin, amax := append(t0, t1...).getRange(c.s.icmp)
@@ -384,8 +399,8 @@ func (c *compaction) baseLevelForKey(ukey []byte) bool {
 }
 
 func (c *compaction) shouldStopBefore(ikey iKey) bool {
-	for ; c.gpidx < len(c.gp); c.gpidx++ {
-		gp := c.gp[c.gpidx]
+	for ; c.gpi < len(c.gp); c.gpi++ {
+		gp := c.gp[c.gpi]
 		if c.s.icmp.Compare(ikey, gp.imax) <= 0 {
 			break
 		}
