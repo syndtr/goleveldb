@@ -24,6 +24,7 @@ var _ = testutil.Defer(func() {
 			CachedOpenFiles:      -1,
 			Strict:               opt.StrictAll,
 			WriteBuffer:          1000,
+			CompactionTableSize:  2000,
 		}
 
 		Describe("write test", func() {

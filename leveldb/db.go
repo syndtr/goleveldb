@@ -625,7 +625,7 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 	}
 
 	v := db.s.version()
-	value, cSched, err := v.get(ikey, ro)
+	value, cSched, err := v.get(ikey, ro, false)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -634,8 +634,51 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 	return
 }
 
+func (db *DB) has(key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err error) {
+	ikey := newIkey(key, seq, ktSeek)
+
+	em, fm := db.getMems()
+	for _, m := range [...]*memDB{em, fm} {
+		if m == nil {
+			continue
+		}
+		defer m.decref()
+
+		mk, _, me := m.mdb.Find(ikey)
+		if me == nil {
+			ukey, _, kt, kerr := parseIkey(mk)
+			if kerr != nil {
+				// Shouldn't have had happen.
+				panic(kerr)
+			}
+			if db.s.icmp.uCompare(ukey, key) == 0 {
+				if kt == ktDel {
+					return false, nil
+				}
+				return true, nil
+			}
+		} else if me != ErrNotFound {
+			return false, me
+		}
+	}
+
+	v := db.s.version()
+	_, cSched, err := v.get(ikey, ro, true)
+	v.release()
+	if cSched {
+		// Trigger table compaction.
+		db.compSendTrigger(db.tcompCmdC)
+	}
+	if err == nil {
+		ret = true
+	} else if err == ErrNotFound {
+		err = nil
+	}
+	return
+}
+
 // Get gets the value for the given key. It returns ErrNotFound if the
-// DB does not contain the key.
+// DB does not contains the key.
 //
 // The returned slice is its own copy, it is safe to modify the contents
 // of the returned slice.
@@ -649,6 +692,20 @@ func (db *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	se := db.acquireSnapshot()
 	defer db.releaseSnapshot(se)
 	return db.get(key, se.seq, ro)
+}
+
+// Has returns true if the DB does contains the given key.
+//
+// It is safe to modify the contents of the argument after Get returns.
+func (db *DB) Has(key []byte, ro *opt.ReadOptions) (ret bool, err error) {
+	err = db.ok()
+	if err != nil {
+		return
+	}
+
+	se := db.acquireSnapshot()
+	defer db.releaseSnapshot(se)
+	return db.has(key, se.seq, ro)
 }
 
 // NewIterator returns an iterator for the latest snapshot of the

@@ -798,13 +798,7 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 	return iterator.NewIndexedIterator(index, opt.GetStrict(r.o, ro, opt.StrictReader))
 }
 
-// Find finds key/value pair whose key is greater than or equal to the
-// given key. It returns ErrNotFound if the table doesn't contain
-// such pair.
-//
-// The caller should not modify the contents of the returned slice, but
-// it is safe to modify the contents of the argument after Find returns.
-func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err error) {
+func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bool) (rkey, value []byte, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -833,7 +827,7 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
 		return
 	}
-	if r.filter != nil {
+	if filtered && r.filter != nil {
 		filterBlock, rel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
 			if !filterBlock.contains(r.filter, dataBH.offset, key) {
@@ -854,21 +848,52 @@ func (r *Reader) Find(key []byte, ro *opt.ReadOptions) (rkey, value []byte, err 
 	}
 	// Don't use block buffer, no need to copy the buffer.
 	rkey = data.Key()
-	if r.bpool == nil {
-		value = data.Value()
-	} else {
-		// Use block buffer, and since the buffer will be recycled, the buffer
-		// need to be copied.
-		value = append([]byte{}, data.Value()...)
+	if !noValue {
+		if r.bpool == nil {
+			value = data.Value()
+		} else {
+			// Use block buffer, and since the buffer will be recycled, the buffer
+			// need to be copied.
+			value = append([]byte{}, data.Value()...)
+		}
 	}
+	return
+}
+
+// Find finds key/value pair whose key is greater than or equal to the
+// given key. It returns ErrNotFound if the table doesn't contain
+// such pair.
+// If filtered is true then the nearest 'block' will be checked against
+// 'filter data' (if present) and will immediately return ErrNotFound if
+// 'filter data' indicates that such pair doesn't exist.
+//
+// The caller may modify the contents of the returned slice as it is its
+// own copy.
+// It is safe to modify the contents of the argument after Find returns.
+func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions) (rkey, value []byte, err error) {
+	return r.find(key, filtered, ro, false)
+}
+
+// Find finds key that is greater than or equal to the given key.
+// It returns ErrNotFound if the table doesn't contain such key.
+// If filtered is true then the nearest 'block' will be checked against
+// 'filter data' (if present) and will immediately return ErrNotFound if
+// 'filter data' indicates that such key doesn't exist.
+//
+// The caller may modify the contents of the returned slice as it is its
+// own copy.
+// It is safe to modify the contents of the argument after Find returns.
+func (r *Reader) FindKey(key []byte, filtered bool, ro *opt.ReadOptions) (rkey []byte, err error) {
+	rkey, _, err = r.find(key, filtered, ro, true)
 	return
 }
 
 // Get gets the value for the given key. It returns errors.ErrNotFound
 // if the table does not contain the key.
 //
-// The caller should not modify the contents of the returned slice, but
-// it is safe to modify the contents of the argument after Get returns.
+// The caller may modify the contents of the returned slice as it is its
+// own copy.
+// It is safe to modify the contents of the argument after Find returns.
 func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -878,7 +903,7 @@ func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) 
 		return
 	}
 
-	rkey, value, err := r.Find(key, ro)
+	rkey, value, err := r.find(key, false, ro, false)
 	if err == nil && r.cmp.Compare(rkey, key) != 0 {
 		value = nil
 		err = ErrNotFound

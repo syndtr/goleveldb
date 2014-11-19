@@ -84,6 +84,26 @@ func KeyValueTesting(rnd *rand.Rand, kv KeyValue, p DB, setup func(KeyValue) DB,
 		}
 	})
 
+	It("Should only find present key with Has", func() {
+		if db, ok := p.(Has); ok {
+			ShuffledIndex(nil, kv.Len(), 1, func(i int) {
+				key_, key, _ := kv.IndexInexact(i)
+
+				// Using exact key.
+				ret, err := db.TestHas(key)
+				Expect(err).ShouldNot(HaveOccurred(), "Error for key %q", key)
+				Expect(ret).Should(BeTrue(), "False for key %q", key)
+
+				// Using inexact key.
+				if len(key_) > 0 {
+					ret, err = db.TestHas(key_)
+					Expect(err).ShouldNot(HaveOccurred(), "Error for key %q", key_)
+					Expect(ret).ShouldNot(BeTrue(), "True for key %q", key)
+				}
+			})
+		}
+	})
+
 	TestIter := func(r *util.Range, _kv KeyValue) {
 		if db, ok := p.(NewIterator); ok {
 			iter := db.TestNewIterator(r)
@@ -95,6 +115,7 @@ func KeyValueTesting(rnd *rand.Rand, kv KeyValue, p DB, setup func(KeyValue) DB,
 			}
 
 			DoIteratorTesting(&t)
+			iter.Release()
 		}
 	}
 
