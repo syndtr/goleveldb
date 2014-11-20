@@ -50,13 +50,6 @@ func max(x, y int) int {
 	return y
 }
 
-func verifyBlockChecksum(data []byte) bool {
-	n := len(data) - 4
-	checksum0 := binary.LittleEndian.Uint32(data[n:])
-	checksum1 := util.NewCRC(data[:n]).Value()
-	return checksum0 == checksum1
-}
-
 type block struct {
 	bpool          *util.BufferPool
 	bh             blockHandle
@@ -566,9 +559,14 @@ func (r *Reader) readRawBlock(bh blockHandle, verifyChecksum bool) ([]byte, erro
 	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
 		return nil, err
 	}
-	if verifyChecksum && !verifyBlockChecksum(data) {
-		r.bpool.Put(data)
-		return nil, r.newErrCorruptedBH(bh, "checksum mismatch")
+	if verifyChecksum {
+		n := bh.length + 1
+		checksum0 := binary.LittleEndian.Uint32(data[n:])
+		checksum1 := util.NewCRC(data[:n]).Value()
+		if checksum0 != checksum1 {
+			r.bpool.Put(data)
+			return nil, r.newErrCorruptedBH(bh, fmt.Sprintf("checksum mismatch, want=%#x got=%#x", checksum0, checksum1))
+		}
 	}
 	switch data[bh.length] {
 	case blockTypeNoCompression:
