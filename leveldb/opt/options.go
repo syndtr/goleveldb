@@ -114,7 +114,7 @@ const (
 	StrictOverride
 
 	// StrictAll enables all strict flags.
-	StrictAll = StrictManifest | StrictJournalChecksum | StrictJournal | StrictBlockChecksum | StrictCompaction | StrictReader
+	StrictAll = StrictManifest | StrictJournalChecksum | StrictJournal | StrictBlockChecksum | StrictCompaction | StrictReader | StrictRecovery
 
 	// DefaultStrict is the default strict flags. Specify any strict flags
 	// will override default strict flags as whole (i.e. not OR'ed).
