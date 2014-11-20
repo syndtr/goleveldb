@@ -509,6 +509,10 @@ func newTestStorage(t *testing.T) *testStorage {
 						}
 						f.Close()
 					}
+					if t.Failed() {
+						t.Logf("testing failed, test DB preserved at %s", path)
+						return nil
+					}
 					if tsKeepFS {
 						return nil
 					}
