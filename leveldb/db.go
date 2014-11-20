@@ -269,7 +269,7 @@ func recoverTable(s *session, o *opt.Options) error {
 	tableFiles.sort()
 
 	var (
-		mSeq                                                              uint64
+		maxSeq                                                            uint64
 		recoveredKey, goodKey, corruptedKey, corruptedBlock, droppedTable int
 
 		// We will drop corrupted table.
@@ -324,7 +324,12 @@ func recoverTable(s *session, o *opt.Options) error {
 		if err != nil {
 			return err
 		}
-		defer reader.Close()
+		var closed bool
+		defer func() {
+			if !closed {
+				reader.Close()
+			}
+		}()
 
 		// Get file size.
 		size, err := reader.Seek(0, 2)
@@ -392,14 +397,15 @@ func recoverTable(s *session, o *opt.Options) error {
 				if err != nil {
 					return err
 				}
+				closed = true
 				reader.Close()
 				if err := file.Replace(tmp); err != nil {
 					return err
 				}
 				size = newSize
 			}
-			if tSeq > mSeq {
-				mSeq = tSeq
+			if tSeq > maxSeq {
+				maxSeq = tSeq
 			}
 			recoveredKey += tgoodKey
 			// Add table to level 0.
@@ -426,11 +432,11 @@ func recoverTable(s *session, o *opt.Options) error {
 			}
 		}
 
-		s.logf("table@recovery recovered F·%d N·%d Gk·%d Ck·%d Q·%d", len(tableFiles), recoveredKey, goodKey, corruptedKey, mSeq)
+		s.logf("table@recovery recovered F·%d N·%d Gk·%d Ck·%d Q·%d", len(tableFiles), recoveredKey, goodKey, corruptedKey, maxSeq)
 	}
 
 	// Set sequence number.
-	rec.setSeqNum(mSeq + 1)
+	rec.setSeqNum(maxSeq)
 
 	// Create new manifest.
 	if err := s.create(); err != nil {

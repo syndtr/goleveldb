@@ -17,6 +17,9 @@ func dupOptions(o *opt.Options) *opt.Options {
 	if o != nil {
 		*newo = *o
 	}
+	if newo.Strict == 0 {
+		newo.Strict = opt.DefaultStrict
+	}
 	return newo
 }
 

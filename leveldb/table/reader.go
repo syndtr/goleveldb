@@ -536,10 +536,11 @@ func (r *Reader) blockKind(bh blockHandle) string {
 	case r.indexBH.offset:
 		return "index-block"
 	case r.filterBH.offset:
-		return "filter-block"
-	default:
-		return "data-block"
+		if r.filterBH.length > 0 {
+			return "filter-block"
+		}
 	}
+	return "data-block"
 }
 
 func (r *Reader) newErrCorrupted(pos, size int64, kind, reason string) error {
@@ -828,13 +829,16 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		return
 	}
 	if filtered && r.filter != nil {
-		filterBlock, rel, ferr := r.getFilterBlock(true)
+		filterBlock, frel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
 			if !filterBlock.contains(r.filter, dataBH.offset, key) {
-				rel.Release()
+				frel.Release()
 				return nil, nil, ErrNotFound
 			}
-			rel.Release()
+			frel.Release()
+		} else if !errors.IsCorrupted(ferr) {
+			err = ferr
+			return
 		}
 	}
 	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
@@ -1069,13 +1073,12 @@ func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Name
 		if r.filter != nil {
 			r.filterBlock, err = r.readFilterBlock(r.filterBH)
 			if err != nil {
-				if !errors.IsCorrupted(r.err) {
+				if !errors.IsCorrupted(err) {
 					return nil, err
 				}
 
 				// Don't use filter then.
 				r.filter = nil
-				r.filterBH = blockHandle{}
 			}
 		}
 	}
