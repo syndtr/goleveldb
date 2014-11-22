@@ -2077,12 +2077,13 @@ func TestDb_GoleveldbIssue72and83(t *testing.T) {
 
 	randomData := func(prefix byte, i int) []byte {
 		data := make([]byte, 1+4+32+64+32)
-		_, err := crand.Reader.Read(data[1 : len(data)-4])
+		_, err := crand.Reader.Read(data[1 : len(data)-8])
 		if err != nil {
 			panic(err)
 		}
 		data[0] = prefix
-		binary.LittleEndian.PutUint32(data[len(data)-4:], uint32(i))
+		binary.LittleEndian.PutUint32(data[len(data)-8:], uint32(i))
+		binary.LittleEndian.PutUint32(data[len(data)-4:], util.NewCRC(data[:len(data)-4]).Value())
 		return data
 	}
 
@@ -2131,12 +2132,22 @@ func TestDb_GoleveldbIssue72and83(t *testing.T) {
 				continue
 			}
 			iter := snap.NewIterator(util.BytesPrefix([]byte{1}), nil)
-			writei := int(snap.elem.seq/(n*2) - 1)
+			writei := int(seq/(n*2) - 1)
 			var k int
 			for ; iter.Next(); k++ {
 				k1 := iter.Key()
 				k2 := iter.Value()
-				kwritei := int(binary.LittleEndian.Uint32(k2[len(k2)-4:]))
+				k1checksum0 := binary.LittleEndian.Uint32(k1[len(k1)-4:])
+				k1checksum1 := util.NewCRC(k1[:len(k1)-4]).Value()
+				if k1checksum0 != k1checksum1 {
+					t.Fatalf("READER0 #%d.%d W#%d invalid K1 checksum: %#x != %#x", i, k, k1checksum0, k1checksum0)
+				}
+				k2checksum0 := binary.LittleEndian.Uint32(k2[len(k2)-4:])
+				k2checksum1 := util.NewCRC(k2[:len(k2)-4]).Value()
+				if k2checksum0 != k2checksum1 {
+					t.Fatalf("READER0 #%d.%d W#%d invalid K2 checksum: %#x != %#x", i, k, k2checksum0, k2checksum1)
+				}
+				kwritei := int(binary.LittleEndian.Uint32(k2[len(k2)-8:]))
 				if writei != kwritei {
 					t.Fatalf("READER0 #%d.%d W#%d invalid write iteration num: %d", i, k, writei, kwritei)
 				}
