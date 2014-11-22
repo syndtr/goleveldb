@@ -19,7 +19,7 @@ var _ = testutil.Defer(func() {
 		o := &opt.Options{
 			BlockCache:           opt.NoCache,
 			BlockRestartInterval: 5,
-			BlockSize:            50,
+			BlockSize:            80,
 			Compression:          opt.NoCompression,
 			CachedOpenFiles:      -1,
 			Strict:               opt.StrictAll,
