@@ -518,14 +518,16 @@ type Reader struct {
 	filter         filter.Filter
 	verifyChecksum bool
 
-	dataEnd           int64
-	indexBH, filterBH blockHandle
-	indexBlock        *block
-	filterBlock       *filterBlock
+	dataEnd                   int64
+	metaBH, indexBH, filterBH blockHandle
+	indexBlock                *block
+	filterBlock               *filterBlock
 }
 
 func (r *Reader) blockKind(bh blockHandle) string {
 	switch bh.offset {
+	case r.metaBH.offset:
+		return "meta-block"
 	case r.indexBH.offset:
 		return "index-block"
 	case r.filterBH.offset:
@@ -559,6 +561,7 @@ func (r *Reader) readRawBlock(bh blockHandle, verifyChecksum bool) ([]byte, erro
 	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
 		return nil, err
 	}
+
 	if verifyChecksum {
 		n := bh.length + 1
 		checksum0 := binary.LittleEndian.Uint32(data[n:])
@@ -568,6 +571,7 @@ func (r *Reader) readRawBlock(bh blockHandle, verifyChecksum bool) ([]byte, erro
 			return nil, r.newErrCorruptedBH(bh, fmt.Sprintf("checksum mismatch, want=%#x got=%#x", checksum0, checksum1))
 		}
 	}
+
 	switch data[bh.length] {
 	case blockTypeNoCompression:
 		data = data[:bh.length]
@@ -977,6 +981,10 @@ func (r *Reader) Release() {
 //
 // The returned table reader instance is goroutine-safe.
 func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Namespace, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+	if f == nil {
+		return nil, errors.New("leveldb/table: nil file")
+	}
+
 	r := &Reader{
 		fi:             fi,
 		reader:         f,
@@ -986,13 +994,12 @@ func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Name
 		cmp:            o.GetComparer(),
 		verifyChecksum: o.GetStrict(opt.StrictBlockChecksum),
 	}
-	if f == nil {
-		return nil, errors.New("leveldb/table: nil file")
-	}
+
 	if size < footerLen {
 		r.err = r.newErrCorrupted(0, size, "table", "too small")
 		return r, nil
 	}
+
 	footerPos := size - footerLen
 	var footer [footerLen]byte
 	if _, err := r.reader.ReadAt(footer[:], footerPos); err != nil && err != io.EOF {
@@ -1002,20 +1009,24 @@ func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Name
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad magic number")
 		return r, nil
 	}
+
+	var n int
 	// Decode the metaindex block handle.
-	metaBH, n := decodeBlockHandle(footer[:])
+	r.metaBH, n = decodeBlockHandle(footer[:])
 	if n == 0 {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad metaindex block handle")
 		return r, nil
 	}
+
 	// Decode the index block handle.
 	r.indexBH, n = decodeBlockHandle(footer[n:])
 	if n == 0 {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad index block handle")
 		return r, nil
 	}
+
 	// Read metaindex block.
-	metaBlock, err := r.readBlock(metaBH, true)
+	metaBlock, err := r.readBlock(r.metaBH, true)
 	if err != nil {
 		if errors.IsCorrupted(err) {
 			r.err = err
@@ -1024,9 +1035,12 @@ func NewReader(f io.ReaderAt, size int64, fi *storage.FileInfo, cache cache.Name
 			return nil, err
 		}
 	}
+
 	// Set data end.
-	r.dataEnd = int64(metaBH.offset)
-	metaIter := r.newBlockIter(metaBlock, nil, nil, false)
+	r.dataEnd = int64(r.metaBH.offset)
+
+	// Read metaindex.
+	metaIter := r.newBlockIter(metaBlock, nil, nil, true)
 	for metaIter.Next() {
 		key := string(metaIter.Key())
 		if !strings.HasPrefix(key, "filter.") {
