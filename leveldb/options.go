@@ -35,7 +35,7 @@ func (s *session) setOptions(o *opt.Options) {
 	// Block cache.
 	switch o.GetBlockCache() {
 	case nil:
-		no.BlockCache = cache.NewLRUCache(opt.DefaultBlockCacheSize)
+		no.BlockCache = cache.NewLRUCache(o.GetBlockCacheSize())
 	case opt.NoCache:
 		no.BlockCache = nil
 	}

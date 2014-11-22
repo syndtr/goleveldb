@@ -136,8 +136,13 @@ type Options struct {
 	// BlockCache provides per-block caching for LevelDB. Specify NoCache to
 	// disable block caching.
 	//
-	// By default LevelDB will create LRU-cache with capacity of 8MiB.
+	// By default LevelDB will create LRU-cache with capacity of BlockCacheSize.
 	BlockCache cache.Cache
+
+	// BlockCacheSize defines the capacity of the default 'block cache'.
+	//
+	// The default value is 8MiB.
+	BlockCacheSize int
 
 	// BlockRestartInterval is the number of keys between restart points for
 	// delta encoding of keys.
@@ -320,6 +325,13 @@ func (o *Options) GetBlockCache() cache.Cache {
 		return nil
 	}
 	return o.BlockCache
+}
+
+func (o *Options) GetBlockCacheSize() int {
+	if o == nil || o.BlockCacheSize <= 0 {
+		return DefaultBlockCacheSize
+	}
+	return o.BlockCacheSize
 }
 
 func (o *Options) GetBlockRestartInterval() int {
