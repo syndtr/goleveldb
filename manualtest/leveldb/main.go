@@ -27,12 +27,12 @@ import (
 )
 
 var (
-	dbPath           = path.Join(os.TempDir(), "goleveldb-testdb")
-	cachedOpenFiles  = 500
-	dataLen          = 63
-	numKeys          = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
-	httpProf         = "127.0.0.1:5454"
-	enableBlockCache = false
+	dbPath                 = path.Join(os.TempDir(), "goleveldb-testdb")
+	openFilesCacheCapacity = 500
+	dataLen                = 63
+	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
+	httpProf               = "127.0.0.1:5454"
+	enableBlockCache       = false
 
 	wg         = new(sync.WaitGroup)
 	done, fail uint32
@@ -71,7 +71,7 @@ func (a *arrayInt) Set(str string) error {
 
 func init() {
 	flag.StringVar(&dbPath, "db", dbPath, "testdb path")
-	flag.IntVar(&cachedOpenFiles, "cachedopenfile", cachedOpenFiles, "cached open file")
+	flag.IntVar(&openFilesCacheCapacity, "openfilescachecap", openFilesCacheCapacity, "open files cache capacity")
 	flag.IntVar(&dataLen, "datalen", dataLen, "data length")
 	flag.Var(&numKeys, "numkeys", "num keys")
 	flag.StringVar(&httpProf, "httpprof", httpProf, "http prof listen addr")
@@ -346,12 +346,13 @@ func main() {
 		runtime.Goexit()
 	}
 
-	o := &opt.Options{
-		CachedOpenFiles: cachedOpenFiles,
-		ErrorIfExist:    true,
+	if openFilesCacheCapacity == 0 {
+		openFilesCacheCapacity = -1
 	}
-	if !enableBlockCache {
-		o.BlockCache = opt.NoCache
+	o := &opt.Options{
+		OpenFilesCacheCapacity: openFilesCacheCapacity,
+		DisableBlockCache:      !enableBlockCache,
+		ErrorIfExist:           true,
 	}
 
 	db, err := leveldb.Open(stor, o)
@@ -394,7 +395,7 @@ func main() {
 			mu.Lock()
 			log.Printf("> GetLatencyMin=%v GetLatencyMax=%v GetLatencyAvg=%v GetRatePerSec=%d",
 				gGetStat.min, gGetStat.max, gGetStat.avg(), gGetStat.ratePerSec())
-			log.Printf("> IterLatencyMin=%v IterLatencyMax=%v IterLatencyAvg=%v WriteRatePerSec=%d",
+			log.Printf("> IterLatencyMin=%v IterLatencyMax=%v IterLatencyAvg=%v IterRatePerSec=%d",
 				gIterStat.min, gIterStat.max, gIterStat.avg(), gIterStat.ratePerSec())
 			log.Printf("> WriteLatencyMin=%v WriteLatencyMax=%v WriteLatencyAvg=%v WriteRatePerSec=%d",
 				gWriteStat.min, gWriteStat.max, gWriteStat.avg(), gWriteStat.ratePerSec())
