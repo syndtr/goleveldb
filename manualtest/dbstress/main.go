@@ -5,12 +5,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
-	"github.com/syndtr/goleveldb/leveldb/table"
-	"github.com/syndtr/goleveldb/leveldb/util"
 	"log"
 	mrand "math/rand"
 	"net/http"
@@ -24,6 +18,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/table"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var (
@@ -33,6 +34,7 @@ var (
 	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
 	httpProf               = "127.0.0.1:5454"
 	enableBlockCache       = false
+	noCompression          = false
 
 	wg         = new(sync.WaitGroup)
 	done, fail uint32
@@ -74,8 +76,10 @@ func init() {
 	flag.IntVar(&openFilesCacheCapacity, "openfilescachecap", openFilesCacheCapacity, "open files cache capacity")
 	flag.IntVar(&dataLen, "datalen", dataLen, "data length")
 	flag.Var(&numKeys, "numkeys", "num keys")
-	flag.StringVar(&httpProf, "httpprof", httpProf, "http prof listen addr")
+	flag.StringVar(&httpProf, "httpprof", httpProf, "http pprof listen addr")
 	flag.BoolVar(&enableBlockCache, "enableblockcache", enableBlockCache, "enable block cache")
+	flag.BoolVar(&noCompression, "nocompression", noCompression, "disable block compression")
+
 }
 
 func randomData(dst []byte, ns, prefix byte, i uint32) []byte {
@@ -312,7 +316,9 @@ func scanTable(f storage.File, checksum bool) (corrupted bool) {
 func main() {
 	flag.Parse()
 
+	log.Printf("Test DB stored at %q", dbPath)
 	if httpProf != "" {
+		log.Printf("HTTP pprof listening at %q", httpProf)
 		runtime.SetBlockProfileRate(1)
 		go func() {
 			if err := http.ListenAndServe(httpProf, nil); err != nil {
@@ -338,6 +344,7 @@ func main() {
 		if err != nil && errors.IsCorrupted(err) {
 			cerr := err.(*errors.ErrCorrupted)
 			if cerr.File != nil && cerr.File.Type == storage.TypeTable {
+				log.Print("FATAL: corruption detected, scanning...")
 				if !scanTable(stor.GetFile(cerr.File.Num, cerr.File.Type), false) {
 					log.Printf("FATAL: unable to find corrupted key/value pair in table %v", cerr.File)
 				}
@@ -353,6 +360,9 @@ func main() {
 		OpenFilesCacheCapacity: openFilesCacheCapacity,
 		DisableBlockCache:      !enableBlockCache,
 		ErrorIfExist:           true,
+	}
+	if noCompression {
+		o.Compression = opt.NoCompression
 	}
 
 	db, err := leveldb.Open(stor, o)
@@ -447,11 +457,13 @@ func main() {
 					}
 					writeReq <- b
 					if err := <-writeAck; err != nil {
+						writeAckAck <- struct{}{}
 						fatalf(err, "[%02d] WRITER #%d db.Write: %v", ns, wi, err)
 					}
 
 					snap, err := db.GetSnapshot()
 					if err != nil {
+						writeAckAck <- struct{}{}
 						fatalf(err, "[%02d] WRITER #%d db.GetSnapshot: %v", ns, wi, err)
 					}
 
@@ -508,7 +520,7 @@ func main() {
 							}
 							iter.Release()
 							if err := iter.Error(); err != nil {
-								fatalf(nil, "[%02d] READER #%d.%d K%d iter.Error: %v", ns, snapwi, ri, numKey, err)
+								fatalf(err, "[%02d] READER #%d.%d K%d iter.Error: %v", ns, snapwi, ri, numKey, err)
 							}
 							if n != numKey {
 								fatalf(nil, "[%02d] READER #%d.%d missing keys: want=%d got=%d", ns, snapwi, ri, numKey, n)
@@ -566,7 +578,7 @@ func main() {
 					}
 					iter.Release()
 					if err := iter.Error(); err != nil {
-						fatalf(nil, "[%02d] SCANNER #%d.%d iter.Error: %v", ns, i, n, err)
+						fatalf(err, "[%02d] SCANNER #%d.%d iter.Error: %v", ns, i, n, err)
 					}
 
 					if n > 0 {
@@ -577,9 +589,11 @@ func main() {
 						t := time.Now()
 						writeReq <- delB
 						if err := <-writeAck; err != nil {
+							writeAckAck <- struct{}{}
 							fatalf(err, "[%02d] SCANNER #%d db.Write: %v", ns, i, err)
+						} else {
+							writeAckAck <- struct{}{}
 						}
-						writeAckAck <- struct{}{}
 						log.Printf("[%02d] SCANNER #%d Deleted=%d Time=%v", ns, i, delB.Len(), time.Now().Sub(t))
 					}
 
