@@ -418,7 +418,7 @@ func (h *dbHarness) sizeOf(start, limit string) uint64 {
 func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
 	sz := h.sizeOf(start, limit)
 	if sz < low || sz > hi {
-		h.t.Errorf("sizeof %q to %q not in range, want %d - %d, got %d",
+		h.t.Errorf("sizeOf %q to %q not in range, want %d - %d, got %d",
 			shorten(start), shorten(limit), low, hi, sz)
 	}
 }
@@ -2646,9 +2646,13 @@ func testDB_IterTriggeredCompaction(t *testing.T, limitDiv int) {
 		size0 := h.sizeOf(startKey, limitKey)
 		size1 := h.sizeOf(limitKey, maxKey)
 		t.Logf("#%03d size %s [rest %s]", r, shortenb(int(size0)), shortenb(int(size1)))
-		if size0 < initialSize0 {
+		if size0 < initialSize0/10 {
 			break
 		}
+	}
+
+	if initialSize1 > 0 {
+		h.sizeAssert(limitKey, maxKey, initialSize1/4-opt.MiB, initialSize1+opt.MiB)
 	}
 }
 
