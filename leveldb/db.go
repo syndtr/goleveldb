@@ -784,7 +784,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 
 	const prefix = "leveldb."
 	if !strings.HasPrefix(name, prefix) {
-		return "", errors.New("leveldb: GetProperty: unknown property: " + name)
+		return "", ErrNotFound
 	}
 	p := name[len(prefix):]
 
@@ -798,7 +798,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		var rest string
 		n, _ := fmt.Sscanf(p[len(numFilesPrefix):], "%d%s", &level, &rest)
 		if n != 1 || int(level) >= db.s.o.GetNumLevel() {
-			err = errors.New("leveldb: GetProperty: invalid property: " + name)
+			err = ErrNotFound
 		} else {
 			value = fmt.Sprint(v.tLen(int(level)))
 		}
@@ -837,7 +837,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 	case p == "aliveiters":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveIters))
 	default:
-		err = errors.New("leveldb: GetProperty: unknown property: " + name)
+		err = ErrNotFound
 	}
 
 	return
