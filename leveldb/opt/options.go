@@ -250,6 +250,11 @@ type Options struct {
 	// The default value (DefaultCompression) uses snappy compression.
 	Compression Compression
 
+	// DisableBufferPool allows disable use of util.BufferPool functionality.
+	//
+	// The default value is false.
+	DisableBufferPool bool
+
 	// DisableBlockCache allows disable use of cache.Cache functionality on
 	// 'sorted table' block.
 	//
@@ -470,6 +475,20 @@ func (o *Options) GetCompression() Compression {
 		return DefaultCompressionType
 	}
 	return o.Compression
+}
+
+func (o *Options) GetDisableBufferPool() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableBufferPool
+}
+
+func (o *Options) GetDisableBlockCache() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableBlockCache
 }
 
 func (o *Options) GetDisableCompactionBackoff() bool {
