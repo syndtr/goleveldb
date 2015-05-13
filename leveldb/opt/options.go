@@ -326,6 +326,11 @@ type Options struct {
 	// The default value is 500.
 	OpenFilesCacheCapacity int
 
+	// If true then opens DB in read-only mode.
+	//
+	// The default value is false.
+	ReadOnly bool
+
 	// Strict defines the DB strict level.
 	Strict Strict
 
@@ -565,6 +570,13 @@ func (o *Options) GetOpenFilesCacheCapacity() int {
 		return 0
 	}
 	return o.OpenFilesCacheCapacity
+}
+
+func (o *Options) GetReadOnly() bool {
+	if o == nil {
+		return false
+	}
+	return o.ReadOnly
 }
 
 func (o *Options) GetStrict(strict Strict) bool {

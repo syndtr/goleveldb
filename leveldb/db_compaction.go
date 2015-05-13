@@ -62,10 +62,7 @@ func (p *cStatsStaging) stopTimer() {
 }
 
 func (db *DB) compactionError() {
-	var (
-		err     error
-		wlocked bool
-	)
+	var err error
 noerr:
 	// No error.
 	for {
@@ -73,7 +70,7 @@ noerr:
 		case err = <-db.compErrSetC:
 			switch {
 			case err == nil:
-			case errors.IsCorrupted(err):
+			case err == ErrReadOnly, errors.IsCorrupted(err):
 				goto hasperr
 			default:
 				goto haserr
@@ -91,7 +88,7 @@ haserr:
 			switch {
 			case err == nil:
 				goto noerr
-			case errors.IsCorrupted(err):
+			case err == ErrReadOnly, errors.IsCorrupted(err):
 				goto hasperr
 			default:
 			}
@@ -107,9 +104,9 @@ hasperr:
 		case db.compPerErrC <- err:
 		case db.writeLockC <- struct{}{}:
 			// Hold write lock, so that write won't pass-through.
-			wlocked = true
+			db.compWriteLocking = true
 		case _, _ = <-db.closeC:
-			if wlocked {
+			if db.compWriteLocking {
 				// We should release the lock or Close will hang.
 				<-db.writeLockC
 			}

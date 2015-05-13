@@ -63,13 +63,14 @@ type DB struct {
 	journalAckC  chan error
 
 	// Compaction.
-	tcompCmdC   chan cCmd
-	tcompPauseC chan chan<- struct{}
-	mcompCmdC   chan cCmd
-	compErrC    chan error
-	compPerErrC chan error
-	compErrSetC chan error
-	compStats   []cStats
+	tcompCmdC        chan cCmd
+	tcompPauseC      chan chan<- struct{}
+	mcompCmdC        chan cCmd
+	compErrC         chan error
+	compPerErrC      chan error
+	compErrSetC      chan error
+	compWriteLocking bool
+	compStats        []cStats
 
 	// Close.
 	closeW sync.WaitGroup
@@ -108,28 +109,44 @@ func openDB(s *session) (*DB, error) {
 		closeC: make(chan struct{}),
 	}
 
-	if err := db.recoverJournal(); err != nil {
-		return nil, err
-	}
+	// Read-only mode.
+	readOnly := s.o.GetReadOnly()
 
-	// Remove any obsolete files.
-	if err := db.checkAndCleanFiles(); err != nil {
-		// Close journal.
-		if db.journal != nil {
-			db.journal.Close()
-			db.journalWriter.Close()
+	if readOnly {
+		// Recover journals (read-only mode).
+		if err := db.recoverJournalRO(); err != nil {
+			return nil, err
 		}
-		return nil, err
+	} else {
+		// Recover journals.
+		if err := db.recoverJournal(); err != nil {
+			return nil, err
+		}
+
+		// Remove any obsolete files.
+		if err := db.checkAndCleanFiles(); err != nil {
+			// Close journal.
+			if db.journal != nil {
+				db.journal.Close()
+				db.journalWriter.Close()
+			}
+			return nil, err
+		}
+
 	}
 
 	// Doesn't need to be included in the wait group.
 	go db.compactionError()
 	go db.mpoolDrain()
 
-	db.closeW.Add(3)
-	go db.tCompaction()
-	go db.mCompaction()
-	go db.jWriter()
+	if readOnly {
+		db.SetReadOnly()
+	} else {
+		db.closeW.Add(3)
+		go db.tCompaction()
+		go db.mCompaction()
+		go db.jWriter()
+	}
 
 	s.logf("db@open done T·%v", time.Since(start))
 
@@ -492,85 +509,89 @@ func (db *DB) recoverJournal() error {
 		for _, jf := range recJournalFiles {
 			db.logf("journal@recovery recovering @%d", jf.Num())
 
-			err := func() error {
-				fr, err := jf.Open()
-				if err != nil {
-					return err
-				}
-				defer fr.Close()
-
-				// Create or reset journal reader instance.
-				if jr == nil {
-					jr = journal.NewReader(fr, dropper{db.s, jf}, strict, checksum)
-				} else {
-					jr.Reset(fr, dropper{db.s, jf}, strict, checksum)
-				}
-
-				// Flush memdb and remove obsolete journal file.
-				if of != nil {
-					if mdb.Len() > 0 {
-						if _, err := db.s.flushMemdb(rec, mdb, -1); err != nil {
-							return err
-						}
-					}
-					rec.setJournalNum(jf.Num())
-					rec.setSeqNum(db.seq)
-					if err := db.s.commit(rec); err != nil {
-						return err
-					}
-					rec.resetAddedTables()
-					of.Remove()
-					of = nil
-				}
-
-				// Replay journal to memdb.
-				mdb.Reset()
-				for {
-					r, err := jr.Next()
-					if err != nil {
-						if err == io.EOF {
-							break
-						}
-						return errors.SetFile(err, jf)
-					}
-
-					buf.Reset()
-					if _, err := buf.ReadFrom(r); err != nil {
-						if err == io.ErrUnexpectedEOF {
-							// This is error returned due to corruption, with strict == false.
-							continue
-						} else {
-							return errors.SetFile(err, jf)
-						}
-					}
-					if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
-						if strict || !errors.IsCorrupted(err) {
-							return errors.SetFile(err, jf)
-						} else {
-							db.s.logf("journal error: %v (skipped)", err)
-							// We won't apply sequence number as it might be corrupted.
-							continue
-						}
-					}
-
-					// Save sequence number.
-					db.seq = batch.seq + uint64(batch.Len())
-
-					// Flush it if large enough.
-					if mdb.Size() >= writeBuffer {
-						if _, err := db.s.flushMemdb(rec, mdb, 0); err != nil {
-							return err
-						}
-						mdb.Reset()
-					}
-				}
-
-				of = jf
-				return nil
-			}()
+			fr, err := jf.Open()
 			if err != nil {
 				return err
 			}
+
+			// Create or reset journal reader instance.
+			if jr == nil {
+				jr = journal.NewReader(fr, dropper{db.s, jf}, strict, checksum)
+			} else {
+				jr.Reset(fr, dropper{db.s, jf}, strict, checksum)
+			}
+
+			// Flush memdb and remove obsolete journal file.
+			if of != nil {
+				if mdb.Len() > 0 {
+					if _, err := db.s.flushMemdb(rec, mdb, -1); err != nil {
+						fr.Close()
+						return err
+					}
+				}
+
+				rec.setJournalNum(jf.Num())
+				rec.setSeqNum(db.seq)
+				if err := db.s.commit(rec); err != nil {
+					fr.Close()
+					return err
+				}
+				rec.resetAddedTables()
+
+				of.Remove()
+				of = nil
+			}
+
+			// Replay journal to memdb.
+			mdb.Reset()
+			for {
+				r, err := jr.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+
+				buf.Reset()
+				if _, err := buf.ReadFrom(r); err != nil {
+					if err == io.ErrUnexpectedEOF {
+						// This is error returned due to corruption, with strict == false.
+						continue
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
+					if !strict && errors.IsCorrupted(err) {
+						db.s.logf("journal error: %v (skipped)", err)
+						// We won't apply sequence number as it might be corrupted.
+						continue
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+
+				// Save sequence number.
+				db.seq = batch.seq + uint64(batch.Len())
+
+				// Flush it if large enough.
+				if mdb.Size() >= writeBuffer {
+					if _, err := db.s.flushMemdb(rec, mdb, 0); err != nil {
+						fr.Close()
+						return err
+					}
+
+					mdb.Reset()
+				}
+			}
+
+			fr.Close()
+			of = jf
 		}
 
 		// Flush the last memdb.
@@ -602,6 +623,103 @@ func (db *DB) recoverJournal() error {
 	if of != nil {
 		of.Remove()
 	}
+
+	return nil
+}
+
+func (db *DB) recoverJournalRO() error {
+	// Get all journals and sort it by file number.
+	allJournalFiles, err := db.s.getFiles(storage.TypeJournal)
+	if err != nil {
+		return err
+	}
+	files(allJournalFiles).sort()
+
+	// Journals that will be recovered.
+	var recJournalFiles []storage.File
+	for _, jf := range allJournalFiles {
+		if jf.Num() >= db.s.stJournalNum || jf.Num() == db.s.stPrevJournalNum {
+			recJournalFiles = append(recJournalFiles, jf)
+		}
+	}
+
+	var (
+		// Options.
+		strict      = db.s.o.GetStrict(opt.StrictJournal)
+		checksum    = db.s.o.GetStrict(opt.StrictJournalChecksum)
+		writeBuffer = db.s.o.GetWriteBuffer()
+
+		mdb = memdb.New(db.s.icmp, writeBuffer)
+	)
+
+	// Recover journals.
+	if len(recJournalFiles) > 0 {
+		db.logf("journal@recovery RO·Mode F·%d", len(recJournalFiles))
+
+		var (
+			jr    *journal.Reader
+			buf   = &util.Buffer{}
+			batch = &Batch{}
+		)
+
+		for _, jf := range recJournalFiles {
+			db.logf("journal@recovery recovering @%d", jf.Num())
+
+			fr, err := jf.Open()
+			if err != nil {
+				return err
+			}
+
+			// Create or reset journal reader instance.
+			if jr == nil {
+				jr = journal.NewReader(fr, dropper{db.s, jf}, strict, checksum)
+			} else {
+				jr.Reset(fr, dropper{db.s, jf}, strict, checksum)
+			}
+
+			// Replay journal to memdb.
+			for {
+				r, err := jr.Next()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+
+				buf.Reset()
+				if _, err := buf.ReadFrom(r); err != nil {
+					if err == io.ErrUnexpectedEOF {
+						// This is error returned due to corruption, with strict == false.
+						continue
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
+					if !strict && errors.IsCorrupted(err) {
+						db.s.logf("journal error: %v (skipped)", err)
+						// We won't apply sequence number as it might be corrupted.
+						continue
+					}
+
+					fr.Close()
+					return errors.SetFile(err, jf)
+				}
+
+				// Save sequence number.
+				db.seq = batch.seq + uint64(batch.Len())
+			}
+
+			fr.Close()
+		}
+	}
+
+	// Set memDB.
+	db.mem = &memDB{db: db, DB: mdb, ref: 1}
 
 	return nil
 }
@@ -902,6 +1020,9 @@ func (db *DB) Close() error {
 	var err error
 	select {
 	case err = <-db.compErrC:
+		if err == ErrReadOnly {
+			err = nil
+		}
 	default:
 	}
 

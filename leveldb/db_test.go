@@ -2663,3 +2663,39 @@ func TestDB_IterTriggeredCompaction(t *testing.T) {
 func TestDB_IterTriggeredCompactionHalf(t *testing.T) {
 	testDB_IterTriggeredCompaction(t, 2)
 }
+
+func TestDB_ReadOnly(t *testing.T) {
+	h := newDbHarness(t)
+	defer h.close()
+
+	h.put("foo", "v1")
+	h.put("bar", "v2")
+	h.compactMem()
+
+	h.put("xfoo", "v1")
+	h.put("xbar", "v2")
+
+	t.Log("Trigger read-only")
+	if err := h.db.SetReadOnly(); err != nil {
+		h.close()
+		t.Fatalf("SetReadOnly error: %v", err)
+	}
+
+	h.stor.SetEmuErr(storage.TypeAll, tsOpCreate, tsOpReplace, tsOpRemove, tsOpWrite, tsOpWrite, tsOpSync)
+
+	ro := func(key, value, wantValue string) {
+		if err := h.db.Put([]byte(key), []byte(value), h.wo); err != ErrReadOnly {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		h.getVal(key, wantValue)
+	}
+
+	ro("foo", "vx", "v1")
+
+	h.o.ReadOnly = true
+	h.reopenDB()
+
+	ro("foo", "vx", "v1")
+	ro("bar", "vx", "v2")
+	h.assertNumKeys(4)
+}

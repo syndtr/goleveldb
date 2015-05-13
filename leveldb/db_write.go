@@ -309,3 +309,31 @@ func (db *DB) CompactRange(r util.Range) error {
 	// Table compaction.
 	return db.compSendRange(db.tcompCmdC, -1, r.Start, r.Limit)
 }
+
+// SetReadOnly makes DB read-only. It will stay read-only until reopened.
+func (db *DB) SetReadOnly() error {
+	if err := db.ok(); err != nil {
+		return err
+	}
+
+	// Lock writer.
+	select {
+	case db.writeLockC <- struct{}{}:
+		db.compWriteLocking = true
+	case err := <-db.compPerErrC:
+		return err
+	case _, _ = <-db.closeC:
+		return ErrClosed
+	}
+
+	// Set compaction read-only.
+	select {
+	case db.compErrSetC <- ErrReadOnly:
+	case perr := <-db.compPerErrC:
+		return perr
+	case _, _ = <-db.closeC:
+		return ErrClosed
+	}
+
+	return nil
+}
