@@ -34,12 +34,13 @@ var (
 	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
 	httpProf               = "127.0.0.1:5454"
 	enableBlockCache       = false
-	noCompression          = false
+	enableCompression      = false
+	enableBufferPool       = false
 
 	wg         = new(sync.WaitGroup)
 	done, fail uint32
 
-	bpool = util.NewBufferPool(opt.DefaultBlockSize + 128)
+	bpool *util.BufferPool
 )
 
 type arrayInt []int
@@ -77,9 +78,9 @@ func init() {
 	flag.IntVar(&dataLen, "datalen", dataLen, "data length")
 	flag.Var(&numKeys, "numkeys", "num keys")
 	flag.StringVar(&httpProf, "httpprof", httpProf, "http pprof listen addr")
+	flag.BoolVar(&enableBufferPool, "enablebufferpool", enableBufferPool, "enable buffer pool")
 	flag.BoolVar(&enableBlockCache, "enableblockcache", enableBlockCache, "enable block cache")
-	flag.BoolVar(&noCompression, "nocompression", noCompression, "disable block compression")
-
+	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
 }
 
 func randomData(dst []byte, ns, prefix byte, i uint32) []byte {
@@ -316,6 +317,10 @@ func scanTable(f storage.File, checksum bool) (corrupted bool) {
 func main() {
 	flag.Parse()
 
+	if enableBufferPool {
+		bpool = util.NewBufferPool(opt.DefaultBlockSize + 128)
+	}
+
 	log.Printf("Test DB stored at %q", dbPath)
 	if httpProf != "" {
 		log.Printf("HTTP pprof listening at %q", httpProf)
@@ -358,11 +363,13 @@ func main() {
 	}
 	o := &opt.Options{
 		OpenFilesCacheCapacity: openFilesCacheCapacity,
+		DisableBufferPool:      !enableBufferPool,
 		DisableBlockCache:      !enableBlockCache,
 		ErrorIfExist:           true,
+		Compression:            opt.NoCompression,
 	}
-	if noCompression {
-		o.Compression = opt.NoCompression
+	if enableCompression {
+		o.Compression = opt.DefaultCompression
 	}
 
 	db, err := leveldb.Open(stor, o)
