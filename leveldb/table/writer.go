@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/golang/snappy/snappy"
+	"github.com/golang/snappy"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
@@ -168,10 +168,7 @@ func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh b
 			w.compressionScratch = make([]byte, n)
 		}
 		var compressed []byte
-		compressed, err = snappy.Encode(w.compressionScratch, buf.Bytes())
-		if err != nil {
-			return
-		}
+		compressed = snappy.Encode(w.compressionScratch, buf.Bytes())
 		n := len(compressed)
 		b = compressed[:n+blockTrailerLen]
 		b[n] = blockTypeSnappyCompression
