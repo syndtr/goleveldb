@@ -329,8 +329,7 @@ func (fs *fileStorage) Close() error {
 	runtime.SetFinalizer(fs, nil)
 
 	if fs.open > 0 {
-		fs.log(fmt.Sprintf("refuse to close, %d files still open", fs.open))
-		return fmt.Errorf("leveldb/storage: cannot close, %d files still open", fs.open)
+		fs.log(fmt.Sprintf("close: warning, %d files still open", fs.open))
 	}
 	fs.open = -1
 	e1 := fs.logw.Close()
