@@ -243,7 +243,10 @@ func (fs *fileStorage) GetManifest() (f File, err error) {
 					rem = append(rem, fn)
 				}
 				if !pend1 || cerr == nil {
-					cerr = fmt.Errorf("leveldb/storage: corrupted or incomplete %s file", fn)
+					cerr = &ErrCorrupted{
+						File: fsParseName(filepath.Base(fn)),
+						Err:  errors.New("leveldb/storage: corrupted or incomplete manifest file"),
+					}
 				}
 			} else if f != nil && f1.Num() < f.Num() {
 				fs.log(fmt.Sprintf("skipping %s: obsolete", fn))
@@ -505,30 +508,37 @@ func (f *file) path() string {
 	return filepath.Join(f.fs.path, f.name())
 }
 
-func (f *file) parse(name string) bool {
-	var num uint64
+func fsParseName(name string) *FileInfo {
+	fi := &FileInfo{}
 	var tail string
-	_, err := fmt.Sscanf(name, "%d.%s", &num, &tail)
+	_, err := fmt.Sscanf(name, "%d.%s", &fi.Num, &tail)
 	if err == nil {
 		switch tail {
 		case "log":
-			f.t = TypeJournal
+			fi.Type = TypeJournal
 		case "ldb", "sst":
-			f.t = TypeTable
+			fi.Type = TypeTable
 		case "tmp":
-			f.t = TypeTemp
+			fi.Type = TypeTemp
 		default:
-			return false
+			return nil
 		}
-		f.num = num
-		return true
+		return fi
 	}
-	n, _ := fmt.Sscanf(name, "MANIFEST-%d%s", &num, &tail)
+	n, _ := fmt.Sscanf(name, "MANIFEST-%d%s", &fi.Num, &tail)
 	if n == 1 {
-		f.t = TypeManifest
-		f.num = num
-		return true
+		fi.Type = TypeManifest
+		return fi
 	}
+	return nil
+}
 
-	return false
+func (f *file) parse(name string) bool {
+	fi := fsParseName(name)
+	if fi == nil {
+		return false
+	}
+	f.t = fi.Type
+	f.num = fi.Num
+	return true
 }
