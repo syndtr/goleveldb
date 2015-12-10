@@ -315,7 +315,9 @@ func recoverTable(s *session, o *opt.Options) error {
 		for iter.Next() {
 			key := iter.Key()
 			if validIkey(key) {
-				err = tw.Append(key, iter.Value())
+				value := iter.Value()
+				verifyIKVCRC(key, value)
+				err = tw.Append(key, value)
 				if err != nil {
 					return
 				}
@@ -748,7 +750,7 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 				if kt == ktDel {
 					return nil, ErrNotFound
 				}
-				return append([]byte{}, mv...), nil
+				return verifyKVCRC(key, append([]byte{}, mv...)), nil
 			}
 		} else if me != ErrNotFound {
 			return nil, me
@@ -762,6 +764,7 @@ func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, er
 		// Trigger table compaction.
 		db.compSendTrigger(db.tcompCmdC)
 	}
+	value = verifyKVCRC(key, value)
 	return
 }
 

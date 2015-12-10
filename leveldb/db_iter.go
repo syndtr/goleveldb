@@ -312,7 +312,7 @@ func (i *dbIter) Value() []byte {
 	if i.err != nil || i.dir <= dirEOI {
 		return nil
 	}
-	return i.value
+	return verifyKVCRC(i.key, i.value)
 }
 
 func (i *dbIter) Release() {

@@ -480,6 +480,7 @@ type tWriter struct {
 
 // Append key/value pair to the table.
 func (w *tWriter) append(key, value []byte) error {
+	verifyIKVCRC(key, value)
 	if w.first == nil {
 		w.first = append([]byte{}, key...)
 	}

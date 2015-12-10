@@ -305,7 +305,8 @@ func scanTable(f storage.File, checksum bool) (corrupted bool) {
 		if checkData(i, "key", ukey) {
 			return
 		}
-		if kt == ktVal && checkData(i, "value", iter.Value()) {
+		value := iter.Value()
+		if kt == ktVal && checkData(i, "value", value[:len(value)-4]) {
 			return
 		}
 	}

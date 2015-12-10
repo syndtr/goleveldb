@@ -94,7 +94,7 @@ func (b *Batch) appendRec(kt kType, key, value []byte) {
 // Put appends 'put operation' of the given key/value pair to the batch.
 // It is safe to modify the contents of the argument after Put returns.
 func (b *Batch) Put(key, value []byte) {
-	b.appendRec(ktVal, key, value)
+	b.appendRec(ktVal, key, putKVCRC(key, value))
 }
 
 // Delete appends 'delete operation' of the given key to the batch.
@@ -233,6 +233,7 @@ func (b *Batch) decodeRec(f func(i int, kt kType, key, value []byte)) (err error
 func (b *Batch) memReplay(to *memdb.DB) error {
 	return b.decodeRec(func(i int, kt kType, key, value []byte) {
 		ikey := newIkey(key, b.seq+uint64(i), kt)
+		verifyIKVCRC(ikey, value)
 		to.Put(ikey, value)
 	})
 }

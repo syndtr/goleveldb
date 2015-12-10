@@ -9,8 +9,10 @@ package leveldb
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 type ErrIkeyCorrupted struct {
@@ -138,5 +140,45 @@ func (ik iKey) String() string {
 		return fmt.Sprintf("%s,%s%d", shorten(string(ukey)), kt, seq)
 	} else {
 		return "<invalid>"
+	}
+}
+
+func kvCRC(key, value []byte) uint32 {
+	return util.NewCRC(key).Update(value).Value()
+}
+
+func putKVCRC(key, value []byte) []byte {
+	out := make([]byte, len(value)+4)
+	copy(out, value)
+	binary.LittleEndian.PutUint32(out[len(value):], kvCRC(key, value))
+	return out
+}
+
+func noKVCRC(value []byte) []byte {
+	return value[:len(value)-4]
+}
+
+func verifyKVCRC(key, value []byte) []byte {
+	vLen := len(value) - 4
+	if vLen < 0 {
+		panic(fmt.Sprintf("Found invalid key/value pair:\nKEY:\n%s\nVALUE:\n%s", spew.Sdump(key), spew.Sdump(value)))
+	}
+	want := binary.LittleEndian.Uint32(value[vLen:])
+	got := kvCRC(key, value[:vLen])
+	if want != got {
+		panic(fmt.Sprintf("Found corrupted key/value pair: %#x vs %#x:\nKEY:\n%s\nVALUE:\n%s", want, got, spew.Sdump(key), spew.Sdump(value)))
+	}
+	return value[:vLen]
+}
+
+func verifyIKVCRC(ik, value []byte) []byte {
+	uk, _, kt, err := parseIkey(ik)
+	if err != nil {
+		panic(err)
+	}
+	if kt == ktVal {
+		return verifyKVCRC(uk, value)
+	} else {
+		return value
 	}
 }
