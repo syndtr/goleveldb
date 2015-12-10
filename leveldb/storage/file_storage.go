@@ -41,15 +41,18 @@ func (lock *fileStorageLock) Release() {
 	return
 }
 
+const logSizeThreshold = 1024 * 1024 // 1 MiB
+
 // fileStorage is a file-system backed storage.
 type fileStorage struct {
 	path string
 
-	mu    sync.Mutex
-	flock fileLock
-	slock *fileStorageLock
-	logw  *os.File
-	buf   []byte
+	mu      sync.Mutex
+	flock   fileLock
+	slock   *fileStorageLock
+	logw    *os.File
+	logSize int
+	buf     []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
 	day  int
@@ -81,8 +84,13 @@ func OpenFile(path string) (Storage, error) {
 	if err != nil {
 		return nil, err
 	}
+	logSize, err := logw.Seek(0, os.SEEK_END)
+	if err != nil {
+		logw.Close()
+		return nil, err
+	}
 
-	fs := &fileStorage{path: path, flock: flock, logw: logw}
+	fs := &fileStorage{path: path, flock: flock, logw: logw, logSize: int(logSize)}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
 }
@@ -126,6 +134,22 @@ func (fs *fileStorage) printDay(t time.Time) {
 }
 
 func (fs *fileStorage) doLog(t time.Time, str string) {
+	if fs.logSize > logSizeThreshold {
+		// Rotate log file.
+		fs.logw.Close()
+		fs.logw = nil
+		fs.logSize = 0
+		rename(filepath.Join(fs.path, "LOG"), filepath.Join(fs.path, "LOG.old"))
+	}
+	if fs.logw == nil {
+		var err error
+		fs.logw, err = os.OpenFile(filepath.Join(fs.path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+		if err != nil {
+			return
+		}
+		// Force printDay on new log file.
+		fs.day = 0
+	}
 	fs.printDay(t)
 	hour, min, sec := t.Clock()
 	msec := t.Nanosecond() / 1e3
@@ -332,12 +356,10 @@ func (fs *fileStorage) Close() error {
 		fs.log(fmt.Sprintf("close: warning, %d files still open", fs.open))
 	}
 	fs.open = -1
-	e1 := fs.logw.Close()
-	err := fs.flock.release()
-	if err == nil {
-		err = e1
+	if fs.logw != nil {
+		fs.logw.Close()
 	}
-	return err
+	return fs.flock.release()
 }
 
 type fileWrap struct {
