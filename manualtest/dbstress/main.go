@@ -30,7 +30,8 @@ import (
 var (
 	dbPath                 = path.Join(os.TempDir(), "goleveldb-testdb")
 	openFilesCacheCapacity = 500
-	dataLen                = 63
+	keyLen                 = 63
+	valueLen               = 256
 	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
 	httpProf               = "127.0.0.1:5454"
 	enableBlockCache       = false
@@ -75,7 +76,8 @@ func (a *arrayInt) Set(str string) error {
 func init() {
 	flag.StringVar(&dbPath, "db", dbPath, "testdb path")
 	flag.IntVar(&openFilesCacheCapacity, "openfilescachecap", openFilesCacheCapacity, "open files cache capacity")
-	flag.IntVar(&dataLen, "datalen", dataLen, "data length")
+	flag.IntVar(&keyLen, "keylen", keyLen, "key length")
+	flag.IntVar(&valueLen, "valuelen", valueLen, "value length")
 	flag.Var(&numKeys, "numkeys", "num keys")
 	flag.StringVar(&httpProf, "httpprof", httpProf, "http pprof listen addr")
 	flag.BoolVar(&enableBufferPool, "enablebufferpool", enableBufferPool, "enable buffer pool")
@@ -83,24 +85,32 @@ func init() {
 	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
 }
 
-func randomData(dst []byte, ns, prefix byte, i uint32) []byte {
-	n := 2 + dataLen + 4 + 4
-	n2 := n*2 + 4
-	if cap(dst) < n2 {
-		dst = make([]byte, n2)
-	} else {
-		dst = dst[:n2]
+func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
+	if dataLen < (2+4+4)*2+4 {
+		panic("dataLen is too small")
 	}
-	_, err := rand.Reader.Read(dst[2 : n-8])
-	if err != nil {
+	if cap(dst) < dataLen {
+		dst = make([]byte, dataLen)
+	} else {
+		dst = dst[:dataLen]
+	}
+	half := (dataLen - 4) / 2
+	if _, err := rand.Reader.Read(dst[2 : half-8]); err != nil {
 		panic(err)
 	}
 	dst[0] = ns
 	dst[1] = prefix
-	binary.LittleEndian.PutUint32(dst[n-8:], i)
-	binary.LittleEndian.PutUint32(dst[n-4:], util.NewCRC(dst[:n-4]).Value())
-	copy(dst[n:n+n], dst[:n])
-	binary.LittleEndian.PutUint32(dst[n2-4:], util.NewCRC(dst[:n2-4]).Value())
+	binary.LittleEndian.PutUint32(dst[half-8:], i)
+	binary.LittleEndian.PutUint32(dst[half-8:], i)
+	binary.LittleEndian.PutUint32(dst[half-4:], util.NewCRC(dst[:half-4]).Value())
+	full := half * 2
+	copy(dst[half:full], dst[:half])
+	if full < dataLen-4 {
+		if _, err := rand.Reader.Read(dst[full : dataLen-4]); err != nil {
+			panic(err)
+		}
+	}
+	binary.LittleEndian.PutUint32(dst[dataLen-4:], util.NewCRC(dst[:dataLen-4]).Value())
 	return dst
 }
 
@@ -118,7 +128,7 @@ func dataPrefix(data []byte) byte {
 }
 
 func dataI(data []byte) uint32 {
-	return binary.LittleEndian.Uint32(data[len(data)-12:])
+	return binary.LittleEndian.Uint32(data[(len(data)-4)/2-8:])
 }
 
 func dataChecksum(data []byte) (uint32, uint32) {
@@ -436,7 +446,7 @@ func main() {
 
 			keys := make([][]byte, numKey)
 			for i := range keys {
-				keys[i] = randomData(nil, byte(ns), 1, uint32(i))
+				keys[i] = randomData(nil, byte(ns), 1, uint32(i), keyLen)
 			}
 
 			wg.Add(1)
@@ -457,8 +467,8 @@ func main() {
 
 					b.Reset()
 					for _, k1 := range keys {
-						k2 = randomData(k2, byte(ns), 2, wi)
-						v2 = randomData(v2, byte(ns), 3, wi)
+						k2 = randomData(k2, byte(ns), 2, wi, keyLen)
+						v2 = randomData(v2, byte(ns), 3, wi, valueLen)
 						b.Put(k2, v2)
 						b.Put(k1, k2)
 					}
@@ -516,11 +526,16 @@ func main() {
 								}
 
 								getStat.start()
-								_, err := snap.Get(k2, nil)
+								v2, err := snap.Get(k2, nil)
 								if err != nil {
 									fatalf(err, "[%02d] READER #%d.%d K%d snap.Get: %v\nk1: %x\n -> k2: %x", ns, snapwi, ri, n, err, k1, k2)
 								}
 								getStat.record(1)
+
+								if checksum0, checksum1 := dataChecksum(v2); checksum0 != checksum1 {
+									err := &errors.ErrCorrupted{File: &storage.FileInfo{0xff, 0}, Err: fmt.Errorf("v2: %x: checksum mismatch: %v vs %v", v2, checksum0, checksum1)}
+									fatalf(err, "[%02d] READER #%d.%d K%d snap.Get: %v\nk1: %x\n -> k2: %x", ns, snapwi, ri, n, err, k1, k2)
+								}
 
 								n++
 								iterStat.start()
