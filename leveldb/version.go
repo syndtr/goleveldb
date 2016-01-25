@@ -130,7 +130,7 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byt
 
 	err = ErrNotFound
 
-	// Since entries never hope across level, finding key/value
+	// Since entries never hop across level, finding key/value
 	// in smaller level make later levels irrelevant.
 	v.walkOverlapping(ikey, func(level int, t *tFile) bool {
 		if !tseek {
@@ -323,7 +323,8 @@ func (v *version) computeCompaction() {
 	var bestLevel int = -1
 	var bestScore float64 = -1
 
-	for level, tables := range v.tables {
+	// Last level can't be compacted, so exclude from calculation.
+	for level, tables := range v.tables[:len(v.tables)-1] {
 		var score float64
 		if level == 0 {
 			// We treat level-0 specially by bounding the number of files
