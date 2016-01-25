@@ -79,7 +79,6 @@ func OpenFile(path string) (Storage, error) {
 		}
 	}()
 
-	rename(filepath.Join(path, "LOG"), filepath.Join(path, "LOG.old"))
 	logw, err := os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return nil, err
