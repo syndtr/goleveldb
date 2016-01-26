@@ -14,25 +14,30 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
-func (s *session) pickMemdbLevel(umin, umax []byte) int {
+func (s *session) pickMemdbLevel(umin, umax []byte, maxLevel int) int {
 	v := s.version()
 	defer v.release()
-	return v.pickMemdbLevel(umin, umax)
+	return v.pickMemdbLevel(umin, umax, maxLevel)
 }
 
-func (s *session) flushMemdb(rec *sessionRecord, mdb *memdb.DB, level int) (level_ int, err error) {
+func (s *session) flushMemdb(rec *sessionRecord, mdb *memdb.DB, maxLevel int) (level int, err error) {
 	// Create sorted table.
 	iter := mdb.NewIterator(nil)
 	defer iter.Release()
 	t, n, err := s.tops.createFrom(iter)
 	if err != nil {
-		return level, err
+		return
 	}
 
-	// Pick level and add to record.
-	if level < 0 {
-		level = s.pickMemdbLevel(t.imin.ukey(), t.imax.ukey())
-	}
+	// Pick level other than zero can cause compaction issue with large
+	// bulk insert and delete on strictly incrementing key-space. The
+	// problem is that the small deletion markers trapped at lower level,
+	// while key/value entries keep growing at higher level. Since the
+	// key-space is strictly incrementing it will not overlaps with
+	// higher level, thus maximum possible level is always picked, while
+	// overlapping deletion marker pushed into lower level.
+	// See: https://github.com/syndtr/goleveldb/issues/127.
+	level = s.pickMemdbLevel(t.imin.ukey(), t.imax.ukey(), maxLevel)
 	rec.addTableFile(level, t)
 
 	s.logf("memdb@flush created L%d@%d N·%d S·%s %q:%q", level, t.file.Num(), n, shortenb(int(t.size)), t.imin, t.imax)
@@ -210,7 +215,8 @@ func (c *compaction) trivial() bool {
 }
 
 func (c *compaction) baseLevelForKey(ukey []byte) bool {
-	for level, tables := range c.v.tables[c.level+2:] {
+	for level := c.level + 2; level < len(c.v.tables); level++ {
+		tables := c.v.tables[level]
 		for c.tPtrs[level] < len(tables) {
 			t := tables[c.tPtrs[level]]
 			if c.s.icmp.uCompare(ukey, t.imax.ukey()) <= 0 {

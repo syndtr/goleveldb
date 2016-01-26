@@ -271,7 +271,7 @@ func (db *DB) memCompaction() {
 
 	db.compactionTransactFunc("memdb@flush", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
-		flushLevel, err = db.s.flushMemdb(rec, mdb.DB, -1)
+		flushLevel, err = db.s.flushMemdb(rec, mdb.DB, db.memdbMaxLevel)
 		stats.stopTimer()
 		return
 	}, func() error {

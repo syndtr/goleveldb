@@ -71,6 +71,7 @@ type DB struct {
 	compErrSetC      chan error
 	compWriteLocking bool
 	compStats        []cStats
+	memdbMaxLevel    int // For testing.
 
 	// Close.
 	closeW sync.WaitGroup
@@ -527,7 +528,7 @@ func (db *DB) recoverJournal() error {
 			// Flush memdb and remove obsolete journal file.
 			if of != nil {
 				if mdb.Len() > 0 {
-					if _, err := db.s.flushMemdb(rec, mdb, -1); err != nil {
+					if _, err := db.s.flushMemdb(rec, mdb, 0); err != nil {
 						fr.Close()
 						return err
 					}

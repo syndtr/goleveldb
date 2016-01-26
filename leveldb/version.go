@@ -300,21 +300,21 @@ func (v *version) offsetOf(ikey iKey) (n uint64, err error) {
 	return
 }
 
-func (v *version) pickMemdbLevel(umin, umax []byte) (level int) {
-	if !v.tables[0].overlaps(v.s.icmp, umin, umax, true) {
-		var overlaps tFiles
-		maxLevel := v.s.o.GetMaxMemCompationLevel()
-		for ; level < maxLevel; level++ {
-			if v.tables[level+1].overlaps(v.s.icmp, umin, umax, false) {
-				break
-			}
-			overlaps = v.tables[level+2].getOverlaps(overlaps, v.s.icmp, umin, umax, false)
-			if overlaps.size() > uint64(v.s.o.GetCompactionGPOverlaps(level)) {
-				break
+func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
+	if maxLevel > 0 {
+		if !v.tables[0].overlaps(v.s.icmp, umin, umax, true) {
+			var overlaps tFiles
+			for ; level < maxLevel; level++ {
+				if v.tables[level+1].overlaps(v.s.icmp, umin, umax, false) {
+					break
+				}
+				overlaps = v.tables[level+2].getOverlaps(overlaps, v.s.icmp, umin, umax, false)
+				if overlaps.size() > uint64(v.s.o.GetCompactionGPOverlaps(level)) {
+					break
+				}
 			}
 		}
 	}
-
 	return
 }
 

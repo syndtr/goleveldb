@@ -35,7 +35,6 @@ var (
 	DefaultCompactionTotalSizeMultiplier = 10.0
 	DefaultCompressionType               = SnappyCompression
 	DefaultIteratorSamplingRate          = 1 * MiB
-	DefaultMaxMemCompationLevel          = 2
 	DefaultNumLevel                      = 7
 	DefaultOpenFilesCacher               = LRUCacher
 	DefaultOpenFilesCacheCapacity        = 500
@@ -301,13 +300,6 @@ type Options struct {
 	// The default is 1MiB.
 	IteratorSamplingRate int
 
-	// MaxMemCompationLevel defines maximum level a newly compacted 'memdb'
-	// will be pushed into if doesn't creates overlap. This should less than
-	// NumLevel. Use -1 for level-0.
-	//
-	// The default is 2.
-	MaxMemCompationLevel int
-
 	// NoSync allows completely disable fsync.
 	//
 	// The default is false.
@@ -534,21 +526,6 @@ func (o *Options) GetIteratorSamplingRate() int {
 		return DefaultIteratorSamplingRate
 	}
 	return o.IteratorSamplingRate
-}
-
-func (o *Options) GetMaxMemCompationLevel() int {
-	level := DefaultMaxMemCompationLevel
-	if o != nil {
-		if o.MaxMemCompationLevel > 0 {
-			level = o.MaxMemCompationLevel
-		} else if o.MaxMemCompationLevel < 0 {
-			level = 0
-		}
-	}
-	if level >= o.GetNumLevel() {
-		return o.GetNumLevel() - 1
-	}
-	return level
 }
 
 func (o *Options) GetNoSync() bool {

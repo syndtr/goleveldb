@@ -430,7 +430,8 @@ func (h *dbHarness) getSnapshot() (s *Snapshot) {
 	}
 	return
 }
-func (h *dbHarness) tablesPerLevel(want string) {
+
+func (h *dbHarness) getTablesPerLevel() string {
 	res := ""
 	nz := 0
 	v := h.db.s.version()
@@ -444,7 +445,11 @@ func (h *dbHarness) tablesPerLevel(want string) {
 		}
 	}
 	v.release()
-	res = res[:nz]
+	return res[:nz]
+}
+
+func (h *dbHarness) tablesPerLevel(want string) {
+	res := h.getTablesPerLevel()
 	if res != want {
 		h.t.Errorf("invalid tables len, want=%s, got=%s", want, res)
 	}
@@ -660,6 +665,8 @@ func TestDB_GetSnapshot(t *testing.T) {
 
 func TestDB_GetLevel0Ordering(t *testing.T) {
 	trun(t, func(h *dbHarness) {
+		h.db.memdbMaxLevel = 2
+
 		for i := 0; i < 4; i++ {
 			h.put("bar", fmt.Sprintf("b%d", i))
 			h.put("foo", fmt.Sprintf("v%d", i))
@@ -719,6 +726,8 @@ func TestDB_GetPicksCorrectFile(t *testing.T) {
 
 func TestDB_GetEncountersEmptyLevel(t *testing.T) {
 	trun(t, func(h *dbHarness) {
+		h.db.memdbMaxLevel = 2
+
 		// Arrange for the following to happen:
 		//   * sstable A in level 0
 		//   * nothing in level 1
@@ -1192,9 +1201,11 @@ func TestDB_HiddenValuesAreRemoved(t *testing.T) {
 	trun(t, func(h *dbHarness) {
 		s := h.db.s
 
+		m := 2
+		h.db.memdbMaxLevel = m
+
 		h.put("foo", "v1")
 		h.compactMem()
-		m := h.o.GetMaxMemCompationLevel()
 		v := s.version()
 		num := v.tLen(m)
 		v.release()
@@ -1236,9 +1247,11 @@ func TestDB_DeletionMarkers2(t *testing.T) {
 	defer h.close()
 	s := h.db.s
 
+	m := 2
+	h.db.memdbMaxLevel = m
+
 	h.put("foo", "v1")
 	h.compactMem()
-	m := h.o.GetMaxMemCompationLevel()
 	v := s.version()
 	num := v.tLen(m)
 	v.release()
@@ -1276,6 +1289,8 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{OpenFilesCacheCapacity: -1})
 	defer h.close()
 
+	h.db.memdbMaxLevel = 2
+
 	im := 10
 	jm := 10
 	for r := 0; r < 2; r++ {
@@ -1288,7 +1303,7 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 	}
 
 	if n := h.totalTables(); n != im*2 {
-		t.Errorf("total tables is %d, want %d", n, im)
+		t.Errorf("total tables is %d, want %d", n, im*2)
 	}
 
 	h.stor.SetEmuErr(storage.TypeTable, tsOpOpen)
@@ -1309,9 +1324,7 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 
 func TestDB_OverlapInLevel0(t *testing.T) {
 	trun(t, func(h *dbHarness) {
-		if h.o.GetMaxMemCompationLevel() != 2 {
-			t.Fatal("fix test to reflect the config")
-		}
+		h.db.memdbMaxLevel = 2
 
 		// Fill levels 1 and 2 to disable the pushing of new memtables to levels > 0.
 		h.put("100", "v100")
@@ -1429,7 +1442,7 @@ func TestDB_ManifestWriteError(t *testing.T) {
 			h.compactMem()
 			h.getVal("foo", "bar")
 			v := h.db.s.version()
-			if n := v.tLen(h.o.GetMaxMemCompationLevel()); n != 1 {
+			if n := v.tLen(0); n != 1 {
 				t.Errorf("invalid total tables, want=1 got=%d", n)
 			}
 			v.release()
@@ -1441,7 +1454,7 @@ func TestDB_ManifestWriteError(t *testing.T) {
 			}
 
 			// Merging compaction (will fail)
-			h.compactRangeAtErr(h.o.GetMaxMemCompationLevel(), "", "", true)
+			h.compactRangeAtErr(0, "", "", true)
 
 			h.db.Close()
 			h.stor.SetEmuErr(0, tsOpWrite)
@@ -1595,9 +1608,7 @@ func TestDB_ManualCompaction(t *testing.T) {
 	h := newDbHarness(t)
 	defer h.close()
 
-	if h.o.GetMaxMemCompationLevel() != 2 {
-		t.Fatal("fix test to reflect the config")
-	}
+	h.db.memdbMaxLevel = 2
 
 	h.putMulti(3, "p", "q")
 	h.tablesPerLevel("1,1,1")
@@ -2594,6 +2605,8 @@ func testDB_IterTriggeredCompaction(t *testing.T, limitDiv int) {
 	})
 	defer h.close()
 
+	h.db.memdbMaxLevel = 2
+
 	key := func(x int) string {
 		return fmt.Sprintf("v%06d", x)
 	}
@@ -2698,4 +2711,34 @@ func TestDB_ReadOnly(t *testing.T) {
 	ro("foo", "vx", "v1")
 	ro("bar", "vx", "v2")
 	h.assertNumKeys(4)
+}
+
+func TestDB_BulkInsertDelete(t *testing.T) {
+	h := newDbHarnessWopt(t, &opt.Options{
+		Compression:         opt.NoCompression,
+		CompactionTableSize: 128 * opt.KiB,
+		CompactionTotalSize: 1 * opt.MiB,
+		WriteBuffer:         256 * opt.KiB,
+	})
+	defer h.close()
+
+	const R = 100
+	const N = 2500
+	key := make([]byte, 4)
+	value := make([]byte, 256)
+	for i := 0; i < R; i++ {
+		offset := N * i
+		for j := 0; j < N; j++ {
+			binary.BigEndian.PutUint32(key, uint32(offset+j))
+			h.db.Put(key, value, nil)
+		}
+		for j := 0; j < N; j++ {
+			binary.BigEndian.PutUint32(key, uint32(offset+j))
+			h.db.Delete(key, nil)
+		}
+	}
+
+	if tot := h.totalTables(); tot > 10 {
+		t.Fatalf("too many uncompacted tables: %d (%s)", tot, h.getTablesPerLevel())
+	}
 }
