@@ -73,7 +73,7 @@ func (s *session) pickCompaction() *compaction {
 }
 
 // Create compaction from given level and range; need external synchronization.
-func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
+func (s *session) getCompactionRange(level int, umin, umax []byte, noLimit bool) *compaction {
 	v := s.version()
 
 	t0 := v.tables[level].getOverlaps(nil, s.icmp, umin, umax, level == 0)
@@ -86,7 +86,7 @@ func (s *session) getCompactionRange(level int, umin, umax []byte) *compaction {
 	// But we cannot do this for level-0 since level-0 files can overlap
 	// and we must not pick one file and drop another older file if the
 	// two files overlap.
-	if level > 0 {
+	if !noLimit && level > 0 {
 		limit := uint64(v.s.o.GetCompactionSourceLimit(level))
 		total := uint64(0)
 		for i, t := range t0 {

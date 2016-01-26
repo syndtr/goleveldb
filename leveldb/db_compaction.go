@@ -574,23 +574,33 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
-		if c := db.s.getCompactionRange(level, umin, umax); c != nil {
+		if c := db.s.getCompactionRange(level, umin, umax, true); c != nil {
 			db.tableCompaction(c, true)
 		}
 	} else {
-		// Scan for maximum level with overlapped tables.
-		v := db.s.version()
-		m := 1
-		for i, t := range v.tables[1:] {
-			if t.overlaps(db.s.icmp, umin, umax, false) {
-				m = i + 1
-			}
-		}
-		v.release()
+		// Retry until nothing to compact.
+		for {
+			compacted := false
 
-		for level := 0; level < m; level++ {
-			if c := db.s.getCompactionRange(level, umin, umax); c != nil {
-				db.tableCompaction(c, true)
+			// Scan for maximum level with overlapped tables.
+			v := db.s.version()
+			m := 1
+			for i, t := range v.tables[1:] {
+				if t.overlaps(db.s.icmp, umin, umax, false) {
+					m = i + 1
+				}
+			}
+			v.release()
+
+			for level := 0; level < m; level++ {
+				if c := db.s.getCompactionRange(level, umin, umax, false); c != nil {
+					db.tableCompaction(c, true)
+					compacted = true
+				}
+			}
+
+			if !compacted {
+				break
 			}
 		}
 	}
