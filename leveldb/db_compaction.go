@@ -567,14 +567,18 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	}
 }
 
-func (db *DB) tableRangeCompaction(level int, umin, umax []byte) {
-	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
+func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
+	if level >= db.s.o.GetNumLevel() {
+		return errors.New("leveldb: invalid compaction level")
+	}
 
+	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
 		if c := db.s.getCompactionRange(level, umin, umax); c != nil {
 			db.tableCompaction(c, true)
 		}
 	} else {
+		// Scan for maximum level with overlapped tables.
 		v := db.s.version()
 		m := 1
 		for i, t := range v.tables[1:] {
@@ -590,6 +594,8 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) {
 			}
 		}
 	}
+
+	return nil
 }
 
 func (db *DB) tableAutoCompaction() {
@@ -779,8 +785,7 @@ func (db *DB) tCompaction() {
 			case cIdle:
 				ackQ = append(ackQ, x)
 			case cRange:
-				db.tableRangeCompaction(cmd.level, cmd.min, cmd.max)
-				x.ack(nil)
+				x.ack(db.tableRangeCompaction(cmd.level, cmd.min, cmd.max))
 			default:
 				panic("leveldb: unknown command")
 			}
