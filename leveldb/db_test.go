@@ -158,15 +158,17 @@ func (h *dbHarness) maxNextLevelOverlappingBytes(want uint64) {
 		maxLevel    int
 	)
 	v := db.s.version()
-	for i, tt := range v.tables[1 : len(v.tables)-1] {
-		level := i + 1
-		next := v.tables[level+1]
-		for _, t := range tt {
-			r := next.getOverlaps(nil, db.s.icmp, t.imin.ukey(), t.imax.ukey(), false)
-			sum := r.size()
-			if sum > maxOverlaps {
-				maxOverlaps = sum
-				maxLevel = level
+	if len(v.levels) > 2 {
+		for i, tt := range v.levels[1 : len(v.levels)-1] {
+			level := i + 1
+			next := v.levels[level+1]
+			for _, t := range tt {
+				r := next.getOverlaps(nil, db.s.icmp, t.imin.ukey(), t.imax.ukey(), false)
+				sum := r.size()
+				if sum > maxOverlaps {
+					maxOverlaps = sum
+					maxLevel = level
+				}
 			}
 		}
 	}
@@ -435,12 +437,12 @@ func (h *dbHarness) getTablesPerLevel() string {
 	res := ""
 	nz := 0
 	v := h.db.s.version()
-	for level, tt := range v.tables {
+	for level, tables := range v.levels {
 		if level > 0 {
 			res += ","
 		}
-		res += fmt.Sprint(len(tt))
-		if len(tt) > 0 {
+		res += fmt.Sprint(len(tables))
+		if len(tables) > 0 {
 			nz = len(res)
 		}
 	}
@@ -457,8 +459,8 @@ func (h *dbHarness) tablesPerLevel(want string) {
 
 func (h *dbHarness) totalTables() (n int) {
 	v := h.db.s.version()
-	for _, tt := range v.tables {
-		n += len(tt)
+	for _, tables := range v.levels {
+		n += len(tables)
 	}
 	v.release()
 	return
@@ -974,7 +976,7 @@ func TestDB_RepeatedWritesToSameKey(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{WriteBuffer: 100000})
 	defer h.close()
 
-	maxTables := h.o.GetNumLevel() + h.o.GetWriteL0PauseTrigger()
+	maxTables := h.o.GetWriteL0PauseTrigger() + 7
 
 	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
@@ -992,7 +994,7 @@ func TestDB_RepeatedWritesToSameKeyAfterReopen(t *testing.T) {
 
 	h.reopenDB()
 
-	maxTables := h.o.GetNumLevel() + h.o.GetWriteL0PauseTrigger()
+	maxTables := h.o.GetWriteL0PauseTrigger() + 7
 
 	value := strings.Repeat("v", 2*h.o.GetWriteBuffer())
 	for i := 0; i < 5*maxTables; i++ {
@@ -1008,7 +1010,7 @@ func TestDB_SparseMerge(t *testing.T) {
 	h := newDbHarnessWopt(t, &opt.Options{Compression: opt.NoCompression})
 	defer h.close()
 
-	h.putMulti(h.o.GetNumLevel(), "A", "Z")
+	h.putMulti(7, "A", "Z")
 
 	// Suppose there is:
 	//    small amount of data with prefix A
@@ -2365,7 +2367,7 @@ func TestDB_UkeyShouldntHopAcrossTable(t *testing.T) {
 	h.compactMem()
 
 	h.waitCompaction()
-	for level, tables := range h.db.s.stVersion.tables {
+	for level, tables := range h.db.s.stVersion.levels {
 		for _, table := range tables {
 			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
 		}
@@ -2373,14 +2375,14 @@ func TestDB_UkeyShouldntHopAcrossTable(t *testing.T) {
 
 	h.compactRangeAt(0, "", "")
 	h.waitCompaction()
-	for level, tables := range h.db.s.stVersion.tables {
+	for level, tables := range h.db.s.stVersion.levels {
 		for _, table := range tables {
 			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
 		}
 	}
 	h.compactRangeAt(1, "", "")
 	h.waitCompaction()
-	for level, tables := range h.db.s.stVersion.tables {
+	for level, tables := range h.db.s.stVersion.levels {
 		for _, table := range tables {
 			t.Logf("L%d@%d %q:%q", level, table.file.Num(), table.imin, table.imax)
 		}
@@ -2465,13 +2467,13 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build grandparent.
 	v := s.version()
-	c := newCompaction(s, v, 1, append(tFiles{}, v.tables[1]...))
+	c := newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...))
 	rec := &sessionRecord{}
 	b := &tableCompactionBuilder{
 		s:         s,
 		c:         c,
 		rec:       rec,
-		stat1:     new(cStatsStaging),
+		stat1:     new(cStatStaging),
 		minSeq:    0,
 		strict:    true,
 		tableSize: o.CompactionTableSize/3 + 961,
@@ -2479,8 +2481,8 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 	if err := b.run(new(compactionTransactCounter)); err != nil {
 		t.Fatal(err)
 	}
-	for _, t := range c.tables[0] {
-		rec.delTable(c.level, t.file.Num())
+	for _, t := range c.levels[0] {
+		rec.delTable(c.sourceLevel, t.file.Num())
 	}
 	if err := s.commit(rec); err != nil {
 		t.Fatal(err)
@@ -2489,13 +2491,13 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build level-1.
 	v = s.version()
-	c = newCompaction(s, v, 0, append(tFiles{}, v.tables[0]...))
+	c = newCompaction(s, v, 0, append(tFiles{}, v.levels[0]...))
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,
 		c:         c,
 		rec:       rec,
-		stat1:     new(cStatsStaging),
+		stat1:     new(cStatStaging),
 		minSeq:    0,
 		strict:    true,
 		tableSize: o.CompactionTableSize,
@@ -2503,11 +2505,11 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 	if err := b.run(new(compactionTransactCounter)); err != nil {
 		t.Fatal(err)
 	}
-	for _, t := range c.tables[0] {
-		rec.delTable(c.level, t.file.Num())
+	for _, t := range c.levels[0] {
+		rec.delTable(c.sourceLevel, t.file.Num())
 	}
 	// Move grandparent to level-3
-	for _, t := range v.tables[2] {
+	for _, t := range v.levels[2] {
 		rec.delTable(2, t.file.Num())
 		rec.addTableFile(3, t)
 	}
@@ -2517,14 +2519,14 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 	c.release()
 
 	v = s.version()
-	for level, want := range []bool{false, true, false, true, false} {
-		got := len(v.tables[level]) > 0
+	for level, want := range []bool{false, true, false, true} {
+		got := len(v.levels[level]) > 0
 		if want != got {
 			t.Fatalf("invalid level-%d tables len: want %v, got %v", level, want, got)
 		}
 	}
-	for i, f := range v.tables[1][:len(v.tables[1])-1] {
-		nf := v.tables[1][i+1]
+	for i, f := range v.levels[1][:len(v.levels[1])-1] {
+		nf := v.levels[1][i+1]
 		if bytes.Equal(f.imax.ukey(), nf.imin.ukey()) {
 			t.Fatalf("KEY %q hop across table %d .. %d", f.imax.ukey(), f.file.Num(), nf.file.Num())
 		}
@@ -2533,13 +2535,13 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Compaction with transient error.
 	v = s.version()
-	c = newCompaction(s, v, 1, append(tFiles{}, v.tables[1]...))
+	c = newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...))
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,
 		c:         c,
 		rec:       rec,
-		stat1:     new(cStatsStaging),
+		stat1:     new(cStatStaging),
 		minSeq:    0,
 		strict:    true,
 		tableSize: o.CompactionTableSize,
@@ -2563,11 +2565,11 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 	stor.SetEmuRandErr(0, tsOpRead, tsOpReadAt, tsOpWrite)
 
 	v = s.version()
-	if len(v.tables[1]) != len(v.tables[2]) {
-		t.Fatalf("invalid tables length, want %d, got %d", len(v.tables[1]), len(v.tables[2]))
+	if len(v.levels[1]) != len(v.levels[2]) {
+		t.Fatalf("invalid tables length, want %d, got %d", len(v.levels[1]), len(v.levels[2]))
 	}
-	for i, f0 := range v.tables[1] {
-		f1 := v.tables[2][i]
+	for i, f0 := range v.levels[1] {
+		f1 := v.levels[2][i]
 		iter0 := s.tops.newIterator(f0, nil, nil)
 		iter1 := s.tops.newIterator(f1, nil, nil)
 		for j := 0; true; j++ {

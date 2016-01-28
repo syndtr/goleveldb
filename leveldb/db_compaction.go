@@ -18,28 +18,23 @@ var (
 	errCompactionTransactExiting = errors.New("leveldb: compaction transact exiting")
 )
 
-type cStats struct {
-	sync.Mutex
+type cStat struct {
 	duration time.Duration
 	read     uint64
 	write    uint64
 }
 
-func (p *cStats) add(n *cStatsStaging) {
-	p.Lock()
+func (p *cStat) add(n *cStatStaging) {
 	p.duration += n.duration
 	p.read += n.read
 	p.write += n.write
-	p.Unlock()
 }
 
-func (p *cStats) get() (duration time.Duration, read, write uint64) {
-	p.Lock()
-	defer p.Unlock()
+func (p *cStat) get() (duration time.Duration, read, write uint64) {
 	return p.duration, p.read, p.write
 }
 
-type cStatsStaging struct {
+type cStatStaging struct {
 	start    time.Time
 	duration time.Duration
 	on       bool
@@ -47,18 +42,43 @@ type cStatsStaging struct {
 	write    uint64
 }
 
-func (p *cStatsStaging) startTimer() {
+func (p *cStatStaging) startTimer() {
 	if !p.on {
 		p.start = time.Now()
 		p.on = true
 	}
 }
 
-func (p *cStatsStaging) stopTimer() {
+func (p *cStatStaging) stopTimer() {
 	if p.on {
 		p.duration += time.Since(p.start)
 		p.on = false
 	}
+}
+
+type cStats struct {
+	lk    sync.Mutex
+	stats []cStat
+}
+
+func (p *cStats) addStat(level int, n *cStatStaging) {
+	p.lk.Lock()
+	if level >= len(p.stats) {
+		newStats := make([]cStat, level+1)
+		copy(newStats, p.stats)
+		p.stats = newStats
+	}
+	p.stats[level].add(n)
+	p.lk.Unlock()
+}
+
+func (p *cStats) getStat(level int) (duration time.Duration, read, write uint64) {
+	p.lk.Lock()
+	defer p.lk.Unlock()
+	if level < len(p.stats) {
+		return p.stats[level].get()
+	}
+	return
 }
 
 func (db *DB) compactionError() {
@@ -265,7 +285,7 @@ func (db *DB) memCompaction() {
 
 	var (
 		rec        = &sessionRecord{}
-		stats      = &cStatsStaging{}
+		stats      = &cStatStaging{}
 		flushLevel int
 	)
 
@@ -299,7 +319,7 @@ func (db *DB) memCompaction() {
 	for _, r := range rec.addedTables {
 		stats.write += r.size
 	}
-	db.compStats[flushLevel].add(stats)
+	db.compStats.addStat(flushLevel, stats)
 
 	// Drop frozen memdb.
 	db.dropFrozenMem()
@@ -323,7 +343,7 @@ type tableCompactionBuilder struct {
 	s            *session
 	c            *compaction
 	rec          *sessionRecord
-	stat0, stat1 *cStatsStaging
+	stat0, stat1 *cStatStaging
 
 	snapHasLastUkey bool
 	snapLastUkey    []byte
@@ -377,9 +397,9 @@ func (b *tableCompactionBuilder) flush() error {
 	if err != nil {
 		return err
 	}
-	b.rec.addTableFile(b.c.level+1, t)
+	b.rec.addTableFile(b.c.sourceLevel+1, t)
 	b.stat1.write += t.size
-	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.level+1, t.file.Num(), b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
+	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.sourceLevel+1, t.file.Num(), b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
 	b.tw = nil
 	return nil
 }
@@ -514,30 +534,30 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	defer c.release()
 
 	rec := &sessionRecord{}
-	rec.addCompPtr(c.level, c.imax)
+	rec.addCompPtr(c.sourceLevel, c.imax)
 
 	if !noTrivial && c.trivial() {
-		t := c.tables[0][0]
-		db.logf("table@move L%d@%d -> L%d", c.level, t.file.Num(), c.level+1)
-		rec.delTable(c.level, t.file.Num())
-		rec.addTableFile(c.level+1, t)
+		t := c.levels[0][0]
+		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.file.Num(), c.sourceLevel+1)
+		rec.delTable(c.sourceLevel, t.file.Num())
+		rec.addTableFile(c.sourceLevel+1, t)
 		db.compactionTransactFunc("table@move", func(cnt *compactionTransactCounter) (err error) {
 			return db.s.commit(rec)
 		}, nil)
 		return
 	}
 
-	var stats [2]cStatsStaging
-	for i, tables := range c.tables {
+	var stats [2]cStatStaging
+	for i, tables := range c.levels {
 		for _, t := range tables {
 			stats[i].read += t.size
 			// Insert deleted tables into record
-			rec.delTable(c.level+i, t.file.Num())
+			rec.delTable(c.sourceLevel+i, t.file.Num())
 		}
 	}
 	sourceSize := int(stats[0].read + stats[1].read)
 	minSeq := db.minSeq()
-	db.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.level, len(c.tables[0]), c.level+1, len(c.tables[1]), shortenb(sourceSize), minSeq)
+	db.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.sourceLevel, len(c.levels[0]), c.sourceLevel+1, len(c.levels[1]), shortenb(sourceSize), minSeq)
 
 	b := &tableCompactionBuilder{
 		db:        db,
@@ -547,7 +567,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		stat1:     &stats[1],
 		minSeq:    minSeq,
 		strict:    db.s.o.GetStrict(opt.StrictCompaction),
-		tableSize: db.s.o.GetCompactionTableSize(c.level + 1),
+		tableSize: db.s.o.GetCompactionTableSize(c.sourceLevel + 1),
 	}
 	db.compactionTransact("table@build", b)
 
@@ -563,15 +583,11 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 
 	// Save compaction stats
 	for i := range stats {
-		db.compStats[c.level+1].add(&stats[i])
+		db.compStats.addStat(c.sourceLevel+1, &stats[i])
 	}
 }
 
 func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
-	if level >= db.s.o.GetNumLevel() {
-		return errors.New("leveldb: invalid compaction level")
-	}
-
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
 		if c := db.s.getCompactionRange(level, umin, umax, true); c != nil {
@@ -585,9 +601,10 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 			// Scan for maximum level with overlapped tables.
 			v := db.s.version()
 			m := 1
-			for i, t := range v.tables[1:] {
-				if t.overlaps(db.s.icmp, umin, umax, false) {
-					m = i + 1
+			for i := m; i < len(v.levels); i++ {
+				tables := v.levels[i]
+				if tables.overlaps(db.s.icmp, umin, umax, false) {
+					m = i
 				}
 			}
 			v.release()

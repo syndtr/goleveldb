@@ -35,7 +35,6 @@ var (
 	DefaultCompactionTotalSizeMultiplier = 10.0
 	DefaultCompressionType               = SnappyCompression
 	DefaultIteratorSamplingRate          = 1 * MiB
-	DefaultNumLevel                      = 7
 	DefaultOpenFilesCacher               = LRUCacher
 	DefaultOpenFilesCacheCapacity        = 500
 	DefaultWriteBuffer                   = 4 * MiB
@@ -305,12 +304,6 @@ type Options struct {
 	// The default is false.
 	NoSync bool
 
-	// NumLevel defines number of database level. The level shouldn't changed
-	// between opens, or the database will panic.
-	//
-	// The default is 7.
-	NumLevel int
-
 	// OpenFilesCacher provides cache algorithm for open files caching.
 	// Specify NoCacher to disable caching algorithm.
 	//
@@ -432,7 +425,7 @@ func (o *Options) GetCompactionTableSize(level int) int {
 		if o.CompactionTableSize > 0 {
 			base = o.CompactionTableSize
 		}
-		if len(o.CompactionTableSizeMultiplierPerLevel) > level && o.CompactionTableSizeMultiplierPerLevel[level] > 0 {
+		if level < len(o.CompactionTableSizeMultiplierPerLevel) && o.CompactionTableSizeMultiplierPerLevel[level] > 0 {
 			mult = o.CompactionTableSizeMultiplierPerLevel[level]
 		} else if o.CompactionTableSizeMultiplier > 0 {
 			mult = math.Pow(o.CompactionTableSizeMultiplier, float64(level))
@@ -453,7 +446,7 @@ func (o *Options) GetCompactionTotalSize(level int) int64 {
 		if o.CompactionTotalSize > 0 {
 			base = o.CompactionTotalSize
 		}
-		if len(o.CompactionTotalSizeMultiplierPerLevel) > level && o.CompactionTotalSizeMultiplierPerLevel[level] > 0 {
+		if level < len(o.CompactionTotalSizeMultiplierPerLevel) && o.CompactionTotalSizeMultiplierPerLevel[level] > 0 {
 			mult = o.CompactionTotalSizeMultiplierPerLevel[level]
 		} else if o.CompactionTotalSizeMultiplier > 0 {
 			mult = math.Pow(o.CompactionTotalSizeMultiplier, float64(level))
@@ -533,13 +526,6 @@ func (o *Options) GetNoSync() bool {
 		return false
 	}
 	return o.NoSync
-}
-
-func (o *Options) GetNumLevel() int {
-	if o == nil || o.NumLevel <= 0 {
-		return DefaultNumLevel
-	}
-	return o.NumLevel
 }
 
 func (o *Options) GetOpenFilesCacher() Cacher {

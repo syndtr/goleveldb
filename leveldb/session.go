@@ -66,9 +66,8 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 		return
 	}
 	s = &session{
-		stor:       stor,
-		storLock:   storLock,
-		stCompPtrs: make([]iKey, o.GetNumLevel()),
+		stor:     stor,
+		storLock: storLock,
 	}
 	s.setOptions(o)
 	s.tops = newTableOps(s)
@@ -128,8 +127,7 @@ func (s *session) recover() (err error) {
 
 	var (
 		// Options.
-		numLevel = s.o.GetNumLevel()
-		strict   = s.o.GetStrict(opt.StrictManifest)
+		strict = s.o.GetStrict(opt.StrictManifest)
 
 		jr      = journal.NewReader(reader, dropper{s, m}, strict, true)
 		rec     = &sessionRecord{}
@@ -146,11 +144,11 @@ func (s *session) recover() (err error) {
 			return errors.SetFile(err, m)
 		}
 
-		err = rec.decode(r, numLevel)
+		err = rec.decode(r)
 		if err == nil {
 			// save compact pointers
 			for _, r := range rec.compPtrs {
-				s.stCompPtrs[r.level] = iKey(r.ikey)
+				s.setCompPtr(r.level, iKey(r.ikey))
 			}
 			// commit record to version staging
 			staging.commit(rec)

@@ -70,7 +70,7 @@ type DB struct {
 	compPerErrC      chan error
 	compErrSetC      chan error
 	compWriteLocking bool
-	compStats        []cStats
+	compStats        cStats
 	memdbMaxLevel    int // For testing.
 
 	// Close.
@@ -105,7 +105,6 @@ func openDB(s *session) (*DB, error) {
 		compErrC:    make(chan error),
 		compPerErrC: make(chan error),
 		compErrSetC: make(chan error),
-		compStats:   make([]cStats, s.o.GetNumLevel()),
 		// Close
 		closeC: make(chan struct{}),
 	}
@@ -921,7 +920,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		var level uint
 		var rest string
 		n, _ := fmt.Sscanf(p[len(numFilesPrefix):], "%d%s", &level, &rest)
-		if n != 1 || int(level) >= db.s.o.GetNumLevel() {
+		if n != 1 {
 			err = ErrNotFound
 		} else {
 			value = fmt.Sprint(v.tLen(int(level)))
@@ -930,8 +929,8 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		value = "Compactions\n" +
 			" Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)\n" +
 			"-------+------------+---------------+---------------+---------------+---------------\n"
-		for level, tables := range v.tables {
-			duration, read, write := db.compStats[level].get()
+		for level, tables := range v.levels {
+			duration, read, write := db.compStats.getStat(level)
 			if len(tables) == 0 && duration == 0 {
 				continue
 			}
@@ -940,7 +939,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
 	case p == "sstables":
-		for level, tables := range v.tables {
+		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
 			for _, t := range tables {
 				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Num(), t.size, t.imin, t.imax)

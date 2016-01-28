@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"fmt"
 	"sync/atomic"
 	"unsafe"
 
@@ -23,7 +24,7 @@ type tSet struct {
 type version struct {
 	s *session
 
-	tables []tFiles
+	levels []tFiles
 
 	// Level that should be compacted next and its compaction score.
 	// Score < 1 means compaction is not strictly needed. These fields
@@ -39,7 +40,7 @@ type version struct {
 }
 
 func newVersion(s *session) *version {
-	return &version{s: s, tables: make([]tFiles, s.o.GetNumLevel())}
+	return &version{s: s}
 }
 
 func (v *version) releaseNB() {
@@ -51,18 +52,18 @@ func (v *version) releaseNB() {
 		panic("negative version ref")
 	}
 
-	tables := make(map[uint64]bool)
-	for _, tt := range v.next.tables {
+	nextTables := make(map[uint64]bool)
+	for _, tt := range v.next.levels {
 		for _, t := range tt {
 			num := t.file.Num()
-			tables[num] = true
+			nextTables[num] = true
 		}
 	}
 
-	for _, tt := range v.tables {
+	for _, tt := range v.levels {
 		for _, t := range tt {
 			num := t.file.Num()
-			if _, ok := tables[num]; !ok {
+			if _, ok := nextTables[num]; !ok {
 				v.s.tops.remove(t)
 			}
 		}
@@ -82,7 +83,7 @@ func (v *version) walkOverlapping(ikey iKey, f func(level int, t *tFile) bool, l
 	ukey := ikey.ukey()
 
 	// Walk tables level-by-level.
-	for level, tables := range v.tables {
+	for level, tables := range v.levels {
 		if len(tables) == 0 {
 			continue
 		}
@@ -150,6 +151,7 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byt
 		} else {
 			fikey, fval, ferr = v.s.tops.find(t, ikey, ro)
 		}
+
 		switch ferr {
 		case nil:
 		case ErrNotFound:
@@ -228,27 +230,22 @@ func (v *version) sampleSeek(ikey iKey) (tcomp bool) {
 }
 
 func (v *version) getIterators(slice *util.Range, ro *opt.ReadOptions) (its []iterator.Iterator) {
-	// Merge all level zero files together since they may overlap
-	for _, t := range v.tables[0] {
-		it := v.s.tops.newIterator(t, slice, ro)
-		its = append(its, it)
-	}
-
 	strict := opt.GetStrict(v.s.o.Options, ro, opt.StrictReader)
-	for _, tables := range v.tables[1:] {
-		if len(tables) == 0 {
-			continue
+	for level, tables := range v.levels {
+		if level == 0 {
+			// Merge all level zero files together since they may overlap.
+			for _, t := range tables {
+				its = append(its, v.s.tops.newIterator(t, slice, ro))
+			}
+		} else if len(tables) != 0 {
+			its = append(its, iterator.NewIndexedIterator(tables.newIndexIterator(v.s.tops, v.s.icmp, slice, ro), strict))
 		}
-
-		it := iterator.NewIndexedIterator(tables.newIndexIterator(v.s.tops, v.s.icmp, slice, ro), strict)
-		its = append(its, it)
 	}
-
 	return
 }
 
 func (v *version) newStaging() *versionStaging {
-	return &versionStaging{base: v, tables: make([]tablesScratch, v.s.o.GetNumLevel())}
+	return &versionStaging{base: v}
 }
 
 // Spawn a new version based on this version.
@@ -259,19 +256,22 @@ func (v *version) spawn(r *sessionRecord) *version {
 }
 
 func (v *version) fillRecord(r *sessionRecord) {
-	for level, ts := range v.tables {
-		for _, t := range ts {
+	for level, tables := range v.levels {
+		for _, t := range tables {
 			r.addTableFile(level, t)
 		}
 	}
 }
 
 func (v *version) tLen(level int) int {
-	return len(v.tables[level])
+	if level < len(v.levels) {
+		return len(v.levels[level])
+	}
+	return 0
 }
 
 func (v *version) offsetOf(ikey iKey) (n uint64, err error) {
-	for level, tables := range v.tables {
+	for level, tables := range v.levels {
 		for _, t := range tables {
 			if v.s.icmp.Compare(t.imax, ikey) <= 0 {
 				// Entire file is before "ikey", so just add the file size
@@ -302,15 +302,22 @@ func (v *version) offsetOf(ikey iKey) (n uint64, err error) {
 
 func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 	if maxLevel > 0 {
-		if !v.tables[0].overlaps(v.s.icmp, umin, umax, true) {
+		if len(v.levels) == 0 {
+			return maxLevel
+		}
+		if !v.levels[0].overlaps(v.s.icmp, umin, umax, true) {
 			var overlaps tFiles
 			for ; level < maxLevel; level++ {
-				if v.tables[level+1].overlaps(v.s.icmp, umin, umax, false) {
+				if pLevel := level + 1; pLevel >= len(v.levels) {
+					return maxLevel
+				} else if v.levels[pLevel].overlaps(v.s.icmp, umin, umax, false) {
 					break
 				}
-				overlaps = v.tables[level+2].getOverlaps(overlaps, v.s.icmp, umin, umax, false)
-				if overlaps.size() > uint64(v.s.o.GetCompactionGPOverlaps(level)) {
-					break
+				if gpLevel := level + 2; gpLevel < len(v.levels) {
+					overlaps = v.levels[gpLevel].getOverlaps(overlaps, v.s.icmp, umin, umax, false)
+					if overlaps.size() > uint64(v.s.o.GetCompactionGPOverlaps(level)) {
+						break
+					}
 				}
 			}
 		}
@@ -320,18 +327,23 @@ func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 
 func (v *version) computeCompaction() {
 	// Precomputed best level for next compaction
-	var bestLevel int = -1
-	var bestScore float64 = -1
+	bestLevel := int(-1)
+	bestScore := float64(-1)
 
-	// Last level can't be compacted, so exclude from calculation.
-	for level, tables := range v.tables[:len(v.tables)-1] {
+	statFiles := make([]int, len(v.levels))
+	statSizes := make([]string, len(v.levels))
+	statScore := make([]string, len(v.levels))
+	statTotSize := uint64(0)
+
+	for level, tables := range v.levels {
 		var score float64
+		size := tables.size()
 		if level == 0 {
 			// We treat level-0 specially by bounding the number of files
 			// instead of number of bytes for two reasons:
 			//
 			// (1) With larger write-buffer sizes, it is nice not to do too
-			// many level-0 compactions.
+			// many level-0 compaction.
 			//
 			// (2) The files in level-0 are merged on every read and
 			// therefore we wish to avoid too many files when the individual
@@ -340,17 +352,24 @@ func (v *version) computeCompaction() {
 			// overwrites/deletions).
 			score = float64(len(tables)) / float64(v.s.o.GetCompactionL0Trigger())
 		} else {
-			score = float64(tables.size()) / float64(v.s.o.GetCompactionTotalSize(level))
+			score = float64(size) / float64(v.s.o.GetCompactionTotalSize(level))
 		}
 
 		if score > bestScore {
 			bestLevel = level
 			bestScore = score
 		}
+
+		statFiles[level] = len(tables)
+		statSizes[level] = shortenb(int(size))
+		statScore[level] = fmt.Sprintf("%.2f", score)
+		statTotSize += size
 	}
 
 	v.cLevel = bestLevel
 	v.cScore = bestScore
+
+	v.s.logf("version@stat F·%v S·%s%v Sc·%v", statFiles, shortenb(int(statTotSize)), statSizes, statScore)
 }
 
 func (v *version) needCompaction() bool {
@@ -364,37 +383,42 @@ type tablesScratch struct {
 
 type versionStaging struct {
 	base   *version
-	tables []tablesScratch
+	levels []tablesScratch
+}
+
+func (p *versionStaging) getScratch(level int) *tablesScratch {
+	if level >= len(p.levels) {
+		newLevels := make([]tablesScratch, level+1)
+		copy(newLevels, p.levels)
+		p.levels = newLevels
+	}
+	return &(p.levels[level])
 }
 
 func (p *versionStaging) commit(r *sessionRecord) {
 	// Deleted tables.
 	for _, r := range r.deletedTables {
-		tm := &(p.tables[r.level])
-
-		if len(p.base.tables[r.level]) > 0 {
-			if tm.deleted == nil {
-				tm.deleted = make(map[uint64]struct{})
+		scratch := p.getScratch(r.level)
+		if r.level < len(p.base.levels) && len(p.base.levels[r.level]) > 0 {
+			if scratch.deleted == nil {
+				scratch.deleted = make(map[uint64]struct{})
 			}
-			tm.deleted[r.num] = struct{}{}
+			scratch.deleted[r.num] = struct{}{}
 		}
-
-		if tm.added != nil {
-			delete(tm.added, r.num)
+		if scratch.added != nil {
+			delete(scratch.added, r.num)
 		}
 	}
 
 	// New tables.
 	for _, r := range r.addedTables {
-		tm := &(p.tables[r.level])
-
-		if tm.added == nil {
-			tm.added = make(map[uint64]atRecord)
+		scratch := p.getScratch(r.level)
+		if scratch.added == nil {
+			scratch.added = make(map[uint64]atRecord)
 		}
-		tm.added[r.num] = r
-
-		if tm.deleted != nil {
-			delete(tm.deleted, r.num)
+		scratch.added[r.num] = r
+		if scratch.deleted != nil {
+			delete(scratch.deleted, r.num)
 		}
 	}
 }
@@ -402,39 +426,62 @@ func (p *versionStaging) commit(r *sessionRecord) {
 func (p *versionStaging) finish() *version {
 	// Build new version.
 	nv := newVersion(p.base.s)
-	for level, tm := range p.tables {
-		btables := p.base.tables[level]
-
-		n := len(btables) + len(tm.added) - len(tm.deleted)
-		if n < 0 {
-			n = 0
-		}
-		nt := make(tFiles, 0, n)
-
-		// Base tables.
-		for _, t := range btables {
-			if _, ok := tm.deleted[t.file.Num()]; ok {
-				continue
-			}
-			if _, ok := tm.added[t.file.Num()]; ok {
-				continue
-			}
-			nt = append(nt, t)
-		}
-
-		// New tables.
-		for _, r := range tm.added {
-			nt = append(nt, p.base.s.tableFileFromRecord(r))
-		}
-
-		// Sort tables.
-		if level == 0 {
-			nt.sortByNum()
-		} else {
-			nt.sortByKey(p.base.s.icmp)
-		}
-		nv.tables[level] = nt
+	numLevel := len(p.levels)
+	if len(p.base.levels) > numLevel {
+		numLevel = len(p.base.levels)
 	}
+	nv.levels = make([]tFiles, numLevel)
+	for level := 0; level < numLevel; level++ {
+		var baseTabels tFiles
+		if level < len(p.base.levels) {
+			baseTabels = p.base.levels[level]
+		}
+
+		if level < len(p.levels) {
+			scratch := p.levels[level]
+
+			var nt tFiles
+			// Prealloc list if possible.
+			if n := len(baseTabels) + len(scratch.added) - len(scratch.deleted); n > 0 {
+				nt = make(tFiles, 0, n)
+			}
+
+			// Base tables.
+			for _, t := range baseTabels {
+				if _, ok := scratch.deleted[t.file.Num()]; ok {
+					continue
+				}
+				if _, ok := scratch.added[t.file.Num()]; ok {
+					continue
+				}
+				nt = append(nt, t)
+			}
+
+			// New tables.
+			for _, r := range scratch.added {
+				nt = append(nt, p.base.s.tableFileFromRecord(r))
+			}
+
+			if len(nt) != 0 {
+				// Sort tables.
+				if level == 0 {
+					nt.sortByNum()
+				} else {
+					nt.sortByKey(p.base.s.icmp)
+				}
+
+				nv.levels[level] = nt
+			}
+		} else {
+			nv.levels[level] = baseTabels
+		}
+	}
+
+	// Trim levels.
+	n := len(nv.levels)
+	for ; n > 0 && nv.levels[n-1] == nil; n-- {
+	}
+	nv.levels = nv.levels[:n]
 
 	// Compute compaction score for new version.
 	nv.computeCompaction()

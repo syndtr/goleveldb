@@ -41,7 +41,7 @@ func (db *DB) checkAndCleanFiles() error {
 	defer v.release()
 
 	tablesMap := make(map[uint64]bool)
-	for _, tables := range v.tables {
+	for _, tables := range v.levels {
 		for _, t := range tables {
 			tablesMap[t.file.Num()] = false
 		}

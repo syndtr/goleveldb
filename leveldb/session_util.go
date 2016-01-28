@@ -121,6 +121,24 @@ func (s *session) reuseFileNum(num uint64) {
 	}
 }
 
+// Set compaction ptr at given level; need external synchronization.
+func (s *session) setCompPtr(level int, ik iKey) {
+	if level >= len(s.stCompPtrs) {
+		newCompPtrs := make([]iKey, level+1)
+		copy(newCompPtrs, s.stCompPtrs)
+		s.stCompPtrs = newCompPtrs
+	}
+	s.stCompPtrs[level] = append(iKey{}, ik...)
+}
+
+// Get compaction ptr at given level; need external synchronization.
+func (s *session) getCompPtr(level int) iKey {
+	if level >= len(s.stCompPtrs) {
+		return nil
+	}
+	return s.stCompPtrs[level]
+}
+
 // Manifest related utils.
 
 // Fill given session record obj with current states; need external
@@ -149,21 +167,21 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 
 // Mark if record has been committed, this will update session state;
 // need external synchronization.
-func (s *session) recordCommited(r *sessionRecord) {
-	if r.has(recJournalNum) {
-		s.stJournalNum = r.journalNum
+func (s *session) recordCommited(rec *sessionRecord) {
+	if rec.has(recJournalNum) {
+		s.stJournalNum = rec.journalNum
 	}
 
-	if r.has(recPrevJournalNum) {
-		s.stPrevJournalNum = r.prevJournalNum
+	if rec.has(recPrevJournalNum) {
+		s.stPrevJournalNum = rec.prevJournalNum
 	}
 
-	if r.has(recSeqNum) {
-		s.stSeqNum = r.seqNum
+	if rec.has(recSeqNum) {
+		s.stSeqNum = rec.seqNum
 	}
 
-	for _, p := range r.compPtrs {
-		s.stCompPtrs[p.level] = iKey(p.ikey)
+	for _, r := range rec.compPtrs {
+		s.setCompPtr(r.level, iKey(r.ikey))
 	}
 }
 
