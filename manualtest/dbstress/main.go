@@ -145,52 +145,98 @@ func dataNsSlice(ns byte) *util.Range {
 	return util.BytesPrefix([]byte{ns})
 }
 
-type testingFile struct {
-	storage.File
-}
-
-func (tf *testingFile) Remove() error {
-	if atomic.LoadUint32(&fail) == 1 {
-		return nil
-	}
-
-	if tf.Type() == storage.TypeTable {
-		if scanTable(tf, true) {
-			return nil
-		}
-	}
-	return tf.File.Remove()
-}
-
 type testingStorage struct {
 	storage.Storage
 }
 
-func (ts *testingStorage) GetFile(num uint64, t storage.FileType) storage.File {
-	return &testingFile{ts.Storage.GetFile(num, t)}
-}
-
-func (ts *testingStorage) GetFiles(t storage.FileType) ([]storage.File, error) {
-	files, err := ts.Storage.GetFiles(t)
+func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupted bool) {
+	r, err := ts.Open(fd)
 	if err != nil {
-		return nil, err
+		log.Fatal(err)
 	}
-	for i := range files {
-		files[i] = &testingFile{files[i]}
+	defer r.Close()
+
+	size, err := r.Seek(0, os.SEEK_END)
+	if err != nil {
+		log.Fatal(err)
 	}
-	return files, nil
+
+	o := &opt.Options{Strict: opt.NoStrict}
+	if checksum {
+		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
+	}
+	tr, err := table.NewReader(r, size, fd, nil, bpool, o)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer tr.Release()
+
+	checkData := func(i int, t string, data []byte) bool {
+		if len(data) == 0 {
+			panic(fmt.Sprintf("[%v] nil data: i=%d t=%s", fd, i, t))
+		}
+
+		checksum0, checksum1 := dataChecksum(data)
+		if checksum0 != checksum1 {
+			atomic.StoreUint32(&fail, 1)
+			atomic.StoreUint32(&done, 1)
+			corrupted = true
+
+			data0, data1 := dataSplit(data)
+			data0c0, data0c1 := dataChecksum(data0)
+			data1c0, data1c1 := dataChecksum(data1)
+			log.Printf("FATAL: [%v] Corrupted data i=%d t=%s (%#x != %#x): %x(%v) vs %x(%v)",
+				fd, i, t, checksum0, checksum1, data0, data0c0 == data0c1, data1, data1c0 == data1c1)
+			return true
+		}
+		return false
+	}
+
+	iter := tr.NewIterator(nil, nil)
+	defer iter.Release()
+	for i := 0; iter.Next(); i++ {
+		ukey, _, kt, kerr := parseIkey(iter.Key())
+		if kerr != nil {
+			atomic.StoreUint32(&fail, 1)
+			atomic.StoreUint32(&done, 1)
+			corrupted = true
+
+			log.Printf("FATAL: [%v] Corrupted ikey i=%d: %v", fd, i, kerr)
+			return
+		}
+		if checkData(i, "key", ukey) {
+			return
+		}
+		if kt == ktVal && checkData(i, "value", iter.Value()) {
+			return
+		}
+	}
+	if err := iter.Error(); err != nil {
+		if errors.IsCorrupted(err) {
+			atomic.StoreUint32(&fail, 1)
+			atomic.StoreUint32(&done, 1)
+			corrupted = true
+
+			log.Printf("FATAL: [%v] Corruption detected: %v", fd, err)
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	return
 }
 
-func (ts *testingStorage) GetManifest() (storage.File, error) {
-	f, err := ts.Storage.GetManifest()
-	if err == nil {
-		f = &testingFile{f}
+func (ts *testingStorage) Remove(fd storage.FileDesc) error {
+	if atomic.LoadUint32(&fail) == 1 {
+		return nil
 	}
-	return f, err
-}
 
-func (ts *testingStorage) SetManifest(f storage.File) error {
-	return ts.Storage.SetManifest(f.(*testingFile).File)
+	if fd.Type == storage.TypeTable {
+		if ts.scanTable(fd, true) {
+			return nil
+		}
+	}
+	return ts.Storage.Remove(fd)
 }
 
 type latencyStats struct {
@@ -246,84 +292,6 @@ func (s *latencyStats) add(x *latencyStats) {
 	s.num += x.num
 }
 
-func scanTable(f storage.File, checksum bool) (corrupted bool) {
-	fi := storage.NewFileInfo(f)
-	r, err := f.Open()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer r.Close()
-
-	size, err := r.Seek(0, os.SEEK_END)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	o := &opt.Options{Strict: opt.NoStrict}
-	if checksum {
-		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
-	}
-	tr, err := table.NewReader(r, size, fi, nil, bpool, o)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer tr.Release()
-
-	checkData := func(i int, t string, data []byte) bool {
-		if len(data) == 0 {
-			panic(fmt.Sprintf("[%v] nil data: i=%d t=%s", fi, i, t))
-		}
-
-		checksum0, checksum1 := dataChecksum(data)
-		if checksum0 != checksum1 {
-			atomic.StoreUint32(&fail, 1)
-			atomic.StoreUint32(&done, 1)
-			corrupted = true
-
-			data0, data1 := dataSplit(data)
-			data0c0, data0c1 := dataChecksum(data0)
-			data1c0, data1c1 := dataChecksum(data1)
-			log.Printf("FATAL: [%v] Corrupted data i=%d t=%s (%#x != %#x): %x(%v) vs %x(%v)",
-				fi, i, t, checksum0, checksum1, data0, data0c0 == data0c1, data1, data1c0 == data1c1)
-			return true
-		}
-		return false
-	}
-
-	iter := tr.NewIterator(nil, nil)
-	defer iter.Release()
-	for i := 0; iter.Next(); i++ {
-		ukey, _, kt, kerr := parseIkey(iter.Key())
-		if kerr != nil {
-			atomic.StoreUint32(&fail, 1)
-			atomic.StoreUint32(&done, 1)
-			corrupted = true
-
-			log.Printf("FATAL: [%v] Corrupted ikey i=%d: %v", fi, i, kerr)
-			return
-		}
-		if checkData(i, "key", ukey) {
-			return
-		}
-		if kt == ktVal && checkData(i, "value", iter.Value()) {
-			return
-		}
-	}
-	if err := iter.Error(); err != nil {
-		if errors.IsCorrupted(err) {
-			atomic.StoreUint32(&fail, 1)
-			atomic.StoreUint32(&done, 1)
-			corrupted = true
-
-			log.Printf("FATAL: [%v] Corruption detected: %v", fi, err)
-		} else {
-			log.Fatal(err)
-		}
-	}
-
-	return
-}
-
 func main() {
 	flag.Parse()
 
@@ -349,8 +317,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	stor = &testingStorage{stor}
-	defer stor.Close()
+	tstor := &testingStorage{stor}
+	defer tstor.Close()
 
 	fatalf := func(err error, format string, v ...interface{}) {
 		atomic.StoreUint32(&fail, 1)
@@ -358,10 +326,10 @@ func main() {
 		log.Printf("FATAL: "+format, v...)
 		if err != nil && errors.IsCorrupted(err) {
 			cerr := err.(*errors.ErrCorrupted)
-			if cerr.File != nil && cerr.File.Type == storage.TypeTable {
+			if !cerr.Fd.Nil() && cerr.Fd.Type == storage.TypeTable {
 				log.Print("FATAL: corruption detected, scanning...")
-				if !scanTable(stor.GetFile(cerr.File.Num, cerr.File.Type), false) {
-					log.Printf("FATAL: unable to find corrupted key/value pair in table %v", cerr.File)
+				if !tstor.scanTable(storage.FileDesc{Type: storage.TypeTable, Num: cerr.Fd.Num}, false) {
+					log.Printf("FATAL: unable to find corrupted key/value pair in table %v", cerr.Fd)
 				}
 			}
 		}
@@ -382,7 +350,7 @@ func main() {
 		o.Compression = opt.DefaultCompression
 	}
 
-	db, err := leveldb.Open(stor, o)
+	db, err := leveldb.Open(tstor, o)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -533,7 +501,7 @@ func main() {
 								getStat.record(1)
 
 								if checksum0, checksum1 := dataChecksum(v2); checksum0 != checksum1 {
-									err := &errors.ErrCorrupted{File: &storage.FileInfo{0xff, 0}, Err: fmt.Errorf("v2: %x: checksum mismatch: %v vs %v", v2, checksum0, checksum1)}
+									err := &errors.ErrCorrupted{Fd: storage.FileDesc{0xff, 0}, Err: fmt.Errorf("v2: %x: checksum mismatch: %v vs %v", v2, checksum0, checksum1)}
 									fatalf(err, "[%02d] READER #%d.%d K%d snap.Get: %v\nk1: %x\n -> k2: %x", ns, snapwi, ri, n, err, k1, k2)
 								}
 

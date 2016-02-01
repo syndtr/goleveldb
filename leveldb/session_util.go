@@ -17,15 +17,15 @@ import (
 // Logging.
 
 type dropper struct {
-	s    *session
-	file storage.File
+	s  *session
+	fd storage.FileDesc
 }
 
 func (d dropper) Drop(err error) {
 	if e, ok := err.(*journal.ErrCorrupted); ok {
-		d.s.logf("journal@drop %s-%d S·%s %q", d.file.Type(), d.file.Num(), shortenb(e.Size), e.Reason)
+		d.s.logf("journal@drop %s-%d S·%s %q", d.fd.Type, d.fd.Num, shortenb(e.Size), e.Reason)
 	} else {
-		d.s.logf("journal@drop %s-%d %q", d.file.Type(), d.file.Num(), err)
+		d.s.logf("journal@drop %s-%d %q", d.fd.Type, d.fd.Num, err)
 	}
 }
 
@@ -34,25 +34,9 @@ func (s *session) logf(format string, v ...interface{}) { s.stor.Log(fmt.Sprintf
 
 // File utils.
 
-func (s *session) getJournalFile(num uint64) storage.File {
-	return s.stor.GetFile(num, storage.TypeJournal)
-}
-
-func (s *session) getTableFile(num uint64) storage.File {
-	return s.stor.GetFile(num, storage.TypeTable)
-}
-
-func (s *session) getFiles(t storage.FileType) ([]storage.File, error) {
-	return s.stor.GetFiles(t)
-}
-
-func (s *session) newTemp() storage.File {
-	num := atomic.AddUint64(&s.stTempFileNum, 1) - 1
-	return s.stor.GetFile(num, storage.TypeTemp)
-}
-
-func (s *session) tableFileFromRecord(r atRecord) *tFile {
-	return newTableFile(s.getTableFile(r.num), r.size, r.imin, r.imax)
+func (s *session) newTemp() storage.FileDesc {
+	num := atomic.AddInt64(&s.stTempFileNum, 1) - 1
+	return storage.FileDesc{storage.TypeTemp, num}
 }
 
 // Session state.
@@ -80,42 +64,42 @@ func (s *session) setVersion(v *version) {
 }
 
 // Get current unused file number.
-func (s *session) nextFileNum() uint64 {
-	return atomic.LoadUint64(&s.stNextFileNum)
+func (s *session) nextFileNum() int64 {
+	return atomic.LoadInt64(&s.stNextFileNum)
 }
 
 // Set current unused file number to num.
-func (s *session) setNextFileNum(num uint64) {
-	atomic.StoreUint64(&s.stNextFileNum, num)
+func (s *session) setNextFileNum(num int64) {
+	atomic.StoreInt64(&s.stNextFileNum, num)
 }
 
 // Mark file number as used.
-func (s *session) markFileNum(num uint64) {
+func (s *session) markFileNum(num int64) {
 	nextFileNum := num + 1
 	for {
 		old, x := s.stNextFileNum, nextFileNum
 		if old > x {
 			x = old
 		}
-		if atomic.CompareAndSwapUint64(&s.stNextFileNum, old, x) {
+		if atomic.CompareAndSwapInt64(&s.stNextFileNum, old, x) {
 			break
 		}
 	}
 }
 
 // Allocate a file number.
-func (s *session) allocFileNum() uint64 {
-	return atomic.AddUint64(&s.stNextFileNum, 1) - 1
+func (s *session) allocFileNum() int64 {
+	return atomic.AddInt64(&s.stNextFileNum, 1) - 1
 }
 
 // Reuse given file number.
-func (s *session) reuseFileNum(num uint64) {
+func (s *session) reuseFileNum(num int64) {
 	for {
 		old, x := s.stNextFileNum, num
 		if old != x+1 {
 			x = old
 		}
-		if atomic.CompareAndSwapUint64(&s.stNextFileNum, old, x) {
+		if atomic.CompareAndSwapInt64(&s.stNextFileNum, old, x) {
 			break
 		}
 	}
@@ -187,9 +171,8 @@ func (s *session) recordCommited(rec *sessionRecord) {
 
 // Create a new manifest file; need external synchronization.
 func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
-	num := s.allocFileNum()
-	file := s.stor.GetFile(num, storage.TypeManifest)
-	writer, err := file.Create()
+	fd := storage.FileDesc{storage.TypeManifest, s.allocFileNum()}
+	writer, err := s.stor.Create(fd)
 	if err != nil {
 		return
 	}
@@ -214,16 +197,16 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 			if s.manifestWriter != nil {
 				s.manifestWriter.Close()
 			}
-			if s.manifestFile != nil {
-				s.manifestFile.Remove()
+			if !s.manifestFd.Nil() {
+				s.stor.Remove(s.manifestFd)
 			}
-			s.manifestFile = file
+			s.manifestFd = fd
 			s.manifestWriter = writer
 			s.manifest = jw
 		} else {
 			writer.Close()
-			file.Remove()
-			s.reuseFileNum(num)
+			s.stor.Remove(fd)
+			s.reuseFileNum(fd.Num)
 		}
 	}()
 
@@ -239,7 +222,7 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	if err != nil {
 		return
 	}
-	err = s.stor.SetManifest(file)
+	err = s.stor.SetMeta(fd)
 	return
 }
 

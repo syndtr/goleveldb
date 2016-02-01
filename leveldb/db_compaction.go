@@ -12,6 +12,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 var (
@@ -20,8 +21,8 @@ var (
 
 type cStat struct {
 	duration time.Duration
-	read     uint64
-	write    uint64
+	read     int64
+	write    int64
 }
 
 func (p *cStat) add(n *cStatStaging) {
@@ -30,7 +31,7 @@ func (p *cStat) add(n *cStatStaging) {
 	p.write += n.write
 }
 
-func (p *cStat) get() (duration time.Duration, read, write uint64) {
+func (p *cStat) get() (duration time.Duration, read, write int64) {
 	return p.duration, p.read, p.write
 }
 
@@ -38,8 +39,8 @@ type cStatStaging struct {
 	start    time.Time
 	duration time.Duration
 	on       bool
-	read     uint64
-	write    uint64
+	read     int64
+	write    int64
 }
 
 func (p *cStatStaging) startTimer() {
@@ -72,7 +73,7 @@ func (p *cStats) addStat(level int, n *cStatStaging) {
 	p.lk.Unlock()
 }
 
-func (p *cStats) getStat(level int) (duration time.Duration, read, write uint64) {
+func (p *cStats) getStat(level int) (duration time.Duration, read, write int64) {
 	p.lk.Lock()
 	defer p.lk.Unlock()
 	if level < len(p.stats) {
@@ -297,8 +298,7 @@ func (db *DB) memCompaction() {
 	}, func() error {
 		for _, r := range rec.addedTables {
 			db.logf("memdb@flush revert @%d", r.num)
-			f := db.s.getTableFile(r.num)
-			if err := f.Remove(); err != nil {
+			if err := db.s.stor.Remove(storage.FileDesc{Type: storage.TypeTable, Num: r.num}); err != nil {
 				return err
 			}
 		}
@@ -307,7 +307,7 @@ func (db *DB) memCompaction() {
 
 	db.compactionTransactFunc("memdb@commit", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
-		rec.setJournalNum(db.journalFile.Num())
+		rec.setJournalNum(db.journalFd.Num)
 		rec.setSeqNum(db.frozenSeq)
 		err = db.s.commit(rec)
 		stats.stopTimer()
@@ -399,7 +399,7 @@ func (b *tableCompactionBuilder) flush() error {
 	}
 	b.rec.addTableFile(b.c.sourceLevel+1, t)
 	b.stat1.write += t.size
-	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.sourceLevel+1, t.file.Num(), b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
+	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.sourceLevel+1, t.fd.Num, b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
 	b.tw = nil
 	return nil
 }
@@ -522,8 +522,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 func (b *tableCompactionBuilder) revert() error {
 	for _, at := range b.rec.addedTables {
 		b.s.logf("table@build revert @%d", at.num)
-		f := b.s.getTableFile(at.num)
-		if err := f.Remove(); err != nil {
+		if err := b.s.stor.Remove(storage.FileDesc{Type: storage.TypeTable, Num: at.num}); err != nil {
 			return err
 		}
 	}
@@ -538,8 +537,8 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 
 	if !noTrivial && c.trivial() {
 		t := c.levels[0][0]
-		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.file.Num(), c.sourceLevel+1)
-		rec.delTable(c.sourceLevel, t.file.Num())
+		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.fd.Num, c.sourceLevel+1)
+		rec.delTable(c.sourceLevel, t.fd.Num)
 		rec.addTableFile(c.sourceLevel+1, t)
 		db.compactionTransactFunc("table@move", func(cnt *compactionTransactCounter) (err error) {
 			return db.s.commit(rec)
@@ -552,7 +551,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		for _, t := range tables {
 			stats[i].read += t.size
 			// Insert deleted tables into record
-			rec.delTable(c.sourceLevel+i, t.file.Num())
+			rec.delTable(c.sourceLevel+i, t.fd.Num)
 		}
 	}
 	sourceSize := int(stats[0].read + stats[1].read)

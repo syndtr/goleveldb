@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type ErrIkeyCorrupted struct {
@@ -23,7 +24,7 @@ func (e *ErrIkeyCorrupted) Error() string {
 }
 
 func newErrIkeyCorrupted(ikey []byte, reason string) error {
-	return errors.NewErrCorrupted(nil, &ErrIkeyCorrupted{append([]byte{}, ikey...), reason})
+	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrIkeyCorrupted{append([]byte{}, ikey...), reason})
 }
 
 type kType int

@@ -36,14 +36,14 @@ type DB struct {
 	s *session
 
 	// MemDB.
-	memMu             sync.RWMutex
-	memPool           chan *memdb.DB
-	mem, frozenMem    *memDB
-	journal           *journal.Writer
-	journalWriter     storage.Writer
-	journalFile       storage.File
-	frozenJournalFile storage.File
-	frozenSeq         uint64
+	memMu           sync.RWMutex
+	memPool         chan *memdb.DB
+	mem, frozenMem  *memDB
+	journal         *journal.Writer
+	journalWriter   storage.Writer
+	journalFd       storage.FileDesc
+	frozenJournalFd storage.FileDesc
+	frozenSeq       uint64
 
 	// Snapshot.
 	snapsMu   sync.Mutex
@@ -278,12 +278,11 @@ func recoverTable(s *session, o *opt.Options) error {
 	o.Strict &= ^opt.StrictReader
 
 	// Get all tables and sort it by file number.
-	tableFiles_, err := s.getFiles(storage.TypeTable)
+	fds, err := s.stor.List(storage.TypeTable)
 	if err != nil {
 		return err
 	}
-	tableFiles := files(tableFiles_)
-	tableFiles.sort()
+	sortFds(fds)
 
 	var (
 		maxSeq                                                            uint64
@@ -296,17 +295,17 @@ func recoverTable(s *session, o *opt.Options) error {
 		rec   = &sessionRecord{}
 		bpool = util.NewBufferPool(o.GetBlockSize() + 5)
 	)
-	buildTable := func(iter iterator.Iterator) (tmp storage.File, size int64, err error) {
-		tmp = s.newTemp()
-		writer, err := tmp.Create()
+	buildTable := func(iter iterator.Iterator) (tmpFd storage.FileDesc, size int64, err error) {
+		tmpFd = s.newTemp()
+		writer, err := s.stor.Create(tmpFd)
 		if err != nil {
 			return
 		}
 		defer func() {
 			writer.Close()
 			if err != nil {
-				tmp.Remove()
-				tmp = nil
+				s.stor.Remove(tmpFd)
+				tmpFd = storage.FileDesc{}
 			}
 		}()
 
@@ -338,9 +337,9 @@ func recoverTable(s *session, o *opt.Options) error {
 		size = int64(tw.BytesLen())
 		return
 	}
-	recoverTable := func(file storage.File) error {
-		s.logf("table@recovery recovering @%d", file.Num())
-		reader, err := file.Open()
+	recoverTable := func(fd storage.FileDesc) error {
+		s.logf("table@recovery recovering @%d", fd.Num)
+		reader, err := s.stor.Open(fd)
 		if err != nil {
 			return err
 		}
@@ -362,7 +361,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, size, storage.NewFileInfo(file), nil, bpool, o)
+		tr, err := table.NewReader(reader, size, fd, nil, bpool, o)
 		if err != nil {
 			return err
 		}
@@ -370,7 +369,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		if itererr, ok := iter.(iterator.ErrorCallbackSetter); ok {
 			itererr.SetErrorCallback(func(err error) {
 				if errors.IsCorrupted(err) {
-					s.logf("table@recovery block corruption @%d %q", file.Num(), err)
+					s.logf("table@recovery block corruption @%d %q", fd.Num, err)
 					tcorruptedBlock++
 				}
 			})
@@ -405,23 +404,23 @@ func recoverTable(s *session, o *opt.Options) error {
 
 		if strict && (tcorruptedKey > 0 || tcorruptedBlock > 0) {
 			droppedTable++
-			s.logf("table@recovery dropped @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", file.Num(), tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
+			s.logf("table@recovery dropped @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", fd.Num, tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
 			return nil
 		}
 
 		if tgoodKey > 0 {
 			if tcorruptedKey > 0 || tcorruptedBlock > 0 {
 				// Rebuild the table.
-				s.logf("table@recovery rebuilding @%d", file.Num())
+				s.logf("table@recovery rebuilding @%d", fd.Num)
 				iter := tr.NewIterator(nil, nil)
-				tmp, newSize, err := buildTable(iter)
+				tmpFd, newSize, err := buildTable(iter)
 				iter.Release()
 				if err != nil {
 					return err
 				}
 				closed = true
 				reader.Close()
-				if err := file.Replace(tmp); err != nil {
+				if err := s.stor.Rename(tmpFd, fd); err != nil {
 					return err
 				}
 				size = newSize
@@ -431,30 +430,30 @@ func recoverTable(s *session, o *opt.Options) error {
 			}
 			recoveredKey += tgoodKey
 			// Add table to level 0.
-			rec.addTable(0, file.Num(), uint64(size), imin, imax)
-			s.logf("table@recovery recovered @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", file.Num(), tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
+			rec.addTable(0, fd.Num, size, imin, imax)
+			s.logf("table@recovery recovered @%d Gk·%d Ck·%d Cb·%d S·%d Q·%d", fd.Num, tgoodKey, tcorruptedKey, tcorruptedBlock, size, tSeq)
 		} else {
 			droppedTable++
-			s.logf("table@recovery unrecoverable @%d Ck·%d Cb·%d S·%d", file.Num(), tcorruptedKey, tcorruptedBlock, size)
+			s.logf("table@recovery unrecoverable @%d Ck·%d Cb·%d S·%d", fd.Num, tcorruptedKey, tcorruptedBlock, size)
 		}
 
 		return nil
 	}
 
 	// Recover all tables.
-	if len(tableFiles) > 0 {
-		s.logf("table@recovery F·%d", len(tableFiles))
+	if len(fds) > 0 {
+		s.logf("table@recovery F·%d", len(fds))
 
 		// Mark file number as used.
-		s.markFileNum(tableFiles[len(tableFiles)-1].Num())
+		s.markFileNum(fds[len(fds)-1].Num)
 
-		for _, file := range tableFiles {
-			if err := recoverTable(file); err != nil {
+		for _, fd := range fds {
+			if err := recoverTable(fd); err != nil {
 				return err
 			}
 		}
 
-		s.logf("table@recovery recovered F·%d N·%d Gk·%d Ck·%d Q·%d", len(tableFiles), recoveredKey, goodKey, corruptedKey, maxSeq)
+		s.logf("table@recovery recovered F·%d N·%d Gk·%d Ck·%d Q·%d", len(fds), recoveredKey, goodKey, corruptedKey, maxSeq)
 	}
 
 	// Set sequence number.
@@ -471,31 +470,31 @@ func recoverTable(s *session, o *opt.Options) error {
 
 func (db *DB) recoverJournal() error {
 	// Get all journals and sort it by file number.
-	allJournalFiles, err := db.s.getFiles(storage.TypeJournal)
+	fds_, err := db.s.stor.List(storage.TypeJournal)
 	if err != nil {
 		return err
 	}
-	files(allJournalFiles).sort()
+	sortFds(fds_)
 
 	// Journals that will be recovered.
-	var recJournalFiles []storage.File
-	for _, jf := range allJournalFiles {
-		if jf.Num() >= db.s.stJournalNum || jf.Num() == db.s.stPrevJournalNum {
-			recJournalFiles = append(recJournalFiles, jf)
+	var fds []storage.FileDesc
+	for _, fd := range fds_ {
+		if fd.Num >= db.s.stJournalNum || fd.Num == db.s.stPrevJournalNum {
+			fds = append(fds, fd)
 		}
 	}
 
 	var (
-		of  storage.File // Obsolete file.
+		ofd storage.FileDesc // Obsolete file.
 		rec = &sessionRecord{}
 	)
 
 	// Recover journals.
-	if len(recJournalFiles) > 0 {
-		db.logf("journal@recovery F·%d", len(recJournalFiles))
+	if len(fds) > 0 {
+		db.logf("journal@recovery F·%d", len(fds))
 
 		// Mark file number as used.
-		db.s.markFileNum(recJournalFiles[len(recJournalFiles)-1].Num())
+		db.s.markFileNum(fds[len(fds)-1].Num)
 
 		var (
 			// Options.
@@ -509,23 +508,23 @@ func (db *DB) recoverJournal() error {
 			batch = &Batch{}
 		)
 
-		for _, jf := range recJournalFiles {
-			db.logf("journal@recovery recovering @%d", jf.Num())
+		for _, fd := range fds {
+			db.logf("journal@recovery recovering @%d", fd.Num)
 
-			fr, err := jf.Open()
+			fr, err := db.s.stor.Open(fd)
 			if err != nil {
 				return err
 			}
 
 			// Create or reset journal reader instance.
 			if jr == nil {
-				jr = journal.NewReader(fr, dropper{db.s, jf}, strict, checksum)
+				jr = journal.NewReader(fr, dropper{db.s, fd}, strict, checksum)
 			} else {
-				jr.Reset(fr, dropper{db.s, jf}, strict, checksum)
+				jr.Reset(fr, dropper{db.s, fd}, strict, checksum)
 			}
 
 			// Flush memdb and remove obsolete journal file.
-			if of != nil {
+			if !ofd.Nil() {
 				if mdb.Len() > 0 {
 					if _, err := db.s.flushMemdb(rec, mdb, 0); err != nil {
 						fr.Close()
@@ -533,7 +532,7 @@ func (db *DB) recoverJournal() error {
 					}
 				}
 
-				rec.setJournalNum(jf.Num())
+				rec.setJournalNum(fd.Num)
 				rec.setSeqNum(db.seq)
 				if err := db.s.commit(rec); err != nil {
 					fr.Close()
@@ -541,8 +540,8 @@ func (db *DB) recoverJournal() error {
 				}
 				rec.resetAddedTables()
 
-				of.Remove()
-				of = nil
+				db.s.stor.Remove(ofd)
+				ofd = storage.FileDesc{}
 			}
 
 			// Replay journal to memdb.
@@ -555,7 +554,7 @@ func (db *DB) recoverJournal() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 
 				buf.Reset()
@@ -566,7 +565,7 @@ func (db *DB) recoverJournal() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
 					if !strict && errors.IsCorrupted(err) {
@@ -576,7 +575,7 @@ func (db *DB) recoverJournal() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 
 				// Save sequence number.
@@ -594,7 +593,7 @@ func (db *DB) recoverJournal() error {
 			}
 
 			fr.Close()
-			of = jf
+			ofd = fd
 		}
 
 		// Flush the last memdb.
@@ -611,7 +610,7 @@ func (db *DB) recoverJournal() error {
 	}
 
 	// Commit.
-	rec.setJournalNum(db.journalFile.Num())
+	rec.setJournalNum(db.journalFd.Num)
 	rec.setSeqNum(db.seq)
 	if err := db.s.commit(rec); err != nil {
 		// Close journal on error.
@@ -623,8 +622,8 @@ func (db *DB) recoverJournal() error {
 	}
 
 	// Remove the last obsolete journal file.
-	if of != nil {
-		of.Remove()
+	if !ofd.Nil() {
+		db.s.stor.Remove(ofd)
 	}
 
 	return nil
@@ -632,17 +631,17 @@ func (db *DB) recoverJournal() error {
 
 func (db *DB) recoverJournalRO() error {
 	// Get all journals and sort it by file number.
-	allJournalFiles, err := db.s.getFiles(storage.TypeJournal)
+	fds_, err := db.s.stor.List(storage.TypeJournal)
 	if err != nil {
 		return err
 	}
-	files(allJournalFiles).sort()
+	sortFds(fds_)
 
 	// Journals that will be recovered.
-	var recJournalFiles []storage.File
-	for _, jf := range allJournalFiles {
-		if jf.Num() >= db.s.stJournalNum || jf.Num() == db.s.stPrevJournalNum {
-			recJournalFiles = append(recJournalFiles, jf)
+	var fds []storage.FileDesc
+	for _, fd := range fds_ {
+		if fd.Num >= db.s.stJournalNum || fd.Num == db.s.stPrevJournalNum {
+			fds = append(fds, fd)
 		}
 	}
 
@@ -656,8 +655,8 @@ func (db *DB) recoverJournalRO() error {
 	)
 
 	// Recover journals.
-	if len(recJournalFiles) > 0 {
-		db.logf("journal@recovery RO·Mode F·%d", len(recJournalFiles))
+	if len(fds) > 0 {
+		db.logf("journal@recovery RO·Mode F·%d", len(fds))
 
 		var (
 			jr    *journal.Reader
@@ -665,19 +664,19 @@ func (db *DB) recoverJournalRO() error {
 			batch = &Batch{}
 		)
 
-		for _, jf := range recJournalFiles {
-			db.logf("journal@recovery recovering @%d", jf.Num())
+		for _, fd := range fds {
+			db.logf("journal@recovery recovering @%d", fd.Num)
 
-			fr, err := jf.Open()
+			fr, err := db.s.stor.Open(fd)
 			if err != nil {
 				return err
 			}
 
 			// Create or reset journal reader instance.
 			if jr == nil {
-				jr = journal.NewReader(fr, dropper{db.s, jf}, strict, checksum)
+				jr = journal.NewReader(fr, dropper{db.s, fd}, strict, checksum)
 			} else {
-				jr.Reset(fr, dropper{db.s, jf}, strict, checksum)
+				jr.Reset(fr, dropper{db.s, fd}, strict, checksum)
 			}
 
 			// Replay journal to memdb.
@@ -689,7 +688,7 @@ func (db *DB) recoverJournalRO() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 
 				buf.Reset()
@@ -700,7 +699,7 @@ func (db *DB) recoverJournalRO() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
 					if !strict && errors.IsCorrupted(err) {
@@ -710,7 +709,7 @@ func (db *DB) recoverJournalRO() error {
 					}
 
 					fr.Close()
-					return errors.SetFile(err, jf)
+					return errors.SetFd(err, fd)
 				}
 
 				// Save sequence number.
@@ -942,7 +941,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
 			for _, t := range tables {
-				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.file.Num(), t.size, t.imin, t.imax)
+				value += fmt.Sprintf("%d:%d[%q .. %q]\n", t.fd.Num, t.size, t.imin, t.imax)
 			}
 		}
 	case p == "blockpool":
@@ -1063,8 +1062,6 @@ func (db *DB) Close() error {
 	db.frozenMem = nil
 	db.journal = nil
 	db.journalWriter = nil
-	db.journalFile = nil
-	db.frozenJournalFile = nil
 	db.closer = nil
 
 	return err

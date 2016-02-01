@@ -52,17 +52,17 @@ func (v *version) releaseNB() {
 		panic("negative version ref")
 	}
 
-	nextTables := make(map[uint64]bool)
+	nextTables := make(map[int64]bool)
 	for _, tt := range v.next.levels {
 		for _, t := range tt {
-			num := t.file.Num()
+			num := t.fd.Num
 			nextTables[num] = true
 		}
 	}
 
 	for _, tt := range v.levels {
 		for _, t := range tt {
-			num := t.file.Num()
+			num := t.fd.Num
 			if _, ok := nextTables[num]; !ok {
 				v.s.tops.remove(t)
 			}
@@ -275,7 +275,7 @@ func (v *version) offsetOf(ikey iKey) (n uint64, err error) {
 		for _, t := range tables {
 			if v.s.icmp.Compare(t.imax, ikey) <= 0 {
 				// Entire file is before "ikey", so just add the file size
-				n += t.size
+				n += uint64(t.size)
 			} else if v.s.icmp.Compare(t.imin, ikey) > 0 {
 				// Entire file is after "ikey", so ignore
 				if level > 0 {
@@ -315,7 +315,7 @@ func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 				}
 				if gpLevel := level + 2; gpLevel < len(v.levels) {
 					overlaps = v.levels[gpLevel].getOverlaps(overlaps, v.s.icmp, umin, umax, false)
-					if overlaps.size() > uint64(v.s.o.GetCompactionGPOverlaps(level)) {
+					if overlaps.size() > int64(v.s.o.GetCompactionGPOverlaps(level)) {
 						break
 					}
 				}
@@ -333,7 +333,7 @@ func (v *version) computeCompaction() {
 	statFiles := make([]int, len(v.levels))
 	statSizes := make([]string, len(v.levels))
 	statScore := make([]string, len(v.levels))
-	statTotSize := uint64(0)
+	statTotSize := int64(0)
 
 	for level, tables := range v.levels {
 		var score float64
@@ -377,8 +377,8 @@ func (v *version) needCompaction() bool {
 }
 
 type tablesScratch struct {
-	added   map[uint64]atRecord
-	deleted map[uint64]struct{}
+	added   map[int64]atRecord
+	deleted map[int64]struct{}
 }
 
 type versionStaging struct {
@@ -401,7 +401,7 @@ func (p *versionStaging) commit(r *sessionRecord) {
 		scratch := p.getScratch(r.level)
 		if r.level < len(p.base.levels) && len(p.base.levels[r.level]) > 0 {
 			if scratch.deleted == nil {
-				scratch.deleted = make(map[uint64]struct{})
+				scratch.deleted = make(map[int64]struct{})
 			}
 			scratch.deleted[r.num] = struct{}{}
 		}
@@ -414,7 +414,7 @@ func (p *versionStaging) commit(r *sessionRecord) {
 	for _, r := range r.addedTables {
 		scratch := p.getScratch(r.level)
 		if scratch.added == nil {
-			scratch.added = make(map[uint64]atRecord)
+			scratch.added = make(map[int64]atRecord)
 		}
 		scratch.added[r.num] = r
 		if scratch.deleted != nil {
@@ -448,10 +448,10 @@ func (p *versionStaging) finish() *version {
 
 			// Base tables.
 			for _, t := range baseTabels {
-				if _, ok := scratch.deleted[t.file.Num()]; ok {
+				if _, ok := scratch.deleted[t.fd.Num]; ok {
 					continue
 				}
-				if _, ok := scratch.added[t.file.Num()]; ok {
+				if _, ok := scratch.added[t.fd.Num]; ok {
 					continue
 				}
 				nt = append(nt, t)
@@ -459,7 +459,7 @@ func (p *versionStaging) finish() *version {
 
 			// New tables.
 			for _, r := range scratch.added {
-				nt = append(nt, p.base.s.tableFileFromRecord(r))
+				nt = append(nt, tableFileFromRecord(r))
 			}
 
 			if len(nt) != 0 {

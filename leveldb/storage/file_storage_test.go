@@ -17,14 +17,14 @@ var cases = []struct {
 	oldName []string
 	name    string
 	ftype   FileType
-	num     uint64
+	num     int64
 }{
 	{nil, "000100.log", TypeJournal, 100},
 	{nil, "000000.log", TypeJournal, 0},
 	{[]string{"000000.sst"}, "000000.ldb", TypeTable, 0},
 	{nil, "MANIFEST-000002", TypeManifest, 2},
 	{nil, "MANIFEST-000007", TypeManifest, 7},
-	{nil, "18446744073709551615.log", TypeJournal, 18446744073709551615},
+	{nil, "9223372036854775807.log", TypeJournal, 9223372036854775807},
 	{nil, "000100.tmp", TypeTemp, 100},
 }
 
@@ -55,9 +55,8 @@ var invalidCases = []string{
 
 func TestFileStorage_CreateFileName(t *testing.T) {
 	for _, c := range cases {
-		f := &file{num: c.num, t: c.ftype}
-		if f.name() != c.name {
-			t.Errorf("invalid filename got '%s', want '%s'", f.name(), c.name)
+		if name := fsGenName(FileDesc{c.ftype, c.num}); name != c.name {
+			t.Errorf("invalid filename got '%s', want '%s'", name, c.name)
 		}
 	}
 }
@@ -65,16 +64,16 @@ func TestFileStorage_CreateFileName(t *testing.T) {
 func TestFileStorage_ParseFileName(t *testing.T) {
 	for _, c := range cases {
 		for _, name := range append([]string{c.name}, c.oldName...) {
-			f := new(file)
-			if !f.parse(name) {
+			fd, ok := fsParseName(name)
+			if !ok {
 				t.Errorf("cannot parse filename '%s'", name)
 				continue
 			}
-			if f.Type() != c.ftype {
-				t.Errorf("filename '%s' invalid type got '%d', want '%d'", name, f.Type(), c.ftype)
+			if fd.Type != c.ftype {
+				t.Errorf("filename '%s' invalid type got '%d', want '%d'", name, fd.Type, c.ftype)
 			}
-			if f.Num() != c.num {
-				t.Errorf("filename '%s' invalid number got '%d', want '%d'", name, f.Num(), c.num)
+			if fd.Num != c.num {
+				t.Errorf("filename '%s' invalid number got '%d', want '%d'", name, fd.Num, c.num)
 			}
 		}
 	}
@@ -82,8 +81,7 @@ func TestFileStorage_ParseFileName(t *testing.T) {
 
 func TestFileStorage_InvalidFileName(t *testing.T) {
 	for _, name := range invalidCases {
-		f := new(file)
-		if f.parse(name) {
+		if fsParseNamePtr(name, nil) {
 			t.Errorf("filename '%s' should be invalid", name)
 		}
 	}

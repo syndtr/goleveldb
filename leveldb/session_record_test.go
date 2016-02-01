@@ -31,9 +31,9 @@ func decodeEncode(v *sessionRecord) (res bool, err error) {
 }
 
 func TestSessionRecord_EncodeDecode(t *testing.T) {
-	big := uint64(1) << 50
+	big := int64(1) << 50
 	v := &sessionRecord{}
-	i := uint64(0)
+	i := int64(0)
 	test := func() {
 		res, err := decodeEncode(v)
 		if err != nil {
@@ -47,16 +47,16 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 	for ; i < 4; i++ {
 		test()
 		v.addTable(3, big+300+i, big+400+i,
-			newIkey([]byte("foo"), big+500+1, ktVal),
-			newIkey([]byte("zoo"), big+600+1, ktDel))
+			newIkey([]byte("foo"), uint64(big+500+1), ktVal),
+			newIkey([]byte("zoo"), uint64(big+600+1), ktDel))
 		v.delTable(4, big+700+i)
-		v.addCompPtr(int(i), newIkey([]byte("x"), big+900+1, ktVal))
+		v.addCompPtr(int(i), newIkey([]byte("x"), uint64(big+900+1), ktVal))
 	}
 
 	v.setComparer("foo")
 	v.setJournalNum(big + 100)
 	v.setPrevJournalNum(big + 99)
 	v.setNextFileNum(big + 200)
-	v.setSeqNum(big + 1000)
+	v.setSeqNum(uint64(big + 1000))
 	test()
 }

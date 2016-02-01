@@ -12,6 +12,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type ErrBatchCorrupted struct {
@@ -23,7 +24,7 @@ func (e *ErrBatchCorrupted) Error() string {
 }
 
 func newErrBatchCorrupted(reason string) error {
-	return errors.NewErrCorrupted(nil, &ErrBatchCorrupted{reason})
+	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrBatchCorrupted{reason})
 }
 
 const (

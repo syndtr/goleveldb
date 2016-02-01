@@ -4,15 +4,20 @@ import (
 	"encoding/binary"
 	"reflect"
 	"testing"
+
+	"github.com/onsi/gomega"
+
+	"github.com/syndtr/goleveldb/leveldb/testutil"
 )
 
 type testFileRec struct {
 	level int
-	num   uint64
+	num   int64
 }
 
 func TestVersionStaging(t *testing.T) {
-	stor := newTestStorage(t)
+	gomega.RegisterTestingT(t)
+	stor := testutil.NewStorage()
 	defer stor.Close()
 	s, err := newSession(stor, nil)
 	if err != nil {
@@ -30,13 +35,13 @@ func TestVersionStaging(t *testing.T) {
 
 	for i, x := range []struct {
 		add, del []testFileRec
-		levels   [][]uint64
+		levels   [][]int64
 	}{
 		{
 			add: []testFileRec{
 				{1, 1},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{},
 				{1},
 			},
@@ -45,7 +50,7 @@ func TestVersionStaging(t *testing.T) {
 			add: []testFileRec{
 				{1, 1},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{},
 				{1},
 			},
@@ -54,7 +59,7 @@ func TestVersionStaging(t *testing.T) {
 			del: []testFileRec{
 				{1, 1},
 			},
-			levels: [][]uint64{},
+			levels: [][]int64{},
 		},
 		{
 			add: []testFileRec{
@@ -64,7 +69,7 @@ func TestVersionStaging(t *testing.T) {
 				{2, 5},
 				{1, 4},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{3, 2, 1},
 				{4},
 				{5},
@@ -79,7 +84,7 @@ func TestVersionStaging(t *testing.T) {
 				{0, 1},
 				{0, 4},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{3, 2},
 				{4, 6},
 				{5},
@@ -93,13 +98,13 @@ func TestVersionStaging(t *testing.T) {
 				{1, 6},
 				{2, 5},
 			},
-			levels: [][]uint64{},
+			levels: [][]int64{},
 		},
 		{
 			add: []testFileRec{
 				{0, 1},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{1},
 			},
 		},
@@ -107,7 +112,7 @@ func TestVersionStaging(t *testing.T) {
 			add: []testFileRec{
 				{1, 2},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{1},
 				{2},
 			},
@@ -116,7 +121,7 @@ func TestVersionStaging(t *testing.T) {
 			add: []testFileRec{
 				{0, 3},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{3, 1},
 				{2},
 			},
@@ -125,7 +130,7 @@ func TestVersionStaging(t *testing.T) {
 			add: []testFileRec{
 				{6, 9},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{3, 1},
 				{2},
 				{},
@@ -139,7 +144,7 @@ func TestVersionStaging(t *testing.T) {
 			del: []testFileRec{
 				{6, 9},
 			},
-			levels: [][]uint64{
+			levels: [][]int64{
 				{3, 1},
 				{2},
 			},
@@ -147,7 +152,7 @@ func TestVersionStaging(t *testing.T) {
 	} {
 		rec := &sessionRecord{}
 		for _, f := range x.add {
-			ik := makeIKey(f.num)
+			ik := makeIKey(uint64(f.num))
 			rec.addTable(f.level, f.num, 1, ik, ik)
 		}
 		for _, f := range x.del {
@@ -164,9 +169,9 @@ func TestVersionStaging(t *testing.T) {
 			if len(want) != len(tables) {
 				t.Fatalf("#%d.%d: invalid tables count: want=%d got=%d", i, j, len(want), len(tables))
 			}
-			got := make([]uint64, len(tables))
+			got := make([]int64, len(tables))
 			for k, t := range tables {
-				got[k] = t.file.Num()
+				got[k] = t.fd.Num
 			}
 			if !reflect.DeepEqual(want, got) {
 				t.Fatalf("#%d.%d: invalid tables: want=%v got=%v", i, j, want, got)

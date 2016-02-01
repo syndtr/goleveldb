@@ -12,6 +12,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/memdb"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
 type memDB struct {
@@ -95,11 +96,10 @@ func (db *DB) mpoolDrain() {
 // Create new memdb and froze the old one; need external synchronization.
 // newMem only called synchronously by the writer.
 func (db *DB) newMem(n int) (mem *memDB, err error) {
-	num := db.s.allocFileNum()
-	file := db.s.getJournalFile(num)
-	w, err := file.Create()
+	fd := storage.FileDesc{Type: storage.TypeJournal, Num: db.s.allocFileNum()}
+	w, err := db.s.stor.Create(fd)
 	if err != nil {
-		db.s.reuseFileNum(num)
+		db.s.reuseFileNum(fd.Num)
 		return
 	}
 
@@ -115,10 +115,10 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 	} else {
 		db.journal.Reset(w)
 		db.journalWriter.Close()
-		db.frozenJournalFile = db.journalFile
+		db.frozenJournalFd = db.journalFd
 	}
 	db.journalWriter = w
-	db.journalFile = file
+	db.journalFd = fd
 	db.frozenMem = db.mem
 	mdb := db.mpoolGet()
 	if mdb == nil || mdb.Capacity() < n {
@@ -181,12 +181,12 @@ func (db *DB) getFrozenMem() *memDB {
 // Drop frozen memdb; assume that frozen memdb isn't nil.
 func (db *DB) dropFrozenMem() {
 	db.memMu.Lock()
-	if err := db.frozenJournalFile.Remove(); err != nil {
-		db.logf("journal@remove removing @%d %q", db.frozenJournalFile.Num(), err)
+	if err := db.s.stor.Remove(db.frozenJournalFd); err != nil {
+		db.logf("journal@remove removing @%d %q", db.frozenJournalFd.Num, err)
 	} else {
-		db.logf("journal@remove removed @%d", db.frozenJournalFile.Num())
+		db.logf("journal@remove removed @%d", db.frozenJournalFd.Num)
 	}
-	db.frozenJournalFile = nil
+	db.frozenJournalFd = storage.FileDesc{}
 	db.frozenMem.decref()
 	db.frozenMem = nil
 	db.memMu.Unlock()

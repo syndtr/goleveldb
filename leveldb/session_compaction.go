@@ -40,7 +40,7 @@ func (s *session) flushMemdb(rec *sessionRecord, mdb *memdb.DB, maxLevel int) (i
 	flushLevel := s.pickMemdbLevel(t.imin.ukey(), t.imax.ukey(), maxLevel)
 	rec.addTableFile(flushLevel, t)
 
-	s.logf("memdb@flush created L%d@%d N·%d S·%s %q:%q", flushLevel, t.file.Num(), n, shortenb(int(t.size)), t.imin, t.imax)
+	s.logf("memdb@flush created L%d@%d N·%d S·%s %q:%q", flushLevel, t.fd.Num, n, shortenb(int(t.size)), t.imin, t.imax)
 	return flushLevel, nil
 }
 
@@ -97,8 +97,8 @@ func (s *session) getCompactionRange(sourceLevel int, umin, umax []byte, noLimit
 	// and we must not pick one file and drop another older file if the
 	// two files overlap.
 	if !noLimit && sourceLevel > 0 {
-		limit := uint64(v.s.o.GetCompactionSourceLimit(sourceLevel))
-		total := uint64(0)
+		limit := int64(v.s.o.GetCompactionSourceLimit(sourceLevel))
+		total := int64(0)
 		for i, t := range t0 {
 			total += t.size
 			if total >= limit {
@@ -118,7 +118,7 @@ func newCompaction(s *session, v *version, sourceLevel int, t0 tFiles) *compacti
 		v:             v,
 		sourceLevel:   sourceLevel,
 		levels:        [2]tFiles{t0, nil},
-		maxGPOverlaps: uint64(s.o.GetCompactionGPOverlaps(sourceLevel)),
+		maxGPOverlaps: int64(s.o.GetCompactionGPOverlaps(sourceLevel)),
 		tPtrs:         make([]int, len(v.levels)),
 	}
 	c.expand()
@@ -133,19 +133,19 @@ type compaction struct {
 
 	sourceLevel   int
 	levels        [2]tFiles
-	maxGPOverlaps uint64
+	maxGPOverlaps int64
 
 	gp                tFiles
 	gpi               int
 	seenKey           bool
-	gpOverlappedBytes uint64
+	gpOverlappedBytes int64
 	imin, imax        iKey
 	tPtrs             []int
 	released          bool
 
 	snapGPI               int
 	snapSeenKey           bool
-	snapGPOverlappedBytes uint64
+	snapGPOverlappedBytes int64
 	snapTPtrs             []int
 }
 
@@ -172,7 +172,7 @@ func (c *compaction) release() {
 
 // Expand compacted tables; need external synchronization.
 func (c *compaction) expand() {
-	limit := uint64(c.s.o.GetCompactionExpandLimit(c.sourceLevel))
+	limit := int64(c.s.o.GetCompactionExpandLimit(c.sourceLevel))
 	vt0 := c.v.levels[c.sourceLevel]
 	vt1 := tFiles{}
 	if level := c.sourceLevel + 1; level < len(c.v.levels) {
