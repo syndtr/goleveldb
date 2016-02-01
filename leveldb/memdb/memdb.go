@@ -356,7 +356,8 @@ func (p *DB) Get(key []byte) (value []byte, err error) {
 	p.mu.RLock()
 	if node, exact := p.findGE(key, false); exact {
 		o := p.nodeData[node] + p.nodeData[node+nKey]
-		value = p.kvData[o : o+p.nodeData[node+nVal]]
+		value = make([]byte, p.nodeData[node+nVal])
+		copy(value, p.kvData[o:o+p.nodeData[node+nVal]])
 	} else {
 		err = ErrNotFound
 	}
