@@ -217,6 +217,8 @@ func (tr *Transaction) Commit() error {
 				break
 			}
 		}
+		// Trigger table auto-compaction.
+		tr.db.compTrigger(tr.db.tcompCmdC)
 	}
 	return nil
 }
