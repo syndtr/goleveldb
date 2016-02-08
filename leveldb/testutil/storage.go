@@ -25,8 +25,8 @@ import (
 
 var (
 	storageMu     sync.Mutex
-	storageUseFS  bool = true
-	storageKeepFS bool = false
+	storageUseFS  = true
+	storageKeepFS = false
 	storageNum    int
 )
 

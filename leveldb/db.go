@@ -61,8 +61,10 @@ type DB struct {
 	writeDelayN  int
 	journalC     chan *Batch
 	journalAckC  chan error
+	tr           *Transaction
 
 	// Compaction.
+	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
 	tcompPauseC      chan chan<- struct{}
 	mcompCmdC        chan cCmd
@@ -726,46 +728,35 @@ func (db *DB) recoverJournalRO() error {
 	return nil
 }
 
-func (db *DB) get(key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
-	ikey := newIkey(key, seq, ktSeek)
-
-	em, fm := db.getMems()
-	for _, m := range [...]*memDB{em, fm} {
-		if m == nil {
-			continue
+func memGet(mdb *memdb.DB, ikey iKey, icmp *iComparer) (ok bool, mv []byte, err error) {
+	mk, mv, err := mdb.Find(ikey)
+	if err == nil {
+		ukey, _, kt, kerr := parseIkey(mk)
+		if kerr != nil {
+			// Shouldn't have had happen.
+			panic(kerr)
 		}
-		defer m.decref()
+		if icmp.uCompare(ukey, ikey.ukey()) == 0 {
+			if kt == ktDel {
+				return true, nil, ErrNotFound
+			}
+			return true, mv, nil
 
-		mk, mv, me := m.Find(ikey)
-		if me == nil {
-			ukey, _, kt, kerr := parseIkey(mk)
-			if kerr != nil {
-				// Shouldn't have had happen.
-				panic(kerr)
-			}
-			if db.s.icmp.uCompare(ukey, key) == 0 {
-				if kt == ktDel {
-					return nil, ErrNotFound
-				}
-				return append([]byte{}, mv...), nil
-			}
-		} else if me != ErrNotFound {
-			return nil, me
 		}
-	}
-
-	v := db.s.version()
-	value, cSched, err := v.get(ikey, ro, false)
-	v.release()
-	if cSched {
-		// Trigger table compaction.
-		db.compSendTrigger(db.tcompCmdC)
+	} else if err != ErrNotFound {
+		return true, nil, err
 	}
 	return
 }
 
-func (db *DB) has(key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err error) {
-	ikey := newIkey(key, seq, ktSeek)
+func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
+	ikey := makeIkey(nil, key, seq, ktSeek)
+
+	if auxm != nil {
+		if ok, mv, me := memGet(auxm, ikey, db.s.icmp); ok {
+			return append([]byte{}, mv...), me
+		}
+	}
 
 	em, fm := db.getMems()
 	for _, m := range [...]*memDB{em, fm} {
@@ -774,30 +765,55 @@ func (db *DB) has(key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err er
 		}
 		defer m.decref()
 
-		mk, _, me := m.Find(ikey)
-		if me == nil {
-			ukey, _, kt, kerr := parseIkey(mk)
-			if kerr != nil {
-				// Shouldn't have had happen.
-				panic(kerr)
-			}
-			if db.s.icmp.uCompare(ukey, key) == 0 {
-				if kt == ktDel {
-					return false, nil
-				}
-				return true, nil
-			}
-		} else if me != ErrNotFound {
-			return false, me
+		if ok, mv, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			return append([]byte{}, mv...), me
 		}
 	}
 
 	v := db.s.version()
-	_, cSched, err := v.get(ikey, ro, true)
+	value, cSched, err := v.get(auxt, ikey, ro, false)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
-		db.compSendTrigger(db.tcompCmdC)
+		db.compTrigger(db.tcompCmdC)
+	}
+	return
+}
+
+func nilIfNotFound(err error) error {
+	if err == ErrNotFound {
+		return nil
+	}
+	return err
+}
+
+func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err error) {
+	ikey := makeIkey(nil, key, seq, ktSeek)
+
+	if auxm != nil {
+		if ok, _, me := memGet(auxm, ikey, db.s.icmp); ok {
+			return me == nil, nilIfNotFound(me)
+		}
+	}
+
+	em, fm := db.getMems()
+	for _, m := range [...]*memDB{em, fm} {
+		if m == nil {
+			continue
+		}
+		defer m.decref()
+
+		if ok, _, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			return me == nil, nilIfNotFound(me)
+		}
+	}
+
+	v := db.s.version()
+	_, cSched, err := v.get(auxt, ikey, ro, true)
+	v.release()
+	if cSched {
+		// Trigger table compaction.
+		db.compTrigger(db.tcompCmdC)
 	}
 	if err == nil {
 		ret = true
@@ -821,7 +837,7 @@ func (db *DB) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) {
 
 	se := db.acquireSnapshot()
 	defer db.releaseSnapshot(se)
-	return db.get(key, se.seq, ro)
+	return db.get(nil, nil, key, se.seq, ro)
 }
 
 // Has returns true if the DB does contains the given key.
@@ -835,11 +851,11 @@ func (db *DB) Has(key []byte, ro *opt.ReadOptions) (ret bool, err error) {
 
 	se := db.acquireSnapshot()
 	defer db.releaseSnapshot(se)
-	return db.has(key, se.seq, ro)
+	return db.has(nil, nil, key, se.seq, ro)
 }
 
 // NewIterator returns an iterator for the latest snapshot of the
-// uderlying DB.
+// underlying DB.
 // The returned iterator is not goroutine-safe, but it is safe to use
 // multiple iterators concurrently, with each in a dedicated goroutine.
 // It is also safe to use an iterator concurrently with modifying its
@@ -863,7 +879,7 @@ func (db *DB) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Itera
 	defer db.releaseSnapshot(se)
 	// Iterator holds 'version' lock, 'version' is immutable so snapshot
 	// can be released after iterator created.
-	return db.newIterator(se.seq, slice, ro)
+	return db.newIterator(nil, nil, se.seq, slice, ro)
 }
 
 // GetSnapshot returns a latest snapshot of the underlying DB. A snapshot
@@ -981,8 +997,8 @@ func (db *DB) SizeOf(ranges []util.Range) (Sizes, error) {
 
 	sizes := make(Sizes, 0, len(ranges))
 	for _, r := range ranges {
-		imin := newIkey(r.Start, kMaxSeq, ktSeek)
-		imax := newIkey(r.Limit, kMaxSeq, ktSeek)
+		imin := makeIkey(nil, r.Start, kMaxSeq, ktSeek)
+		imax := makeIkey(nil, r.Limit, kMaxSeq, ktSeek)
 		start, err := v.offsetOf(imin)
 		if err != nil {
 			return nil, err
@@ -1001,8 +1017,8 @@ func (db *DB) SizeOf(ranges []util.Range) (Sizes, error) {
 	return sizes, nil
 }
 
-// Close closes the DB. This will also releases any outstanding snapshot and
-// abort any in-flight compaction.
+// Close closes the DB. This will also releases any outstanding snapshot,
+// abort any in-flight compaction and discard open transaction.
 //
 // It is not safe to close a DB until all outstanding iterators are released.
 // It is valid to call Close multiple times. Other methods should not be
@@ -1031,11 +1047,18 @@ func (db *DB) Close() error {
 	// Signal all goroutines.
 	close(db.closeC)
 
+	// Discard open transaction.
+	if db.tr != nil {
+		db.tr.Discard()
+	}
+
+	// Acquire writer lock.
+	db.writeLockC <- struct{}{}
+
 	// Wait for all gorotines to exit.
 	db.closeW.Wait()
 
-	// Lock writer and closes journal.
-	db.writeLockC <- struct{}{}
+	// Closes journal.
 	if db.journal != nil {
 		db.journal.Close()
 		db.journalWriter.Close()

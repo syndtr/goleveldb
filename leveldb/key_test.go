@@ -16,7 +16,7 @@ import (
 var defaultIComparer = &iComparer{comparer.DefaultComparer}
 
 func ikey(key string, seq uint64, kt kType) iKey {
-	return newIkey([]byte(key), uint64(seq), kt)
+	return makeIkey(nil, []byte(key), uint64(seq), kt)
 }
 
 func shortSep(a, b []byte) []byte {

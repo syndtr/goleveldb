@@ -30,7 +30,7 @@ func TestVersionStaging(t *testing.T) {
 	tmp := make([]byte, 4)
 	makeIKey := func(i uint64) []byte {
 		binary.BigEndian.PutUint32(tmp, uint32(i))
-		return []byte(newIkey(tmp, 0, ktVal))
+		return []byte(makeIkey(nil, tmp, 0, ktVal))
 	}
 
 	for i, x := range []struct {

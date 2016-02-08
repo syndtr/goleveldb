@@ -79,8 +79,23 @@ func (v *version) release() {
 	v.s.vmu.Unlock()
 }
 
-func (v *version) walkOverlapping(ikey iKey, f func(level int, t *tFile) bool, lf func(level int) bool) {
+func (v *version) walkOverlapping(aux tFiles, ikey iKey, f func(level int, t *tFile) bool, lf func(level int) bool) {
 	ukey := ikey.ukey()
+
+	// Aux level.
+	if aux != nil {
+		for _, t := range aux {
+			if t.overlaps(v.s.icmp, ukey, ukey) {
+				if !f(-1, t) {
+					return
+				}
+			}
+		}
+
+		if lf != nil && !lf(-1) {
+			return
+		}
+	}
 
 	// Walk tables level-by-level.
 	for level, tables := range v.levels {
@@ -115,7 +130,7 @@ func (v *version) walkOverlapping(ikey iKey, f func(level int, t *tFile) bool, l
 	}
 }
 
-func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
+func (v *version) get(aux tFiles, ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
 	ukey := ikey.ukey()
 
 	var (
@@ -133,8 +148,8 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byt
 
 	// Since entries never hop across level, finding key/value
 	// in smaller level make later levels irrelevant.
-	v.walkOverlapping(ikey, func(level int, t *tFile) bool {
-		if !tseek {
+	v.walkOverlapping(aux, ikey, func(level int, t *tFile) bool {
+		if level >= 0 && !tseek {
 			if tset == nil {
 				tset = &tSet{level, t}
 			} else {
@@ -163,7 +178,8 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byt
 
 		if fukey, fseq, fkt, fkerr := parseIkey(fikey); fkerr == nil {
 			if v.s.icmp.uCompare(ukey, fukey) == 0 {
-				if level == 0 {
+				// Level <= 0 may overlaps each-other.
+				if level <= 0 {
 					if fseq >= zseq {
 						zfound = true
 						zseq = fseq
@@ -214,7 +230,7 @@ func (v *version) get(ikey iKey, ro *opt.ReadOptions, noValue bool) (value []byt
 func (v *version) sampleSeek(ikey iKey) (tcomp bool) {
 	var tset *tSet
 
-	v.walkOverlapping(ikey, func(level int, t *tFile) bool {
+	v.walkOverlapping(nil, ikey, func(level int, t *tFile) bool {
 		if tset == nil {
 			tset = &tSet{level, t}
 			return true

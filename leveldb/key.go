@@ -71,17 +71,21 @@ func init() {
 
 type iKey []byte
 
-func newIkey(ukey []byte, seq uint64, kt kType) iKey {
+func makeIkey(dst, ukey []byte, seq uint64, kt kType) iKey {
 	if seq > kMaxSeq {
 		panic("leveldb: invalid sequence number")
 	} else if kt > ktVal {
 		panic("leveldb: invalid type")
 	}
 
-	ik := make(iKey, len(ukey)+8)
-	copy(ik, ukey)
-	binary.LittleEndian.PutUint64(ik[len(ukey):], (seq<<8)|uint64(kt))
-	return ik
+	if n := len(ukey) + 8; cap(dst) < n {
+		dst = make([]byte, n)
+	} else {
+		dst = dst[:n]
+	}
+	copy(dst, ukey)
+	binary.LittleEndian.PutUint64(dst[len(ukey):], (seq<<8)|uint64(kt))
+	return iKey(dst)
 }
 
 func parseIkey(ik []byte) (ukey []byte, seq uint64, kt kType, err error) {

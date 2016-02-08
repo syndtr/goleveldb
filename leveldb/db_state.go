@@ -21,6 +21,10 @@ type memDB struct {
 	ref int32
 }
 
+func (m *memDB) getref() int32 {
+	return atomic.LoadInt32(&m.ref)
+}
+
 func (m *memDB) incref() {
 	atomic.AddInt32(&m.ref, 1)
 }
@@ -49,11 +53,15 @@ func (db *DB) addSeq(delta uint64) {
 	atomic.AddUint64(&db.seq, delta)
 }
 
+func (db *DB) setSeq(seq uint64) {
+	atomic.StoreUint64(&db.seq, seq)
+}
+
 func (db *DB) sampleSeek(ikey iKey) {
 	v := db.s.version()
 	if v.sampleSeek(ikey) {
 		// Trigger table compaction.
-		db.compSendTrigger(db.tcompCmdC)
+		db.compTrigger(db.tcompCmdC)
 	}
 	v.release()
 }
@@ -68,12 +76,18 @@ func (db *DB) mpoolPut(mem *memdb.DB) {
 	}
 }
 
-func (db *DB) mpoolGet() *memdb.DB {
+func (db *DB) mpoolGet(n int) *memDB {
+	var mdb *memdb.DB
 	select {
-	case mem := <-db.memPool:
-		return mem
+	case mdb = <-db.memPool:
 	default:
-		return nil
+	}
+	if mdb == nil || mdb.Capacity() < n {
+		mdb = memdb.New(db.s.icmp, maxInt(db.s.o.GetWriteBuffer(), n))
+	}
+	return &memDB{
+		db: db,
+		DB: mdb,
 	}
 }
 
@@ -120,15 +134,9 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 	db.journalWriter = w
 	db.journalFd = fd
 	db.frozenMem = db.mem
-	mdb := db.mpoolGet()
-	if mdb == nil || mdb.Capacity() < n {
-		mdb = memdb.New(db.s.icmp, maxInt(db.s.o.GetWriteBuffer(), n))
-	}
-	mem = &memDB{
-		db:  db,
-		DB:  mdb,
-		ref: 2,
-	}
+	mem = db.mpoolGet(n)
+	mem.incref() // for self
+	mem.incref() // for caller
 	db.mem = mem
 	// The seq only incremented by the writer. And whoever called newMem
 	// should hold write lock, so no need additional synchronization here.

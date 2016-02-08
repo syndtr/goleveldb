@@ -276,8 +276,8 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	db := h.db
 	s := db.s
 
-	ikey := newIkey([]byte(key), kMaxSeq, ktVal)
-	iter := db.newRawIterator(nil, nil)
+	ikey := makeIkey(nil, []byte(key), kMaxSeq, ktVal)
+	iter := db.newRawIterator(nil, nil, nil, nil)
 	if !iter.Seek(ikey) && iter.Error() != nil {
 		t.Error("AllEntries: error during seek, err: ", iter.Error())
 		return
@@ -343,7 +343,7 @@ func (h *dbHarness) getKeyVal(want string) {
 func (h *dbHarness) waitCompaction() {
 	t := h.t
 	db := h.db
-	if err := db.compSendIdle(db.tcompCmdC); err != nil {
+	if err := db.compTriggerWait(db.tcompCmdC); err != nil {
 		t.Error("compaction error: ", err)
 	}
 }
@@ -352,7 +352,7 @@ func (h *dbHarness) waitMemCompaction() {
 	t := h.t
 	db := h.db
 
-	if err := db.compSendIdle(db.mcompCmdC); err != nil {
+	if err := db.compTriggerWait(db.mcompCmdC); err != nil {
 		t.Error("compaction error: ", err)
 	}
 }
@@ -368,10 +368,7 @@ func (h *dbHarness) compactMem() {
 		<-db.writeLockC
 	}()
 
-	if _, err := db.rotateMem(0); err != nil {
-		t.Error("compaction error: ", err)
-	}
-	if err := db.compSendIdle(db.mcompCmdC); err != nil {
+	if _, err := db.rotateMem(0, true); err != nil {
 		t.Error("compaction error: ", err)
 	}
 
@@ -396,7 +393,7 @@ func (h *dbHarness) compactRangeAtErr(level int, min, max string, wanterr bool) 
 
 	t.Logf("starting table range compaction: level=%d, min=%q, max=%q", level, min, max)
 
-	if err := db.compSendRange(db.tcompCmdC, level, _min, _max); err != nil {
+	if err := db.compTriggerRange(db.tcompCmdC, level, _min, _max); err != nil {
 		if wanterr {
 			t.Log("CompactRangeAt: got error (expected): ", err)
 		} else {
@@ -1336,7 +1333,7 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 
 	h.stor.EmulateError(testutil.ModeOpen, storage.TypeTable, errors.New("open error during table compaction"))
 	go h.db.CompactRange(util.Range{})
-	if err := h.db.compSendIdle(h.db.tcompCmdC); err != nil {
+	if err := h.db.compTriggerWait(h.db.tcompCmdC); err != nil {
 		t.Log("compaction error: ", err)
 	}
 	h.closeDB0()
@@ -2477,7 +2474,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 			key := []byte(fmt.Sprintf("%09d", k))
 			seq += nSeq - 1
 			for x := uint64(0); x < nSeq; x++ {
-				if err := tw.append(newIkey(key, seq-x, ktVal), value); err != nil {
+				if err := tw.append(makeIkey(nil, key, seq-x, ktVal), value); err != nil {
 					t.Fatal(err)
 				}
 			}

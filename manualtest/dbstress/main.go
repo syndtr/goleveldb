@@ -34,6 +34,7 @@ var (
 	valueLen               = 256
 	numKeys                = arrayInt{100000, 1332, 531, 1234, 9553, 1024, 35743}
 	httpProf               = "127.0.0.1:5454"
+	transactionProb        = 0.5
 	enableBlockCache       = false
 	enableCompression      = false
 	enableBufferPool       = false
@@ -80,6 +81,7 @@ func init() {
 	flag.IntVar(&valueLen, "valuelen", valueLen, "value length")
 	flag.Var(&numKeys, "numkeys", "num keys")
 	flag.StringVar(&httpProf, "httpprof", httpProf, "http pprof listen addr")
+	flag.Float64Var(&transactionProb, "transactionprob", transactionProb, "probablity of writes using transaction")
 	flag.BoolVar(&enableBufferPool, "enablebufferpool", enableBufferPool, "enable buffer pool")
 	flag.BoolVar(&enableBlockCache, "enableblockcache", enableBlockCache, "enable block cache")
 	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
@@ -357,11 +359,12 @@ func main() {
 	defer db.Close()
 
 	var (
-		mu         = &sync.Mutex{}
-		gGetStat   = &latencyStats{}
-		gIterStat  = &latencyStats{}
-		gWriteStat = &latencyStats{}
-		startTime  = time.Now()
+		mu              = &sync.Mutex{}
+		gGetStat        = &latencyStats{}
+		gIterStat       = &latencyStats{}
+		gWriteStat      = &latencyStats{}
+		gTrasactionStat = &latencyStats{}
+		startTime       = time.Now()
 
 		writeReq    = make(chan *leveldb.Batch)
 		writeAck    = make(chan error)
@@ -370,10 +373,26 @@ func main() {
 
 	go func() {
 		for b := range writeReq {
-			gWriteStat.start()
-			err := db.Write(b, nil)
-			if err == nil {
-				gWriteStat.record(b.Len())
+
+			var err error
+			if mrand.Float64() < transactionProb {
+				log.Print("> Write using transaction")
+				gTrasactionStat.start()
+				var tr *leveldb.Transaction
+				if tr, err = db.OpenTransaction(); err == nil {
+					if err = tr.Write(b, nil); err == nil {
+						if err = tr.Commit(); err == nil {
+							gTrasactionStat.record(b.Len())
+						}
+					} else {
+						tr.Discard()
+					}
+				}
+			} else {
+				gWriteStat.start()
+				if err = db.Write(b, nil); err == nil {
+					gWriteStat.record(b.Len())
+				}
 			}
 			writeAck <- err
 			<-writeAckAck
@@ -394,6 +413,8 @@ func main() {
 				gIterStat.min, gIterStat.max, gIterStat.avg(), gIterStat.ratePerSec())
 			log.Printf("> WriteLatencyMin=%v WriteLatencyMax=%v WriteLatencyAvg=%v WriteRatePerSec=%d",
 				gWriteStat.min, gWriteStat.max, gWriteStat.avg(), gWriteStat.ratePerSec())
+			log.Printf("> TransactionLatencyMin=%v TransactionLatencyMax=%v TransactionLatencyAvg=%v TransactionRatePerSec=%d",
+				gTrasactionStat.min, gTrasactionStat.max, gTrasactionStat.avg(), gTrasactionStat.ratePerSec())
 			mu.Unlock()
 
 			cachedblock, _ := db.GetProperty("leveldb.cachedblock")

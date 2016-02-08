@@ -47,10 +47,10 @@ func TestSessionRecord_EncodeDecode(t *testing.T) {
 	for ; i < 4; i++ {
 		test()
 		v.addTable(3, big+300+i, big+400+i,
-			newIkey([]byte("foo"), uint64(big+500+1), ktVal),
-			newIkey([]byte("zoo"), uint64(big+600+1), ktDel))
+			makeIkey(nil, []byte("foo"), uint64(big+500+1), ktVal),
+			makeIkey(nil, []byte("zoo"), uint64(big+600+1), ktDel))
 		v.delTable(4, big+700+i)
-		v.addCompPtr(int(i), newIkey([]byte("x"), uint64(big+900+1), ktVal))
+		v.addCompPtr(int(i), makeIkey(nil, []byte("x"), uint64(big+900+1), ktVal))
 	}
 
 	v.setComparer("foo")
