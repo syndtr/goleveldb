@@ -163,7 +163,10 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 		log.Fatal(err)
 	}
 
-	o := &opt.Options{Strict: opt.NoStrict}
+	o := &opt.Options{
+		DisableLargeBatchTransaction: true,
+		Strict: opt.NoStrict,
+	}
 	if checksum {
 		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
 	}

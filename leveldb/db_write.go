@@ -135,6 +135,19 @@ func (db *DB) Write(b *Batch, wo *opt.WriteOptions) (err error) {
 
 	b.init(wo.GetSync() && !db.s.o.GetNoSync())
 
+	if b.size() > db.s.o.GetWriteBuffer() && !db.s.o.GetDisableLargeBatchTransaction() {
+		// Writes using transaction.
+		tr, err1 := db.OpenTransaction()
+		if err1 != nil {
+			return err1
+		}
+		if err1 := tr.Write(b, wo); err1 != nil {
+			tr.Discard()
+			return err1
+		}
+		return tr.Commit()
+	}
+
 	// The write happen synchronously.
 	select {
 	case db.writeC <- b:

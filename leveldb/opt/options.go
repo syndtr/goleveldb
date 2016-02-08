@@ -8,10 +8,11 @@
 package opt
 
 import (
+	"math"
+
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
-	"math"
 )
 
 const (
@@ -264,6 +265,13 @@ type Options struct {
 	// The default value is false.
 	DisableCompactionBackoff bool
 
+	// DisableLargeBatchTransaction allows disabling switch-to-transaction mode
+	// on large batch write. If enable batch writes large than WriteBuffer will
+	// use transaction.
+	//
+	// The default is false.
+	DisableLargeBatchTransaction bool
+
 	// ErrorIfExist defines whether an error should returned if the DB already
 	// exist.
 	//
@@ -491,6 +499,13 @@ func (o *Options) GetDisableCompactionBackoff() bool {
 		return false
 	}
 	return o.DisableCompactionBackoff
+}
+
+func (o *Options) GetDisableLargeBatchTransaction() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableLargeBatchTransaction
 }
 
 func (o *Options) GetErrorIfExist() bool {
