@@ -276,7 +276,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	db := h.db
 	s := db.s
 
-	ikey := makeIkey(nil, []byte(key), kMaxSeq, ktVal)
+	ikey := makeInternalKey(nil, []byte(key), keyMaxSeq, keyTypeVal)
 	iter := db.newRawIterator(nil, nil, nil, nil)
 	if !iter.Seek(ikey) && iter.Error() != nil {
 		t.Error("AllEntries: error during seek, err: ", iter.Error())
@@ -285,7 +285,7 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 	res := "[ "
 	first := true
 	for iter.Valid() {
-		if ukey, _, kt, kerr := parseIkey(iter.Key()); kerr == nil {
+		if ukey, _, kt, kerr := parseInternalKey(iter.Key()); kerr == nil {
 			if s.icmp.uCompare(ikey.ukey(), ukey) != 0 {
 				break
 			}
@@ -294,9 +294,9 @@ func (h *dbHarness) allEntriesFor(key, want string) {
 			}
 			first = false
 			switch kt {
-			case ktVal:
+			case keyTypeVal:
 				res += string(iter.Value())
-			case ktDel:
+			case keyTypeDel:
 				res += "DEL"
 			}
 		} else {
@@ -430,7 +430,7 @@ func (h *dbHarness) compactRange(min, max string) {
 	t.Log("DB range compaction done")
 }
 
-func (h *dbHarness) sizeOf(start, limit string) uint64 {
+func (h *dbHarness) sizeOf(start, limit string) int64 {
 	sz, err := h.db.SizeOf([]util.Range{
 		{[]byte(start), []byte(limit)},
 	})
@@ -440,7 +440,7 @@ func (h *dbHarness) sizeOf(start, limit string) uint64 {
 	return sz.Sum()
 }
 
-func (h *dbHarness) sizeAssert(start, limit string, low, hi uint64) {
+func (h *dbHarness) sizeAssert(start, limit string, low, hi int64) {
 	sz := h.sizeOf(start, limit)
 	if sz < low || sz > hi {
 		h.t.Errorf("sizeOf %q to %q not in range, want %d - %d, got %d",
@@ -505,7 +505,7 @@ func numKey(num int) string {
 	return fmt.Sprintf("key%06d", num)
 }
 
-var _bloom_filter = filter.NewBloomFilter(10)
+var testingBloomFilter = filter.NewBloomFilter(10)
 
 func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 	for i := 0; i < 4; i++ {
@@ -514,16 +514,22 @@ func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 			case 0:
 			case 1:
 				if o == nil {
-					o = &opt.Options{DisableLargeBatchTransaction: true, Filter: _bloom_filter}
+					o = &opt.Options{
+						DisableLargeBatchTransaction: true,
+						Filter: testingBloomFilter,
+					}
 				} else {
 					old := o
 					o = &opt.Options{}
 					*o = *old
-					o.Filter = _bloom_filter
+					o.Filter = testingBloomFilter
 				}
 			case 2:
 				if o == nil {
-					o = &opt.Options{DisableLargeBatchTransaction: true, Compression: opt.NoCompression}
+					o = &opt.Options{
+						DisableLargeBatchTransaction: true,
+						Compression:                  opt.NoCompression,
+					}
 				} else {
 					old := o
 					o = &opt.Options{}
@@ -1103,13 +1109,13 @@ func TestDB_SizeOf(t *testing.T) {
 
 		for cs := 0; cs < n; cs += 10 {
 			for i := 0; i < n; i += 10 {
-				h.sizeAssert("", numKey(i), uint64(s1*i), uint64(s2*i))
-				h.sizeAssert("", numKey(i)+".suffix", uint64(s1*(i+1)), uint64(s2*(i+1)))
-				h.sizeAssert(numKey(i), numKey(i+10), uint64(s1*10), uint64(s2*10))
+				h.sizeAssert("", numKey(i), int64(s1*i), int64(s2*i))
+				h.sizeAssert("", numKey(i)+".suffix", int64(s1*(i+1)), int64(s2*(i+1)))
+				h.sizeAssert(numKey(i), numKey(i+10), int64(s1*10), int64(s2*10))
 			}
 
-			h.sizeAssert("", numKey(50), uint64(s1*50), uint64(s2*50))
-			h.sizeAssert("", numKey(50)+".suffix", uint64(s1*50), uint64(s2*50))
+			h.sizeAssert("", numKey(50), int64(s1*50), int64(s2*50))
+			h.sizeAssert("", numKey(50)+".suffix", int64(s1*50), int64(s2*50))
 
 			h.compactRangeAt(0, numKey(cs), numKey(cs+9))
 		}
@@ -1132,7 +1138,7 @@ func TestDB_SizeOf_MixOfSmallAndLarge(t *testing.T) {
 	})
 	defer h.close()
 
-	sizes := []uint64{
+	sizes := []int64{
 		10000,
 		10000,
 		100000,
@@ -1150,7 +1156,7 @@ func TestDB_SizeOf_MixOfSmallAndLarge(t *testing.T) {
 	for r := 0; r < 3; r++ {
 		h.reopenDB()
 
-		var x uint64
+		var x int64
 		for i, n := range sizes {
 			y := x
 			if i > 0 {
@@ -2498,7 +2504,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 			key := []byte(fmt.Sprintf("%09d", k))
 			seq += nSeq - 1
 			for x := uint64(0); x < nSeq; x++ {
-				if err := tw.append(makeIkey(nil, key, seq-x, ktVal), value); err != nil {
+				if err := tw.append(makeInternalKey(nil, key, seq-x, keyTypeVal), value); err != nil {
 					t.Fatal(err)
 				}
 			}

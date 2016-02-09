@@ -28,9 +28,9 @@ func TestVersionStaging(t *testing.T) {
 	v.newStaging()
 
 	tmp := make([]byte, 4)
-	makeIKey := func(i uint64) []byte {
+	mik := func(i uint64) []byte {
 		binary.BigEndian.PutUint32(tmp, uint32(i))
-		return []byte(makeIkey(nil, tmp, 0, ktVal))
+		return []byte(makeInternalKey(nil, tmp, 0, keyTypeVal))
 	}
 
 	for i, x := range []struct {
@@ -152,7 +152,7 @@ func TestVersionStaging(t *testing.T) {
 	} {
 		rec := &sessionRecord{}
 		for _, f := range x.add {
-			ik := makeIKey(uint64(f.num))
+			ik := mik(uint64(f.num))
 			rec.addTable(f.level, f.num, 1, ik, ik)
 		}
 		for _, f := range x.del {
