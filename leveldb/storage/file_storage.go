@@ -19,7 +19,10 @@ import (
 	"time"
 )
 
-var errFileOpen = errors.New("leveldb/storage: file still open")
+var (
+	errFileOpen = errors.New("leveldb/storage: file still open")
+	errReadOnly = errors.New("leveldb/storage: storage is read-only")
+)
 
 type fileLock interface {
 	release() error
@@ -30,26 +33,27 @@ type fileStorageLock struct {
 }
 
 func (lock *fileStorageLock) Release() {
-	fs := lock.fs
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	if fs.slock == lock {
-		fs.slock = nil
+	if lock.fs != nil {
+		lock.fs.mu.Lock()
+		defer lock.fs.mu.Unlock()
+		if lock.fs.slock == lock {
+			lock.fs.slock = nil
+		}
 	}
-	return
 }
 
 const logSizeThreshold = 1024 * 1024 // 1 MiB
 
 // fileStorage is a file-system backed storage.
 type fileStorage struct {
-	path string
+	path     string
+	readOnly bool
 
 	mu      sync.Mutex
 	flock   fileLock
 	slock   *fileStorageLock
 	logw    *os.File
-	logSize int
+	logSize int64
 	buf     []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
@@ -61,12 +65,20 @@ type fileStorage struct {
 // same path will fail.
 //
 // The storage must be closed after use, by calling Close method.
-func OpenFile(path string) (Storage, error) {
-	if err := os.MkdirAll(path, 0755); err != nil {
+func OpenFile(path string, readOnly bool) (Storage, error) {
+	if fi, err := os.Stat(path); err == nil {
+		if !fi.IsDir() {
+			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
+		}
+	} else if os.IsNotExist(err) && !readOnly {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return nil, err
+		}
+	} else {
 		return nil, err
 	}
 
-	flock, err := newFileLock(filepath.Join(path, "LOCK"))
+	flock, err := newFileLock(filepath.Join(path, "LOCK"), readOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -77,17 +89,29 @@ func OpenFile(path string) (Storage, error) {
 		}
 	}()
 
-	logw, err := os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
-	if err != nil {
-		return nil, err
-	}
-	logSize, err := logw.Seek(0, os.SEEK_END)
-	if err != nil {
-		logw.Close()
-		return nil, err
+	var (
+		logw    *os.File
+		logSize int64
+	)
+	if !readOnly {
+		logw, err = os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+		if err != nil {
+			return nil, err
+		}
+		logSize, err = logw.Seek(0, os.SEEK_END)
+		if err != nil {
+			logw.Close()
+			return nil, err
+		}
 	}
 
-	fs := &fileStorage{path: path, flock: flock, logw: logw, logSize: int(logSize)}
+	fs := &fileStorage{
+		path:     path,
+		readOnly: readOnly,
+		flock:    flock,
+		logw:     logw,
+		logSize:  logSize,
+	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
 }
@@ -98,6 +122,9 @@ func (fs *fileStorage) Lock() (Lock, error) {
 	if fs.open < 0 {
 		return nil, ErrClosed
 	}
+	if fs.readOnly {
+		return &fileStorageLock{}, nil
+	}
 	if fs.slock != nil {
 		return nil, ErrLocked
 	}
@@ -106,7 +133,7 @@ func (fs *fileStorage) Lock() (Lock, error) {
 }
 
 func itoa(buf []byte, i int, wid int) []byte {
-	var u uint = uint(i)
+	u := uint(i)
 	if u == 0 && wid <= 1 {
 		return append(buf, '0')
 	}
@@ -166,22 +193,29 @@ func (fs *fileStorage) doLog(t time.Time, str string) {
 }
 
 func (fs *fileStorage) Log(str string) {
-	t := time.Now()
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	if fs.open < 0 {
-		return
+	if !fs.readOnly {
+		t := time.Now()
+		fs.mu.Lock()
+		defer fs.mu.Unlock()
+		if fs.open < 0 {
+			return
+		}
+		fs.doLog(t, str)
 	}
-	fs.doLog(t, str)
 }
 
 func (fs *fileStorage) log(str string) {
-	fs.doLog(time.Now(), str)
+	if !fs.readOnly {
+		fs.doLog(time.Now(), str)
+	}
 }
 
 func (fs *fileStorage) SetMeta(fd FileDesc) (err error) {
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
+	}
+	if fs.readOnly {
+		return errReadOnly
 	}
 
 	fs.mu.Lock()
@@ -297,18 +331,20 @@ func (fs *fileStorage) GetMeta() (fd FileDesc, err error) {
 		}
 		return
 	}
-	// Rename pending CURRENT file to an effective CURRENT.
-	if pend {
-		path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), fd.Num)
-		if err := rename(path, filepath.Join(fs.path, "CURRENT")); err != nil {
-			fs.log(fmt.Sprintf("CURRENT.%d -> CURRENT: %v", fd.Num, err))
+	if !fs.readOnly {
+		// Rename pending CURRENT file to an effective CURRENT.
+		if pend {
+			path := fmt.Sprintf("%s.%d", filepath.Join(fs.path, "CURRENT"), fd.Num)
+			if err := rename(path, filepath.Join(fs.path, "CURRENT")); err != nil {
+				fs.log(fmt.Sprintf("CURRENT.%d -> CURRENT: %v", fd.Num, err))
+			}
 		}
-	}
-	// Remove obsolete or incomplete pending CURRENT files.
-	for _, name := range rem {
-		path := filepath.Join(fs.path, name)
-		if err := os.Remove(path); err != nil {
-			fs.log(fmt.Sprintf("remove %s: %v", name, err))
+		// Remove obsolete or incomplete pending CURRENT files.
+		for _, name := range rem {
+			path := filepath.Join(fs.path, name)
+			if err := os.Remove(path); err != nil {
+				fs.log(fmt.Sprintf("remove %s: %v", name, err))
+			}
 		}
 	}
 	return
@@ -368,6 +404,9 @@ func (fs *fileStorage) Create(fd FileDesc) (Writer, error) {
 	if !FileDescOk(fd) {
 		return nil, ErrInvalidFile
 	}
+	if fs.readOnly {
+		return nil, errReadOnly
+	}
 
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -385,6 +424,9 @@ func (fs *fileStorage) Create(fd FileDesc) (Writer, error) {
 func (fs *fileStorage) Remove(fd FileDesc) error {
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
+	}
+	if fs.readOnly {
+		return errReadOnly
 	}
 
 	fs.mu.Lock()
@@ -412,6 +454,9 @@ func (fs *fileStorage) Rename(oldfd, newfd FileDesc) error {
 	}
 	if oldfd == newfd {
 		return nil
+	}
+	if fs.readOnly {
+		return errReadOnly
 	}
 
 	fs.mu.Lock()

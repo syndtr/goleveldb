@@ -88,24 +88,18 @@ func TestFileStorage_InvalidFileName(t *testing.T) {
 }
 
 func TestFileStorage_Locking(t *testing.T) {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldbtestfd-%d", os.Getuid()))
-
-	_, err := os.Stat(path)
-	if err == nil {
-		err = os.RemoveAll(path)
-		if err != nil {
-			t.Fatal("RemoveAll: got error: ", err)
-		}
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldb-testrwlock-%d", os.Getuid()))
+	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal("RemoveAll: got error: ", err)
 	}
+	defer os.RemoveAll(path)
 
-	p1, err := OpenFile(path)
+	p1, err := OpenFile(path, false)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	defer os.RemoveAll(path)
-
-	p2, err := OpenFile(path)
+	p2, err := OpenFile(path, false)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -116,7 +110,7 @@ func TestFileStorage_Locking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(path)
+	p3, err := OpenFile(path, false)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
@@ -137,4 +131,46 @@ func TestFileStorage_Locking(t *testing.T) {
 	if err != nil {
 		t.Fatal("storage lock failed(2): ", err)
 	}
+}
+
+func TestFileStorage_ReadOnlyLocking(t *testing.T) {
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldb-testrolock-%d", os.Getuid()))
+	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
+		t.Fatal("RemoveAll: got error: ", err)
+	}
+	defer os.RemoveAll(path)
+
+	p1, err := OpenFile(path, false)
+	if err != nil {
+		t.Fatal("OpenFile(1): got error: ", err)
+	}
+
+	_, err = OpenFile(path, true)
+	if err != nil {
+		t.Logf("OpenFile(2): got error: %s (expected)", err)
+	} else {
+		t.Fatal("OpenFile(2): expect error")
+	}
+
+	p1.Close()
+
+	p3, err := OpenFile(path, true)
+	if err != nil {
+		t.Fatal("OpenFile(3): got error: ", err)
+	}
+
+	p4, err := OpenFile(path, true)
+	if err != nil {
+		t.Fatal("OpenFile(4): got error: ", err)
+	}
+
+	_, err = OpenFile(path, false)
+	if err != nil {
+		t.Logf("OpenFile(5): got error: %s (expected)", err)
+	} else {
+		t.Fatal("OpenFile(2): expect error")
+	}
+
+	p3.Close()
+	p4.Close()
 }

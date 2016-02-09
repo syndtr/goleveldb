@@ -49,7 +49,7 @@ func main() {
 		fmt.Println("Child flag set.")
 	}
 
-	stor, err := storage.OpenFile(filename)
+	stor, err := storage.OpenFile(filename, false)
 	if err != nil {
 		fmt.Printf("Could not open storage: %s", err)
 		os.Exit(10)

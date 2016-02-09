@@ -211,7 +211,7 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
-	stor, err := storage.OpenFile(path)
+	stor, err := storage.OpenFile(path, o.GetReadOnly())
 	if err != nil {
 		return
 	}
@@ -261,7 +261,7 @@ func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The returned DB instance is goroutine-safe.
 // The DB must be closed after use, by calling Close method.
 func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
-	stor, err := storage.OpenFile(path)
+	stor, err := storage.OpenFile(path, false)
 	if err != nil {
 		return
 	}

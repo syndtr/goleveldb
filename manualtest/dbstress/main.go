@@ -318,7 +318,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	os.RemoveAll(dbPath)
-	stor, err := storage.OpenFile(dbPath)
+	stor, err := storage.OpenFile(dbPath, false)
 	if err != nil {
 		log.Fatal(err)
 	}

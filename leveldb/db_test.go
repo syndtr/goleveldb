@@ -1877,7 +1877,7 @@ func TestDB_CreateReopenDbOnFile(t *testing.T) {
 	defer os.RemoveAll(dbpath)
 
 	for i := 0; i < 3; i++ {
-		stor, err := storage.OpenFile(dbpath)
+		stor, err := storage.OpenFile(dbpath, false)
 		if err != nil {
 			t.Fatalf("(%d) cannot open storage: %s", i, err)
 		}
