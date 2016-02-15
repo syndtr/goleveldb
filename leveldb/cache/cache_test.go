@@ -45,9 +45,8 @@ func set(c *Cache, ns, key uint64, value Value, charge int, relf func()) *Handle
 	return c.Get(ns, key, func() (int, Value) {
 		if relf != nil {
 			return charge, releaserFunc{relf, value}
-		} else {
-			return charge, value
 		}
+		return charge, value
 	})
 }
 

@@ -351,9 +351,9 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 			return 0, nil
 		}
 
-		var bcache *cache.CacheGetter
+		var bcache *cache.NamespaceGetter
 		if t.bcache != nil {
-			bcache = &cache.CacheGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
+			bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
 		}
 
 		var tr *table.Reader
