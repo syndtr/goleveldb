@@ -548,9 +548,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.fd.Num, c.sourceLevel+1)
 		rec.delTable(c.sourceLevel, t.fd.Num)
 		rec.addTableFile(c.sourceLevel+1, t)
-		db.compactionTransactFunc("table@move", func(cnt *compactionTransactCounter) (err error) {
-			return db.s.commit(rec)
-		}, nil)
+		db.compactionCommit("table-move", rec)
 		return
 	}
 
