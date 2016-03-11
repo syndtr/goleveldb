@@ -6,4 +6,6 @@ go:
   - 1.4
   - tip
 
-script: go test -timeout 1h ./...
+script:
+  - go test -timeout 1h ./...
+  - go test -timeout 30m -race -run "TestDB_(Concurrent|GoleveldbIssue74)" ./leveldb
