@@ -38,9 +38,6 @@ func compareBatch(t *testing.T, b1, b2 *Batch) {
 	if b1.Len() != b2.Len() {
 		t.Fatalf("invalid record length want %d, got %d", b1.Len(), b2.Len())
 	}
-	if b1.size() != b2.size() {
-		t.Fatalf("invalid batch size want %d, got %d", b1.size(), b2.size())
-	}
 	p1, p2 := new(testBatch), new(testBatch)
 	err := b1.Replay(p1)
 	if err != nil {
@@ -103,6 +100,9 @@ func TestBatch_Append(t *testing.T) {
 	b2b.Put([]byte("bar"), []byte("barvalue"))
 	b2a.append(b2b)
 	compareBatch(t, b1, b2a)
+	if b1.size() != b2a.size() {
+		t.Fatalf("invalid batch size want %d, got %d", b1.size(), b2a.size())
+	}
 }
 
 func TestBatch_Size(t *testing.T) {
