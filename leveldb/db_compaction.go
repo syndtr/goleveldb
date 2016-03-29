@@ -172,7 +172,7 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 		disableBackoff = db.s.o.GetDisableCompactionBackoff()
 	)
 	for n := 0; ; n++ {
-		// Check wether the DB is closed.
+		// Check whether the DB is closed.
 		if db.isClosed() {
 			db.logf("%s exiting", name)
 			db.compactionExitTransact()
