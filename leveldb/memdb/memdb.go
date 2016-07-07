@@ -436,7 +436,6 @@ func (p *DB) Len() int {
 // Reset resets the DB to initial empty state. Allows reuse the buffer.
 func (p *DB) Reset() {
 	p.mu.Lock()
-	p.rnd = rand.New(rand.NewSource(0xdeadbeef))
 	p.maxHeight = 1
 	p.n = 0
 	p.kvSize = 0
