@@ -10,9 +10,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/memdb"
-	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/pingcap/goleveldb/leveldb/errors"
+	"github.com/pingcap/goleveldb/leveldb/memdb"
+	"github.com/pingcap/goleveldb/leveldb/storage"
 )
 
 // ErrBatchCorrupted records reason of batch corruption.

@@ -19,12 +19,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
-	"github.com/syndtr/goleveldb/leveldb/table"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/pingcap/goleveldb/leveldb"
+	"github.com/pingcap/goleveldb/leveldb/errors"
+	"github.com/pingcap/goleveldb/leveldb/opt"
+	"github.com/pingcap/goleveldb/leveldb/storage"
+	"github.com/pingcap/goleveldb/leveldb/table"
+	"github.com/pingcap/goleveldb/leveldb/util"
 )
 
 var (
