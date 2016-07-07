@@ -5,7 +5,7 @@ This is an implementation of the [LevelDB key/value database](http:code.google.c
 Installation
 -----------
 
-	go get github.com/syndtr/goleveldb/leveldb
+	go get github.com/pingcap/goleveldb/leveldb
 
 Requirements
 -----------
@@ -102,4 +102,4 @@ defer db.Close()
 Documentation
 -----------
 
-You can read package documentation [here](http:godoc.org/github.com/syndtr/goleveldb).
+You can read package documentation [here](http:godoc.org/github.com/pingcap/goleveldb).

@@ -11,10 +11,10 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/syndtr/goleveldb/leveldb/comparer"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/iterator"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/pingcap/goleveldb/leveldb/comparer"
+	"github.com/pingcap/goleveldb/leveldb/errors"
+	"github.com/pingcap/goleveldb/leveldb/iterator"
+	"github.com/pingcap/goleveldb/leveldb/util"
 )
 
 var (
@@ -436,7 +436,6 @@ func (p *DB) Len() int {
 // Reset resets the DB to initial empty state. Allows reuse the buffer.
 func (p *DB) Reset() {
 	p.mu.Lock()
-	p.rnd = rand.New(rand.NewSource(0xdeadbeef))
 	p.maxHeight = 1
 	p.n = 0
 	p.kvSize = 0
