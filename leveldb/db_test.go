@@ -116,7 +116,6 @@ func (h *dbHarness) closeDB() {
 		if err := h.closeDB0(); err != nil {
 			h.t.Error("Close: got error: ", err)
 		}
-		h.db = nil
 	}
 	h.stor.CloseCheck()
 	runtime.GC()
