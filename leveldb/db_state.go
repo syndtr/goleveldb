@@ -153,7 +153,7 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 func (db *DB) getMems() (e, f *memDB) {
 	db.memMu.RLock()
 	defer db.memMu.RUnlock()
-	if db.mem == nil {
+	if db.mem == nil && !db.isClosed() {
 		panic("nil effective mem")
 	}
 	db.mem.incref()
@@ -167,7 +167,7 @@ func (db *DB) getMems() (e, f *memDB) {
 func (db *DB) getEffectiveMem() *memDB {
 	db.memMu.RLock()
 	defer db.memMu.RUnlock()
-	if db.mem == nil {
+	if db.mem == nil && !db.isClosed() {
 		panic("nil effective mem")
 	}
 	db.mem.incref()
@@ -201,6 +201,14 @@ func (db *DB) dropFrozenMem() {
 	}
 	db.frozenJournalFd = storage.FileDesc{}
 	db.frozenMem.decref()
+	db.frozenMem = nil
+	db.memMu.Unlock()
+}
+
+// Clear mems ptr; used by DB.Close().
+func (db *DB) clearMems() {
+	db.memMu.Lock()
+	db.mem = nil
 	db.frozenMem = nil
 	db.memMu.Unlock()
 }
