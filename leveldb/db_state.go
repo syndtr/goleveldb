@@ -153,10 +153,11 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 func (db *DB) getMems() (e, f *memDB) {
 	db.memMu.RLock()
 	defer db.memMu.RUnlock()
-	if db.mem == nil && !db.isClosed() {
+	if db.mem != nil {
+		db.mem.incref()
+	} else if !db.isClosed() {
 		panic("nil effective mem")
 	}
-	db.mem.incref()
 	if db.frozenMem != nil {
 		db.frozenMem.incref()
 	}
@@ -167,10 +168,11 @@ func (db *DB) getMems() (e, f *memDB) {
 func (db *DB) getEffectiveMem() *memDB {
 	db.memMu.RLock()
 	defer db.memMu.RUnlock()
-	if db.mem == nil && !db.isClosed() {
+	if db.mem != nil {
+		db.mem.incref()
+	} else if !db.isClosed() {
 		panic("nil effective mem")
 	}
-	db.mem.incref()
 	return db.mem
 }
 
