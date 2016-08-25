@@ -87,7 +87,7 @@ func (s *session) close() {
 	}
 	s.manifest = nil
 	s.manifestWriter = nil
-	s.stVersion = nil
+	s.setVersion(&version{})
 }
 
 // Release session lock.
