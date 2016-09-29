@@ -164,7 +164,7 @@ func (db *DB) getMems() (e, f *memDB) {
 	return db.mem, db.frozenMem
 }
 
-// Get frozen memdb.
+// Get effective memdb.
 func (db *DB) getEffectiveMem() *memDB {
 	db.memMu.RLock()
 	defer db.memMu.RUnlock()
