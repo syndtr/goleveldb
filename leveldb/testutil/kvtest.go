@@ -140,7 +140,7 @@ func KeyValueTesting(rnd *rand.Rand, kv KeyValue, p DB, setup func(KeyValue) DB,
 			TestIter(db, nil, kv.Clone())
 		}
 		done <- true
-	}, 3.0)
+	}, 30.0)
 
 	It("Should iterates and seeks slice correctly", func(done Done) {
 		if db, ok := p.(NewIterator); ok {
@@ -162,7 +162,7 @@ func KeyValueTesting(rnd *rand.Rand, kv KeyValue, p DB, setup func(KeyValue) DB,
 			})
 		}
 		done <- true
-	}, 50.0)
+	}, 200.0)
 
 	It("Should iterates and seeks slice correctly", func(done Done) {
 		if db, ok := p.(NewIterator); ok {
@@ -174,7 +174,7 @@ func KeyValueTesting(rnd *rand.Rand, kv KeyValue, p DB, setup func(KeyValue) DB,
 			})
 		}
 		done <- true
-	}, 50.0)
+	}, 200.0)
 }
 
 func AllKeyValueTesting(rnd *rand.Rand, body, setup func(KeyValue) DB, teardown func(DB)) {

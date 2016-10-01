@@ -69,7 +69,7 @@ var _ = testutil.Defer(func() {
 					}
 					testutil.DoIteratorTesting(&t)
 					done <- true
-				}, 1.5)
+				}, 15.0)
 			}
 		}
 
