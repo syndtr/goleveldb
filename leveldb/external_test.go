@@ -32,7 +32,7 @@ var _ = testutil.Defer(func() {
 				db := newTestingDB(o, nil, nil)
 				t := testutil.DBTesting{
 					DB:      db,
-					Deleted: testutil.KeyValue_Generate(nil, 500, 1, 50, 5, 5).Clone(),
+					Deleted: testutil.KeyValue_Generate(nil, 500, 1, 1, 50, 5, 5).Clone(),
 				}
 				testutil.DoDBTesting(&t)
 				db.TestClose()
@@ -66,7 +66,7 @@ var _ = testutil.Defer(func() {
 				Expect(err).NotTo(HaveOccurred())
 				t0 := &testutil.DBTesting{
 					DB:      tr,
-					Deleted: testutil.KeyValue_Generate(nil, 200, 1, 50, 5, 5).Clone(),
+					Deleted: testutil.KeyValue_Generate(nil, 200, 1, 1, 50, 5, 5).Clone(),
 				}
 				testutil.DoDBTesting(t0)
 				testutil.TestGet(tr, t0.Present)

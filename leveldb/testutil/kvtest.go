@@ -23,15 +23,15 @@ func TestFind(db Find, kv KeyValue) {
 
 		// Using exact key.
 		rkey, rvalue, err := db.TestFind(key)
-		Expect(err).ShouldNot(HaveOccurred(), "Error for key %q", key)
+		Expect(err).ShouldNot(HaveOccurred(), "Error for exact key %q", key)
 		Expect(rkey).Should(Equal(key), "Key")
-		Expect(rvalue).Should(Equal(value), "Value for key %q", key)
+		Expect(rvalue).Should(Equal(value), "Value for exact key %q", key)
 
 		// Using inexact key.
 		rkey, rvalue, err = db.TestFind(key_)
-		Expect(err).ShouldNot(HaveOccurred(), "Error for key %q (%q)", key_, key)
-		Expect(rkey).Should(Equal(key))
-		Expect(rvalue).Should(Equal(value), "Value for key %q (%q)", key_, key)
+		Expect(err).ShouldNot(HaveOccurred(), "Error for inexact key %q (%q)", key_, key)
+		Expect(rkey).Should(Equal(key), "Key for inexact key %q (%q)", key_, key)
+		Expect(rvalue).Should(Equal(value), "Value for inexact key %q (%q)", key_, key)
 	})
 }
 
@@ -207,5 +207,6 @@ func AllKeyValueTesting(rnd *rand.Rand, body, setup func(KeyValue) DB, teardown 
 	Describe("with big value", Test(KeyValue_BigValue()))
 	Describe("with special key", Test(KeyValue_SpecialKey()))
 	Describe("with multiple key/value", Test(KeyValue_MultipleKeyValue()))
-	Describe("with generated key/value", Test(KeyValue_Generate(nil, 120, 1, 50, 10, 120)))
+	Describe("with generated key/value 2-incr", Test(KeyValue_Generate(nil, 120, 2, 1, 50, 10, 120)))
+	Describe("with generated key/value 3-incr", Test(KeyValue_Generate(nil, 120, 3, 1, 50, 10, 120)))
 }

@@ -61,7 +61,7 @@ type block struct {
 func (b *block) seek(cmp comparer.Comparer, rstart, rlimit int, key []byte) (index, offset int, err error) {
 	index = sort.Search(b.restartsLen-rstart-(b.restartsLen-rlimit), func(i int) bool {
 		offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
-		offset += 1                                 // shared always zero, since this is a restart point
+		offset++                                    // shared always zero, since this is a restart point
 		v1, n1 := binary.Uvarint(b.data[offset:])   // key length
 		_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
 		m := offset + n1 + n2
@@ -356,7 +356,7 @@ func (i *blockIter) Prev() bool {
 	i.value = nil
 	offset := i.block.restartOffset(ri)
 	if offset == i.offset {
-		ri -= 1
+		ri--
 		if ri < 0 {
 			i.dir = dirSOI
 			return false
@@ -826,18 +826,21 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 
 	index := r.newBlockIter(indexBlock, nil, nil, true)
 	defer index.Release()
+
 	if !index.Seek(key) {
-		err = index.Error()
-		if err == nil {
+		if err = index.Error(); err == nil {
 			err = ErrNotFound
 		}
 		return
 	}
+
 	dataBH, n := decodeBlockHandle(index.Value())
 	if n == 0 {
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
-		return
+		return nil, nil, r.err
 	}
+
+	// The filter should only used for exact match.
 	if filtered && r.filter != nil {
 		filterBlock, frel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
@@ -847,30 +850,53 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 			}
 			frel.Release()
 		} else if !errors.IsCorrupted(ferr) {
-			err = ferr
+			return nil, nil, ferr
+		}
+	}
+
+	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
+	if !data.Seek(key) {
+		data.Release()
+		if err = data.Error(); err != nil {
+			return
+		}
+
+		// The nearest greater-than key is the first key of the next block.
+		if !index.Next() {
+			if err = index.Error(); err == nil {
+				err = ErrNotFound
+			}
+			return
+		}
+
+		dataBH, n = decodeBlockHandle(index.Value())
+		if n == 0 {
+			r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
+			return nil, nil, r.err
+		}
+
+		data = r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
+		if !data.Next() {
+			data.Release()
+			if err = data.Error(); err == nil {
+				err = ErrNotFound
+			}
 			return
 		}
 	}
-	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
-	defer data.Release()
-	if !data.Seek(key) {
-		err = data.Error()
-		if err == nil {
-			err = ErrNotFound
-		}
-		return
-	}
-	// Don't use block buffer, no need to copy the buffer.
+
+	// Key doesn't use block buffer, no need to copy the buffer.
 	rkey = data.Key()
 	if !noValue {
 		if r.bpool == nil {
 			value = data.Value()
 		} else {
-			// Use block buffer, and since the buffer will be recycled, the buffer
-			// need to be copied.
+			// Value does use block buffer, and since the buffer will be
+			// recycled, it need to be copied.
 			value = append([]byte{}, data.Value()...)
 		}
 	}
+	data.Release()
 	return
 }
 
@@ -1039,9 +1065,8 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.Name
 		if errors.IsCorrupted(err) {
 			r.err = err
 			return r, nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 
 	// Set data end.
@@ -1086,9 +1111,8 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.Name
 			if errors.IsCorrupted(err) {
 				r.err = err
 				return r, nil
-			} else {
-				return nil, err
 			}
+			return nil, err
 		}
 		if r.filter != nil {
 			r.filterBlock, err = r.readFilterBlock(r.filterBH)
