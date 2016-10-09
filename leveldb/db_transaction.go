@@ -167,8 +167,8 @@ func (tr *Transaction) Write(b *Batch, wo *opt.WriteOptions) error {
 	if tr.closed {
 		return errTransactionDone
 	}
-	return b.decodeRec(func(i int, kt keyType, key, value []byte) error {
-		return tr.put(kt, key, value)
+	return b.replayInternal(func(i int, kt keyType, k, v []byte) error {
+		return tr.put(kt, k, v)
 	})
 }
 
@@ -246,8 +246,8 @@ func (tr *Transaction) Discard() {
 }
 
 // OpenTransaction opens an atomic DB transaction. Only one transaction can be
-// opened at a time. Write will be blocked until the transaction is committed or
-// discarded.
+// opened at a time. Subsequent call to Write and OpenTransaction will be blocked
+// until in-flight transaction is committed or discarded.
 // The returned transaction handle is goroutine-safe.
 //
 // The transaction must be closed once done, either by committing or discarding

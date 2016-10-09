@@ -53,14 +53,13 @@ type DB struct {
 	aliveSnaps, aliveIters int32
 
 	// Write.
-	writeC       chan *Batch
+	batchPool    sync.Pool
+	writeMergeC  chan writeMerge
 	writeMergedC chan bool
 	writeLockC   chan struct{}
 	writeAckC    chan error
 	writeDelay   time.Duration
 	writeDelayN  int
-	journalC     chan *Batch
-	journalAckC  chan error
 	tr           *Transaction
 
 	// Compaction.
@@ -94,12 +93,11 @@ func openDB(s *session) (*DB, error) {
 		// Snapshot
 		snapsList: list.New(),
 		// Write
-		writeC:       make(chan *Batch),
+		batchPool:    sync.Pool{New: newBatch},
+		writeMergeC:  make(chan writeMerge),
 		writeMergedC: make(chan bool),
 		writeLockC:   make(chan struct{}, 1),
 		writeAckC:    make(chan error),
-		journalC:     make(chan *Batch),
-		journalAckC:  make(chan error),
 		// Compaction
 		tcompCmdC:   make(chan cCmd),
 		tcompPauseC: make(chan chan<- struct{}),
@@ -144,10 +142,10 @@ func openDB(s *session) (*DB, error) {
 	if readOnly {
 		db.SetReadOnly()
 	} else {
-		db.closeW.Add(3)
+		db.closeW.Add(2)
 		go db.tCompaction()
 		go db.mCompaction()
-		go db.jWriter()
+		// go db.jWriter()
 	}
 
 	s.logf("db@open done T·%v", time.Since(start))
@@ -504,10 +502,11 @@ func (db *DB) recoverJournal() error {
 			checksum    = db.s.o.GetStrict(opt.StrictJournalChecksum)
 			writeBuffer = db.s.o.GetWriteBuffer()
 
-			jr    *journal.Reader
-			mdb   = memdb.New(db.s.icmp, writeBuffer)
-			buf   = &util.Buffer{}
-			batch = &Batch{}
+			jr       *journal.Reader
+			mdb      = memdb.New(db.s.icmp, writeBuffer)
+			buf      = &util.Buffer{}
+			batchSeq uint64
+			batchLen int
 		)
 
 		for _, fd := range fds {
@@ -569,7 +568,8 @@ func (db *DB) recoverJournal() error {
 					fr.Close()
 					return errors.SetFd(err, fd)
 				}
-				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
+				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), db.seq, mdb)
+				if err != nil {
 					if !strict && errors.IsCorrupted(err) {
 						db.s.logf("journal error: %v (skipped)", err)
 						// We won't apply sequence number as it might be corrupted.
@@ -581,7 +581,7 @@ func (db *DB) recoverJournal() error {
 				}
 
 				// Save sequence number.
-				db.seq = batch.seq + uint64(batch.Len())
+				db.seq = batchSeq + uint64(batchLen)
 
 				// Flush it if large enough.
 				if mdb.Size() >= writeBuffer {
@@ -661,9 +661,10 @@ func (db *DB) recoverJournalRO() error {
 		db.logf("journal@recovery RO·Mode F·%d", len(fds))
 
 		var (
-			jr    *journal.Reader
-			buf   = &util.Buffer{}
-			batch = &Batch{}
+			jr       *journal.Reader
+			buf      = &util.Buffer{}
+			batchSeq uint64
+			batchLen int
 		)
 
 		for _, fd := range fds {
@@ -703,7 +704,8 @@ func (db *DB) recoverJournalRO() error {
 					fr.Close()
 					return errors.SetFd(err, fd)
 				}
-				if err := batch.memDecodeAndReplay(db.seq, buf.Bytes(), mdb); err != nil {
+				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), db.seq, mdb)
+				if err != nil {
 					if !strict && errors.IsCorrupted(err) {
 						db.s.logf("journal error: %v (skipped)", err)
 						// We won't apply sequence number as it might be corrupted.
@@ -715,7 +717,7 @@ func (db *DB) recoverJournalRO() error {
 				}
 
 				// Save sequence number.
-				db.seq = batch.seq + uint64(batch.Len())
+				db.seq = batchSeq + uint64(batchLen)
 			}
 
 			fr.Close()
