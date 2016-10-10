@@ -55,9 +55,9 @@ func (db *DB) rotateMem(n int, wait bool) (mem *memDB, err error) {
 
 func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 	delayed := false
+	slowdownTrigger := db.s.o.GetWriteL0SlowdownTrigger()
+	pauseTrigger := db.s.o.GetWriteL0PauseTrigger()
 	flush := func() (retry bool) {
-		v := db.s.version()
-		defer v.release()
 		mdb = db.getEffectiveMem()
 		if mdb == nil {
 			err = ErrClosed
@@ -69,14 +69,15 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 				mdb = nil
 			}
 		}()
+		tLen := db.s.tLen(0)
 		mdbFree = mdb.Free()
 		switch {
-		case v.tLen(0) >= db.s.o.GetWriteL0SlowdownTrigger() && !delayed:
+		case tLen >= slowdownTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
 		case mdbFree >= n:
 			return false
-		case v.tLen(0) >= db.s.o.GetWriteL0PauseTrigger():
+		case tLen >= pauseTrigger:
 			delayed = true
 			err = db.compTriggerWait(db.tcompCmdC)
 			if err != nil {

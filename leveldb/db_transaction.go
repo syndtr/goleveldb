@@ -201,7 +201,6 @@ func (tr *Transaction) Commit() error {
 		// Committing transaction.
 		tr.rec.setSeqNum(tr.seq)
 		tr.db.compCommitLk.Lock()
-		defer tr.db.compCommitLk.Unlock()
 		for retry := 0; retry < 3; retry++ {
 			if err := tr.db.s.commit(&tr.rec); err != nil {
 				tr.db.logf("transaction@commit error R·%d %q", retry, err)
@@ -209,6 +208,7 @@ func (tr *Transaction) Commit() error {
 				case <-time.After(time.Second):
 				case _, _ = <-tr.db.closeC:
 					tr.db.logf("transaction@commit exiting")
+					tr.db.compCommitLk.Unlock()
 					return err
 				}
 			} else {
@@ -219,6 +219,12 @@ func (tr *Transaction) Commit() error {
 		}
 		// Trigger table auto-compaction.
 		tr.db.compTrigger(tr.db.tcompCmdC)
+		tr.db.compCommitLk.Unlock()
+
+		// Additionally, wait compaction when certain threshold reached.
+		if err := tr.db.waitCompaction(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -245,10 +251,19 @@ func (tr *Transaction) Discard() {
 	tr.lk.Unlock()
 }
 
+func (db *DB) waitCompaction() error {
+	if db.s.tLen(0) >= db.s.o.GetWriteL0PauseTrigger() {
+		return db.compTriggerWait(db.tcompCmdC)
+	}
+	return nil
+}
+
 // OpenTransaction opens an atomic DB transaction. Only one transaction can be
 // opened at a time. Subsequent call to Write and OpenTransaction will be blocked
 // until in-flight transaction is committed or discarded.
-// The returned transaction handle is goroutine-safe.
+// The returned transaction handle is safe for concurrent use.
+//
+// Transaction is expensive and put restrains on the compaction.
 //
 // The transaction must be closed once done, either by committing or discarding
 // the transaction.
@@ -276,6 +291,11 @@ func (db *DB) OpenTransaction() (*Transaction, error) {
 		if _, err := db.rotateMem(0, true); err != nil {
 			return nil, err
 		}
+	}
+
+	// Wait compaction when certain threshold reached.
+	if err := db.waitCompaction(); err != nil {
+		return nil, err
 	}
 
 	tr := &Transaction{
