@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"testing"
@@ -80,10 +79,6 @@ func TestBatch(t *testing.T) {
 		if len(kvs)%1000 == 0 {
 			if err := batch.replayInternal(testBatch); err != nil {
 				t.Logf("batch.replayInternal: %v", err)
-				return false
-			}
-			if err := readBatch(bufio.NewReader(bytes.NewReader(batch.data)), testBatch); err != nil {
-				t.Logf("readBatch: %v", err)
 				return false
 			}
 

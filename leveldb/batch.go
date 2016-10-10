@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -297,96 +296,6 @@ func decodeBatchToMem(data []byte, expectSeq uint64, mdb *memdb.DB) (seq uint64,
 		}
 		ik = makeInternalKey(ik, index.k(data), seq+uint64(i), index.keyType)
 		if err := mdb.Put(ik, index.v(data)); err != nil {
-			return err
-		}
-		decodedLen++
-		return nil
-	})
-	if err == nil && decodedLen != batchLen {
-		err = newErrBatchCorrupted(fmt.Sprintf("invalid records length: %d vs %d", batchLen, decodedLen))
-	}
-	return
-}
-
-func readBatch(br *bufio.Reader, fn func(i int, kt keyType, k, v []byte) error) error {
-	var k, v []byte
-	for i := 0; ; i++ {
-		// Key type.
-		c, err := br.ReadByte()
-		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			return err
-		}
-		kt := keyType(c)
-		if kt > keyTypeVal {
-			return newErrBatchCorrupted(fmt.Sprintf("bad record: invalid type %#x", uint(kt)))
-		}
-
-		// Key.
-		x, err := binary.ReadUvarint(br)
-		if err == nil {
-			k = ensureBuffer(k, int(x))
-			_, err = io.ReadFull(br, k)
-		}
-		if err != nil {
-			if err == io.ErrUnexpectedEOF {
-				err = newErrBatchCorrupted("bad record: invalid key length")
-			}
-			return err
-		}
-
-		// Value.
-		if kt == keyTypeVal {
-			x, err = binary.ReadUvarint(br)
-			if err == nil {
-				v = ensureBuffer(v, int(x))
-				_, err = io.ReadFull(br, v)
-			}
-			if err != nil {
-				if err == io.ErrUnexpectedEOF {
-					err = newErrBatchCorrupted("bad record: invalid value length")
-				}
-				return err
-			}
-
-			if err := fn(i, kt, k, v); err != nil {
-				return err
-			}
-		} else {
-			if err := fn(i, kt, k, nil); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func readBatchToMem(br *bufio.Reader, expectSeq uint64, mdb *memdb.DB) (seq uint64, batchLen int, err error) {
-	header, err := br.Peek(batchHeaderLen)
-	if err != nil && err != io.EOF {
-		// Let's decodeBatchHeader returns "too short" error.
-		return 0, 0, err
-	}
-	seq, batchLen, err = decodeBatchHeader(header)
-	if err != nil {
-		return 0, 0, err
-	}
-	if seq < expectSeq {
-		return 0, 0, newErrBatchCorrupted("invalid sequence number")
-	}
-	// Discard is guaranteed to succeed without reading from the underlying
-	// io.Reader.
-	br.Discard(batchHeaderLen)
-	var ik []byte
-	var decodedLen int
-	err = readBatch(br, func(i int, kt keyType, k, v []byte) error {
-		if i >= batchLen {
-			return newErrBatchCorrupted("invalid records length")
-		}
-		ik = makeInternalKey(ik, k, seq+uint64(i), kt)
-		if err := mdb.Put(ik, v); err != nil {
 			return err
 		}
 		decodedLen++
