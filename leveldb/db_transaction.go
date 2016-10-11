@@ -179,7 +179,8 @@ func (tr *Transaction) setDone() {
 	<-tr.db.writeLockC
 }
 
-// Commit commits the transaction.
+// Commit commits the transaction. If error is not nil, then the transaction is
+// not committed, it can then either be retried or discarded.
 //
 // Other methods should not be called after transaction has been committed.
 func (tr *Transaction) Commit() error {
@@ -192,24 +193,27 @@ func (tr *Transaction) Commit() error {
 	if tr.closed {
 		return errTransactionDone
 	}
-	defer tr.setDone()
 	if err := tr.flush(); err != nil {
-		tr.discard()
+		// Return error, lets user decide either to retry or discard
+		// transaction.
 		return err
 	}
 	if len(tr.tables) != 0 {
 		// Committing transaction.
 		tr.rec.setSeqNum(tr.seq)
 		tr.db.compCommitLk.Lock()
+		tr.stats.startTimer()
+		var cerr error
 		for retry := 0; retry < 3; retry++ {
-			if err := tr.db.s.commit(&tr.rec); err != nil {
-				tr.db.logf("transaction@commit error R·%d %q", retry, err)
+			cerr = tr.db.s.commit(&tr.rec)
+			if cerr != nil {
+				tr.db.logf("transaction@commit error R·%d %q", retry, cerr)
 				select {
 				case <-time.After(time.Second):
-				case _, _ = <-tr.db.closeC:
+				case <-tr.db.closeC:
 					tr.db.logf("transaction@commit exiting")
 					tr.db.compCommitLk.Unlock()
-					return err
+					return cerr
 				}
 			} else {
 				// Success. Set db.seq.
@@ -217,15 +221,26 @@ func (tr *Transaction) Commit() error {
 				break
 			}
 		}
+		tr.stats.stopTimer()
+		if cerr != nil {
+			// Return error, lets user decide either to retry or discard
+			// transaction.
+			return cerr
+		}
+
+		// Update compaction stats. This is safe as long as we hold compCommitLk.
+		tr.db.compStats.addStat(0, &tr.stats)
+
 		// Trigger table auto-compaction.
 		tr.db.compTrigger(tr.db.tcompCmdC)
 		tr.db.compCommitLk.Unlock()
 
 		// Additionally, wait compaction when certain threshold reached.
-		if err := tr.db.waitCompaction(); err != nil {
-			return err
-		}
+		// Ignore error, returns error only if transaction can't be committed.
+		tr.db.waitCompaction()
 	}
+	// Only mark as done if transaction committed successfully.
+	tr.setDone()
 	return nil
 }
 
