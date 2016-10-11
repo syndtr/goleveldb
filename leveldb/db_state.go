@@ -99,7 +99,7 @@ func (db *DB) mpoolDrain() {
 			case <-db.memPool:
 			default:
 			}
-		case _, _ = <-db.closeC:
+		case <-db.closeC:
 			ticker.Stop()
 			// Make sure the pool is drained.
 			select {

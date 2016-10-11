@@ -386,7 +386,7 @@ func (db *DB) CompactRange(r util.Range) error {
 	case db.writeLockC <- struct{}{}:
 	case err := <-db.compPerErrC:
 		return err
-	case _, _ = <-db.closeC:
+	case <-db.closeC:
 		return ErrClosed
 	}
 
@@ -426,7 +426,7 @@ func (db *DB) SetReadOnly() error {
 		db.compWriteLocking = true
 	case err := <-db.compPerErrC:
 		return err
-	case _, _ = <-db.closeC:
+	case <-db.closeC:
 		return ErrClosed
 	}
 
@@ -435,7 +435,7 @@ func (db *DB) SetReadOnly() error {
 	case db.compErrSetC <- ErrReadOnly:
 	case perr := <-db.compPerErrC:
 		return perr
-	case _, _ = <-db.closeC:
+	case <-db.closeC:
 		return ErrClosed
 	}
 

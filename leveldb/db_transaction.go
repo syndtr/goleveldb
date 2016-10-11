@@ -294,7 +294,7 @@ func (db *DB) OpenTransaction() (*Transaction, error) {
 	case db.writeLockC <- struct{}{}:
 	case err := <-db.compPerErrC:
 		return nil, err
-	case _, _ = <-db.closeC:
+	case <-db.closeC:
 		return nil, ErrClosed
 	}
 
