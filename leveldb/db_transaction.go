@@ -59,8 +59,8 @@ func (tr *Transaction) Has(key []byte, ro *opt.ReadOptions) (bool, error) {
 }
 
 // NewIterator returns an iterator for the latest snapshot of the transaction.
-// The returned iterator is not goroutine-safe, but it is safe to use multiple
-// iterators concurrently, with each in a dedicated goroutine.
+// The returned iterator is not safe for concurrent use, but it is safe to use
+// multiple iterators concurrently, with each in a dedicated goroutine.
 // It is also safe to use an iterator concurrently while writes to the
 // transaction. The resultant key/value pairs are guaranteed to be consistent.
 //

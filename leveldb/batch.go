@@ -16,7 +16,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
-// ErrBatchCorrupted records reason of batch corruption.
+// ErrBatchCorrupted records reason of batch corruption. This error will be
+// wrapped with errors.ErrCorrupted.
 type ErrBatchCorrupted struct {
 	Reason string
 }

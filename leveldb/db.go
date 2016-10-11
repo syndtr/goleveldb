@@ -160,10 +160,10 @@ func openDB(s *session) (*DB, error) {
 // os.ErrExist error.
 //
 // Open will return an error with type of ErrCorrupted if corruption
-// detected in the DB. Corrupted DB can be recovered with Recover
-// function.
+// detected in the DB. Use errors.IsCorrupted to test whether an error is
+// due to corruption. Corrupted DB can be recovered with Recover function.
 //
-// The returned DB instance is goroutine-safe.
+// The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(stor, o)
@@ -200,13 +200,13 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // os.ErrExist error.
 //
 // OpenFile uses standard file-system backed storage implementation as
-// desribed in the leveldb/storage package.
+// described in the leveldb/storage package.
 //
 // OpenFile will return an error with type of ErrCorrupted if corruption
-// detected in the DB. Corrupted DB can be recovered with Recover
-// function.
+// detected in the DB. Use errors.IsCorrupted to test whether an error is
+// due to corruption. Corrupted DB can be recovered with Recover function.
 //
-// The returned DB instance is goroutine-safe.
+// The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path, o.GetReadOnly())
@@ -227,7 +227,7 @@ func OpenFile(path string, o *opt.Options) (db *DB, err error) {
 // The DB must already exist or it will returns an error.
 // Also, Recover will ignore ErrorIfMissing and ErrorIfExist options.
 //
-// The returned DB instance is goroutine-safe.
+// The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 	s, err := newSession(stor, o)
@@ -253,10 +253,10 @@ func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The DB must already exist or it will returns an error.
 // Also, Recover will ignore ErrorIfMissing and ErrorIfExist options.
 //
-// RecoverFile uses standard file-system backed storage implementation as desribed
+// RecoverFile uses standard file-system backed storage implementation as described
 // in the leveldb/storage package.
 //
-// The returned DB instance is goroutine-safe.
+// The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
 	stor, err := storage.OpenFile(path, false)
@@ -858,7 +858,7 @@ func (db *DB) Has(key []byte, ro *opt.ReadOptions) (ret bool, err error) {
 
 // NewIterator returns an iterator for the latest snapshot of the
 // underlying DB.
-// The returned iterator is not goroutine-safe, but it is safe to use
+// The returned iterator is not safe for concurrent use, but it is safe to use
 // multiple iterators concurrently, with each in a dedicated goroutine.
 // It is also safe to use an iterator concurrently with modifying its
 // underlying DB. The resultant key/value pairs are guaranteed to be

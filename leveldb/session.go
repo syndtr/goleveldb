@@ -18,7 +18,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/storage"
 )
 
-// ErrManifestCorrupted records manifest corruption.
+// ErrManifestCorrupted records manifest corruption. This error will be
+// wrapped with errors.ErrCorrupted.
 type ErrManifestCorrupted struct {
 	Field  string
 	Reason string

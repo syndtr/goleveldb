@@ -26,12 +26,15 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+// Reader errors.
 var (
 	ErrNotFound       = errors.ErrNotFound
 	ErrReaderReleased = errors.New("leveldb/table: reader released")
 	ErrIterReleased   = errors.New("leveldb/table: iterator released")
 )
 
+// ErrCorrupted describes error due to corruption. This error will be wrapped
+// with errors.ErrCorrupted.
 type ErrCorrupted struct {
 	Pos    int64
 	Size   int64
@@ -783,8 +786,8 @@ func (r *Reader) getDataIterErr(dataBH blockHandle, slice *util.Range, verifyChe
 // table. And a nil Range.Limit is treated as a key after all keys in
 // the table.
 //
-// The returned iterator is not goroutine-safe and should be released
-// when not used.
+// The returned iterator is not safe for concurrent use and should be released
+// after use.
 //
 // Also read Iterator documentation of the leveldb/iterator package.
 func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
@@ -1013,7 +1016,7 @@ func (r *Reader) Release() {
 // NewReader creates a new initialized table reader for the file.
 // The fi, cache and bpool is optional and can be nil.
 //
-// The returned table reader instance is goroutine-safe.
+// The returned table reader instance is safe for concurrent use.
 func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
