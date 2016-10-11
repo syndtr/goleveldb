@@ -525,7 +525,7 @@ func (db *DB) recoverJournal() error {
 			}
 
 			// Flush memdb and remove obsolete journal file.
-			if !ofd.Nil() {
+			if !ofd.Zero() {
 				if mdb.Len() > 0 {
 					if _, err := db.s.flushMemdb(rec, mdb, 0); err != nil {
 						fr.Close()
@@ -624,7 +624,7 @@ func (db *DB) recoverJournal() error {
 	}
 
 	// Remove the last obsolete journal file.
-	if !ofd.Nil() {
+	if !ofd.Zero() {
 		db.s.stor.Remove(ofd)
 	}
 

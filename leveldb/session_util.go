@@ -203,7 +203,7 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 			if s.manifestWriter != nil {
 				s.manifestWriter.Close()
 			}
-			if !s.manifestFd.Nil() {
+			if !s.manifestFd.Zero() {
 				s.stor.Remove(s.manifestFd)
 			}
 			s.manifestFd = fd
