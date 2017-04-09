@@ -17,6 +17,8 @@ Usage
 
 Create or open a database:
 ```go
+// The returned DB instance is safe for concurrent use. Which mean that all
+// DB's methods may be called concurrently from multiple goroutine.
 db, err := leveldb.OpenFile("path/to/db", nil)
 ...
 defer db.Close()
