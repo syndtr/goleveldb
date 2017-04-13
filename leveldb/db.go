@@ -1089,3 +1089,9 @@ func (db *DB) Close() error {
 
 	return err
 }
+
+// BufferPool returns the buffer pool used by database operations.
+// It can be used to put buffers returned by Get back into the pool.
+func (db *DB) BufferPool() *util.BufferPool {
+	return db.s.tops.bpool
+}
