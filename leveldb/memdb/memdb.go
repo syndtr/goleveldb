@@ -181,7 +181,6 @@ const (
 // DB is an in-memory key/value database.
 type DB struct {
 	cmp comparer.BasicComparer
-	rnd *rand.Rand
 
 	mu     sync.RWMutex
 	kvData []byte
@@ -201,7 +200,7 @@ type DB struct {
 func (p *DB) randHeight() (h int) {
 	const branching = 4
 	h = 1
-	for h < tMaxHeight && p.rnd.Int()%branching == 0 {
+	for h < tMaxHeight && rand.Int()%branching == 0 {
 		h++
 	}
 	return
@@ -437,7 +436,6 @@ func (p *DB) Len() int {
 // Reset resets the DB to initial empty state. Allows reuse the buffer.
 func (p *DB) Reset() {
 	p.mu.Lock()
-	p.rnd = rand.New(rand.NewSource(0xdeadbeef))
 	p.maxHeight = 1
 	p.n = 0
 	p.kvSize = 0
@@ -465,7 +463,6 @@ func (p *DB) Reset() {
 func New(cmp comparer.BasicComparer, capacity int) *DB {
 	p := &DB{
 		cmp:       cmp,
-		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
 		maxHeight: 1,
 		kvData:    make([]byte, 0, capacity),
 		nodeData:  make([]int, 4+tMaxHeight),
