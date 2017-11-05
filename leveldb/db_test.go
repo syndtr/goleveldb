@@ -2247,12 +2247,12 @@ func TestDB_GoleveldbIssue72and83(t *testing.T) {
 				k1checksum0 := binary.LittleEndian.Uint32(k1[len(k1)-4:])
 				k1checksum1 := util.NewCRC(k1[:len(k1)-4]).Value()
 				if k1checksum0 != k1checksum1 {
-					t.Fatalf("READER0 #%d.%d W#%d invalid K1 checksum: %#x != %#x", i, k, k1checksum0, k1checksum0)
+					t.Fatalf("READER0 #%d.%d W#%d invalid K1 checksum: %#x != %#x", i, k, writei, k1checksum0, k1checksum0)
 				}
 				k2checksum0 := binary.LittleEndian.Uint32(k2[len(k2)-4:])
 				k2checksum1 := util.NewCRC(k2[:len(k2)-4]).Value()
 				if k2checksum0 != k2checksum1 {
-					t.Fatalf("READER0 #%d.%d W#%d invalid K2 checksum: %#x != %#x", i, k, k2checksum0, k2checksum1)
+					t.Fatalf("READER0 #%d.%d W#%d invalid K2 checksum: %#x != %#x", i, k, writei, k2checksum0, k2checksum1)
 				}
 				kwritei := int(binary.LittleEndian.Uint32(k2[len(k2)-8:]))
 				if writei != kwritei {
