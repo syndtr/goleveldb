@@ -2840,6 +2840,7 @@ func TestDB_BulkInsertDelete(t *testing.T) {
 		}
 	}
 
+	h.waitCompaction()
 	if tot := h.totalTables(); tot > 10 {
 		t.Fatalf("too many uncompacted tables: %d (%s)", tot, h.getTablesPerLevel())
 	}
