@@ -767,7 +767,7 @@ func TestDB_GetEncountersEmptyLevel(t *testing.T) {
 		//   * sstable B in level 2
 		// Then do enough Get() calls to arrange for an automatic compaction
 		// of sstable A.  A bug would cause the compaction to be marked as
-		// occuring at level 1 (instead of the correct level 0).
+		// occurring at level 1 (instead of the correct level 0).
 
 		// Step 1: First place sstables in levels 0 and 2
 		for i := 0; ; i++ {
@@ -2736,7 +2736,7 @@ func testDB_IterTriggeredCompaction(t *testing.T, limitDiv int) {
 		initialSize1 = h.sizeOf(limitKey, maxKey)
 	)
 
-	t.Logf("inital size %s [rest %s]", shortenb(int(initialSize0)), shortenb(int(initialSize1)))
+	t.Logf("initial size %s [rest %s]", shortenb(int(initialSize0)), shortenb(int(initialSize1)))
 
 	for r := 0; true; r++ {
 		if r >= mIter {
