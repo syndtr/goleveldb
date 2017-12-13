@@ -51,6 +51,8 @@ type DB struct {
 
 	// Stats.
 	aliveSnaps, aliveIters int32
+	cWriteDelayN           int32 // The cumulative number of write delays
+	cWriteDelay            int64 // The cumulative duration of write delays
 
 	// Write.
 	batchPool    sync.Pool
@@ -904,6 +906,8 @@ func (db *DB) GetSnapshot() (*Snapshot, error) {
 //		Returns the number of files at level 'n'.
 //	leveldb.stats
 //		Returns statistics of the underlying DB.
+//	leveldb.writedelay
+//		Returns cumulative write delay caused by compaction.
 //	leveldb.sstables
 //		Returns sstables list for each level.
 //	leveldb.blockpool
@@ -955,6 +959,9 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				level, len(tables), float64(tables.size())/1048576.0, duration.Seconds(),
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
+	case p == "writedelay":
+		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), atomic.LoadInt64(&db.cWriteDelay)
+		value = fmt.Sprintf("DelayN:%d Delay(sec):%.5f", writeDelayN, float64(writeDelay)/1000000000.0)
 	case p == "sstables":
 		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
