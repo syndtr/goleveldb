@@ -12,28 +12,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
-	"sync"
+	"sync/atomic"
 )
-
-// writeDelayStat records write delay situations due to compaction.
-type wDelayStat struct {
-	writeDelay  time.Duration
-	writeDelayN int
-	lk          sync.RWMutex
-}
-
-func (s *wDelayStat) addStat(delay time.Duration, count int) {
-	s.lk.Lock()
-	s.writeDelay += delay
-	s.writeDelayN += count
-	s.lk.Unlock()
-}
-
-func (s *wDelayStat) getStat() (time.Duration, int) {
-	s.lk.RLock()
-	defer s.lk.RUnlock()
-	return s.writeDelay, s.writeDelayN
-}
 
 func (db *DB) writeJournal(batches []*Batch, seq uint64, sync bool) error {
 	wr, err := db.journal.Next()
@@ -138,7 +118,8 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 		db.writeDelayN++
 	} else if db.writeDelayN > 0 {
 		db.logf("db@write was delayed N·%d T·%v", db.writeDelayN, db.writeDelay)
-		db.writeDelayStat.addStat(db.writeDelay, db.writeDelayN)
+		atomic.AddInt32(&db.cWriteDelayN, int32(db.writeDelayN))
+		atomic.AddInt64(&db.cWriteDelay, db.writeDelay.Nanoseconds())
 		db.writeDelay = 0
 		db.writeDelayN = 0
 	}

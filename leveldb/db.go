@@ -51,7 +51,8 @@ type DB struct {
 
 	// Stats.
 	aliveSnaps, aliveIters int32
-	writeDelayStat         *wDelayStat
+	cWriteDelayN           int32 // The cumulative number of write delays
+	cWriteDelay            int64 // The cumulative duration of write delays
 
 	// Write.
 	batchPool    sync.Pool
@@ -93,8 +94,6 @@ func openDB(s *session) (*DB, error) {
 		memPool: make(chan *memdb.DB, 1),
 		// Snapshot
 		snapsList: list.New(),
-		// Stats
-		writeDelayStat: &wDelayStat{},
 		// Write
 		batchPool:    sync.Pool{New: newBatch},
 		writeMergeC:  make(chan writeMerge),
@@ -961,8 +960,8 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
 	case p == "writedelay":
-		writeDelay, writeDelayN := db.writeDelayStat.getStat()
-		value = fmt.Sprintf("DelayN: %d Delay(sec):%.5f", writeDelayN, writeDelay.Seconds())
+		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), atomic.LoadInt64(&db.cWriteDelay)
+		value = fmt.Sprintf("DelayN:%d Delay(sec):%.5f", writeDelayN, float64(writeDelay)/1000000000.0)
 	case p == "sstables":
 		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
