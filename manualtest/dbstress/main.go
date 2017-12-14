@@ -425,9 +425,9 @@ func main() {
 			alivesnaps, _ := db.GetProperty("leveldb.alivesnaps")
 			aliveiters, _ := db.GetProperty("leveldb.aliveiters")
 			blockpool, _ := db.GetProperty("leveldb.blockpool")
-			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q",
-				cachedblock, openedtables, alivesnaps, aliveiters, blockpool)
-
+			writeDelay, _ := db.GetProperty("leveldb.writedelay")
+			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q",
+				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay)
 			log.Print("------------------------")
 		}
 	}()
