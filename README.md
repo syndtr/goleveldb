@@ -1,6 +1,7 @@
 This is an implementation of the [LevelDB key/value database](http:code.google.com/p/leveldb) in the [Go programming language](http:golang.org).
 
 [![Build Status](https://travis-ci.org/syndtr/goleveldb.png?branch=master)](https://travis-ci.org/syndtr/goleveldb)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fsyndtr%2Fgoleveldb.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fsyndtr%2Fgoleveldb?ref=badge_shield)
 
 Installation
 -----------
@@ -105,3 +106,7 @@ Documentation
 -----------
 
 You can read package documentation [here](http:godoc.org/github.com/syndtr/goleveldb).
+
+
+## License
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fsyndtr%2Fgoleveldb.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fsyndtr%2Fgoleveldb?ref=badge_large)
