@@ -177,3 +177,8 @@ type Storage interface {
 	// called after the storage has been closed.
 	Close() error
 }
+
+// MeteredStorage collects read and write statistics.
+type MeteredStorage interface {
+	Stats() *IOStats
+}

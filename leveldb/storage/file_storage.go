@@ -58,6 +58,8 @@ type fileStorage struct {
 	// Opened file counter; if open < 0 means closed.
 	open int
 	day  int
+
+	stats *IOStats
 }
 
 // OpenFile returns a new filesytem-backed storage implementation with the given
@@ -111,6 +113,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		flock:    flock,
 		logw:     logw,
 		logSize:  logSize,
+		stats:    new(IOStats),
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
@@ -502,6 +505,11 @@ func (fs *fileStorage) Close() error {
 	return fs.flock.release()
 }
 
+// Stats returns read and write stats of the underlying storage.
+func (fs *fileStorage) Stats() *IOStats {
+	return fs.stats
+}
+
 type fileWrap struct {
 	*os.File
 	fs     *fileStorage
@@ -520,6 +528,11 @@ func (fw *fileWrap) Sync() error {
 			fw.fs.log(fmt.Sprintf("syncDir: %v", err))
 			return err
 		}
+	}
+	if fi, err := fw.File.Stat(); err == nil {
+		fw.fs.stats.AddWrite(uint64(fi.Size()))
+	} else {
+		return err
 	}
 	return nil
 }

@@ -525,6 +525,8 @@ type Reader struct {
 	metaBH, indexBH, filterBH blockHandle
 	indexBlock                *block
 	filterBlock               *filterBlock
+
+	stats *storage.IOStats
 }
 
 func (r *Reader) blockKind(bh blockHandle) string {
@@ -561,8 +563,10 @@ func (r *Reader) fixErrCorruptedBH(bh blockHandle, err error) error {
 
 func (r *Reader) readRawBlock(bh blockHandle, verifyChecksum bool) ([]byte, error) {
 	data := r.bpool.Get(int(bh.length + blockTrailerLen))
-	if _, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
+	if n, err := r.reader.ReadAt(data, int64(bh.offset)); err != nil && err != io.EOF {
 		return nil, err
+	} else if r.stats != nil {
+		r.stats.AddRead(uint64(n))
 	}
 
 	if verifyChecksum {
@@ -1018,7 +1022,7 @@ func (r *Reader) Release() {
 // The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is safe for concurrent use.
-func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, stats *storage.IOStats, o *opt.Options) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
 	}
@@ -1031,6 +1035,7 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.Name
 		o:              o,
 		cmp:            o.GetComparer(),
 		verifyChecksum: o.GetStrict(opt.StrictBlockChecksum),
+		stats:          stats,
 	}
 
 	if size < footerLen {
@@ -1040,8 +1045,10 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.Name
 
 	footerPos := size - footerLen
 	var footer [footerLen]byte
-	if _, err := r.reader.ReadAt(footer[:], footerPos); err != nil && err != io.EOF {
+	if n, err := r.reader.ReadAt(footer[:], footerPos); err != nil && err != io.EOF {
 		return nil, err
+	} else if stats != nil {
+		stats.AddRead(uint64(n))
 	}
 	if string(footer[footerLen-len(magic):footerLen]) != magic {
 		r.err = r.newErrCorrupted(footerPos, footerLen, "table-footer", "bad magic number")

@@ -363,7 +363,11 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, size, fd, nil, bpool, o)
+		var ioStats *storage.IOStats
+		if fs, ok := s.stor.(storage.MeteredStorage); ok {
+			ioStats = fs.Stats()
+		}
+		tr, err := table.NewReader(reader, size, fd, nil, bpool, ioStats, o)
 		if err != nil {
 			return err
 		}
@@ -906,6 +910,8 @@ func (db *DB) GetSnapshot() (*Snapshot, error) {
 //		Returns the number of files at level 'n'.
 //	leveldb.stats
 //		Returns statistics of the underlying DB.
+//	leveldb.iostats
+//		Returns statistics of effective disk read and write.
 //	leveldb.writedelay
 //		Returns cumulative write delay caused by compaction.
 //	leveldb.sstables
@@ -959,6 +965,12 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				level, len(tables), float64(tables.size())/1048576.0, duration.Seconds(),
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
+	case p == "iostats":
+		var r, w float64
+		if fs, ok := db.s.stor.(storage.MeteredStorage); ok {
+			r, w = float64(fs.Stats().Reads())/1048576.0, float64(fs.Stats().Writes())/1048576.0
+		}
+		value = fmt.Sprintf("Read(MB): %13.5f Write(MB): %13.5f", r, w)
 	case p == "writedelay":
 		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), time.Duration(atomic.LoadInt64(&db.cWriteDelay))
 		value = fmt.Sprintf("DelayN:%d Delay:%s", writeDelayN, writeDelay)

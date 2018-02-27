@@ -170,7 +170,7 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 	if checksum {
 		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
 	}
-	tr, err := table.NewReader(r, size, fd, nil, bpool, o)
+	tr, err := table.NewReader(r, size, fd, nil, bpool, ts.Stats(), o)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -242,6 +242,13 @@ func (ts *testingStorage) Remove(fd storage.FileDesc) error {
 		}
 	}
 	return ts.Storage.Remove(fd)
+}
+
+func (ts *testingStorage) Stats() *storage.IOStats {
+	if fs, ok := ts.Storage.(storage.MeteredStorage); ok {
+		return fs.Stats()
+	}
+	return nil
 }
 
 type latencyStats struct {
@@ -426,8 +433,9 @@ func main() {
 			aliveiters, _ := db.GetProperty("leveldb.aliveiters")
 			blockpool, _ := db.GetProperty("leveldb.blockpool")
 			writeDelay, _ := db.GetProperty("leveldb.writedelay")
-			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q",
-				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay)
+			ioStats, _ := db.GetProperty("leveldb.iostats")
+			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q IOStats=%q",
+				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay, ioStats)
 			log.Print("------------------------")
 		}
 	}()
