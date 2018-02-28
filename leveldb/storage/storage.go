@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 )
 
 // FileType represent a file type.
@@ -176,4 +177,122 @@ type Storage interface {
 	// It is valid to call Close multiple times. Other methods should not be
 	// called after the storage has been closed.
 	Close() error
+}
+
+// MeteredStorage collects read and write statistics.
+type MeteredStorage interface {
+	// Reads returns the cumulative number of read bytes of the underlying storage.
+	Reads() uint64
+	// Writes returns the cumulative number of written bytes of the underlying storage.
+	Writes() uint64
+}
+
+type storageWrap struct {
+	s     Storage
+	read  uint64
+	write uint64
+}
+
+func (sw *storageWrap) Lock() (Locker, error) {
+	return sw.s.Lock()
+}
+
+func (sw *storageWrap) Log(str string) {
+	sw.s.Log(str)
+}
+
+func (sw *storageWrap) SetMeta(fd FileDesc) error {
+	return sw.s.SetMeta(fd)
+}
+
+func (sw *storageWrap) GetMeta() (FileDesc, error) {
+	return sw.s.GetMeta()
+}
+
+func (sw *storageWrap) List(ft FileType) ([]FileDesc, error) {
+	return sw.s.List(ft)
+}
+
+func (sw *storageWrap) Open(fd FileDesc) (Reader, error) {
+	r, err := sw.s.Open(fd)
+	return &readerWrap{r: r, sw: sw}, err
+}
+
+func (sw *storageWrap) Create(fd FileDesc) (Writer, error) {
+	w, err := sw.s.Create(fd)
+	return &writerWrap{w: w, sw: sw}, err
+}
+
+func (sw *storageWrap) Remove(fd FileDesc) error {
+	return sw.s.Remove(fd)
+}
+
+func (sw *storageWrap) Rename(oldfd, newfd FileDesc) error {
+	return sw.s.Rename(oldfd, newfd)
+}
+
+func (sw *storageWrap) Close() error {
+	return sw.s.Close()
+}
+
+func (sw *storageWrap) Reads() uint64 {
+	return atomic.LoadUint64(&sw.read)
+}
+
+func (sw *storageWrap) Writes() uint64 {
+	return atomic.LoadUint64(&sw.write)
+}
+
+// AddRead increases the number of read bytes by n.
+func (sw *storageWrap) AddRead(n uint64) uint64 {
+	return atomic.AddUint64(&sw.read, n)
+}
+
+// AddWrite increases the number of written bytes by n.
+func (sw *storageWrap) AddWrite(n uint64) uint64 {
+	return atomic.AddUint64(&sw.write, n)
+}
+
+type readerWrap struct {
+	r  Reader
+	sw *storageWrap
+}
+
+func (rw *readerWrap) Read(p []byte) (n int, err error) {
+	n, err = rw.r.Read(p)
+	rw.sw.AddRead(uint64(n))
+	return n, err
+}
+
+func (rw *readerWrap) Seek(offset int64, whence int) (int64, error) {
+	return rw.r.Seek(offset, whence)
+}
+
+func (rw *readerWrap) ReadAt(p []byte, off int64) (n int, err error) {
+	n, err = rw.r.ReadAt(p, off)
+	rw.sw.AddRead(uint64(n))
+	return n, err
+}
+
+func (rw *readerWrap) Close() error {
+	return rw.r.Close()
+}
+
+type writerWrap struct {
+	w  Writer
+	sw *storageWrap
+}
+
+func (ww *writerWrap) Write(p []byte) (n int, err error) {
+	n, err = ww.w.Write(p)
+	ww.sw.AddWrite(uint64(n))
+	return n, err
+}
+
+func (ww *writerWrap) Close() error {
+	return ww.w.Close()
+}
+
+func (ww *writerWrap) Sync() error {
+	return ww.w.Sync()
 }

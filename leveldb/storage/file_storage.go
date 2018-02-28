@@ -113,7 +113,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		logSize:  logSize,
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
-	return fs, nil
+	return &storageWrap{s: fs}, nil
 }
 
 func (fs *fileStorage) Lock() (Locker, error) {
