@@ -187,112 +187,112 @@ type MeteredStorage interface {
 	Writes() uint64
 }
 
-type storageWrap struct {
+type meteredStorage struct {
 	s     Storage
 	read  uint64
 	write uint64
 }
 
-func (sw *storageWrap) Lock() (Locker, error) {
-	return sw.s.Lock()
+func (ms *meteredStorage) Lock() (Locker, error) {
+	return ms.s.Lock()
 }
 
-func (sw *storageWrap) Log(str string) {
-	sw.s.Log(str)
+func (ms *meteredStorage) Log(str string) {
+	ms.s.Log(str)
 }
 
-func (sw *storageWrap) SetMeta(fd FileDesc) error {
-	return sw.s.SetMeta(fd)
+func (ms *meteredStorage) SetMeta(fd FileDesc) error {
+	return ms.s.SetMeta(fd)
 }
 
-func (sw *storageWrap) GetMeta() (FileDesc, error) {
-	return sw.s.GetMeta()
+func (ms *meteredStorage) GetMeta() (FileDesc, error) {
+	return ms.s.GetMeta()
 }
 
-func (sw *storageWrap) List(ft FileType) ([]FileDesc, error) {
-	return sw.s.List(ft)
+func (ms *meteredStorage) List(ft FileType) ([]FileDesc, error) {
+	return ms.s.List(ft)
 }
 
-func (sw *storageWrap) Open(fd FileDesc) (Reader, error) {
-	r, err := sw.s.Open(fd)
-	return &readerWrap{r: r, sw: sw}, err
+func (ms *meteredStorage) Open(fd FileDesc) (Reader, error) {
+	r, err := ms.s.Open(fd)
+	return &meteredReader{r: r, ms: ms}, err
 }
 
-func (sw *storageWrap) Create(fd FileDesc) (Writer, error) {
-	w, err := sw.s.Create(fd)
-	return &writerWrap{w: w, sw: sw}, err
+func (ms *meteredStorage) Create(fd FileDesc) (Writer, error) {
+	w, err := ms.s.Create(fd)
+	return &meteredWriter{w: w, ms: ms}, err
 }
 
-func (sw *storageWrap) Remove(fd FileDesc) error {
-	return sw.s.Remove(fd)
+func (ms *meteredStorage) Remove(fd FileDesc) error {
+	return ms.s.Remove(fd)
 }
 
-func (sw *storageWrap) Rename(oldfd, newfd FileDesc) error {
-	return sw.s.Rename(oldfd, newfd)
+func (ms *meteredStorage) Rename(oldfd, newfd FileDesc) error {
+	return ms.s.Rename(oldfd, newfd)
 }
 
-func (sw *storageWrap) Close() error {
-	return sw.s.Close()
+func (ms *meteredStorage) Close() error {
+	return ms.s.Close()
 }
 
-func (sw *storageWrap) Reads() uint64 {
-	return atomic.LoadUint64(&sw.read)
+func (ms *meteredStorage) Reads() uint64 {
+	return atomic.LoadUint64(&ms.read)
 }
 
-func (sw *storageWrap) Writes() uint64 {
-	return atomic.LoadUint64(&sw.write)
+func (ms *meteredStorage) Writes() uint64 {
+	return atomic.LoadUint64(&ms.write)
 }
 
 // AddRead increases the number of read bytes by n.
-func (sw *storageWrap) AddRead(n uint64) uint64 {
-	return atomic.AddUint64(&sw.read, n)
+func (ms *meteredStorage) AddRead(n uint64) uint64 {
+	return atomic.AddUint64(&ms.read, n)
 }
 
 // AddWrite increases the number of written bytes by n.
-func (sw *storageWrap) AddWrite(n uint64) uint64 {
-	return atomic.AddUint64(&sw.write, n)
+func (ms *meteredStorage) AddWrite(n uint64) uint64 {
+	return atomic.AddUint64(&ms.write, n)
 }
 
-type readerWrap struct {
+type meteredReader struct {
 	r  Reader
-	sw *storageWrap
+	ms *meteredStorage
 }
 
-func (rw *readerWrap) Read(p []byte) (n int, err error) {
-	n, err = rw.r.Read(p)
-	rw.sw.AddRead(uint64(n))
+func (r *meteredReader) Read(p []byte) (n int, err error) {
+	n, err = r.r.Read(p)
+	r.ms.AddRead(uint64(n))
 	return n, err
 }
 
-func (rw *readerWrap) Seek(offset int64, whence int) (int64, error) {
-	return rw.r.Seek(offset, whence)
+func (r *meteredReader) Seek(offset int64, whence int) (int64, error) {
+	return r.r.Seek(offset, whence)
 }
 
-func (rw *readerWrap) ReadAt(p []byte, off int64) (n int, err error) {
-	n, err = rw.r.ReadAt(p, off)
-	rw.sw.AddRead(uint64(n))
+func (r *meteredReader) ReadAt(p []byte, off int64) (n int, err error) {
+	n, err = r.r.ReadAt(p, off)
+	r.ms.AddRead(uint64(n))
 	return n, err
 }
 
-func (rw *readerWrap) Close() error {
-	return rw.r.Close()
+func (r *meteredReader) Close() error {
+	return r.r.Close()
 }
 
-type writerWrap struct {
+type meteredWriter struct {
 	w  Writer
-	sw *storageWrap
+	ms *meteredStorage
 }
 
-func (ww *writerWrap) Write(p []byte) (n int, err error) {
-	n, err = ww.w.Write(p)
-	ww.sw.AddWrite(uint64(n))
+func (w *meteredWriter) Write(p []byte) (n int, err error) {
+	n, err = w.w.Write(p)
+	w.ms.AddWrite(uint64(n))
 	return n, err
 }
 
-func (ww *writerWrap) Close() error {
-	return ww.w.Close()
+func (w *meteredWriter) Close() error {
+	return w.w.Close()
 }
 
-func (ww *writerWrap) Sync() error {
-	return ww.w.Sync()
+func (w *meteredWriter) Sync() error {
+	return w.w.Sync()
 }
