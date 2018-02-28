@@ -356,8 +356,12 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 			bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
 		}
 
+		var ioStats *storage.IOStats
+		if fs, ok := t.s.stor.(storage.MeteredStorage); ok {
+			ioStats = fs.Stats()
+		}
 		var tr *table.Reader
-		tr, err = table.NewReader(r, f.size, f.fd, bcache, t.bpool, t.s.o.Options)
+		tr, err = table.NewReader(r, f.size, f.fd, bcache, t.bpool, ioStats, t.s.o.Options)
 		if err != nil {
 			r.Close()
 			return 0, nil
