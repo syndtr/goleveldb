@@ -188,51 +188,19 @@ type IOCounter interface {
 }
 
 type ioCounter struct {
-	s     Storage
+	Storage
 	read  uint64
 	write uint64
 }
 
-func (c *ioCounter) Lock() (Locker, error) {
-	return c.s.Lock()
-}
-
-func (c *ioCounter) Log(str string) {
-	c.s.Log(str)
-}
-
-func (c *ioCounter) SetMeta(fd FileDesc) error {
-	return c.s.SetMeta(fd)
-}
-
-func (c *ioCounter) GetMeta() (FileDesc, error) {
-	return c.s.GetMeta()
-}
-
-func (c *ioCounter) List(ft FileType) ([]FileDesc, error) {
-	return c.s.List(ft)
-}
-
 func (c *ioCounter) Open(fd FileDesc) (Reader, error) {
-	r, err := c.s.Open(fd)
-	return &meteredReader{r: r, c: c}, err
+	r, err := c.Storage.Open(fd)
+	return &meteredReader{r, c}, err
 }
 
 func (c *ioCounter) Create(fd FileDesc) (Writer, error) {
-	w, err := c.s.Create(fd)
-	return &meteredWriter{w: w, c: c}, err
-}
-
-func (c *ioCounter) Remove(fd FileDesc) error {
-	return c.s.Remove(fd)
-}
-
-func (c *ioCounter) Rename(oldfd, newfd FileDesc) error {
-	return c.s.Rename(oldfd, newfd)
-}
-
-func (c *ioCounter) Close() error {
-	return c.s.Close()
+	w, err := c.Storage.Create(fd)
+	return &meteredWriter{w, c}, err
 }
 
 func (c *ioCounter) Reads() uint64 {
@@ -255,49 +223,33 @@ func (c *ioCounter) AddWrite(n uint64) uint64 {
 
 // IOCounterWrapper returns the given storage wrapped by ioCounter.
 func IOCounterWrapper(s Storage) Storage {
-	return &ioCounter{s: s}
+	return &ioCounter{s, 0, 0}
 }
 
 type meteredReader struct {
-	r Reader
+	Reader
 	c *ioCounter
 }
 
 func (r *meteredReader) Read(p []byte) (n int, err error) {
-	n, err = r.r.Read(p)
+	n, err = r.Reader.Read(p)
 	r.c.AddRead(uint64(n))
 	return n, err
-}
-
-func (r *meteredReader) Seek(offset int64, whence int) (int64, error) {
-	return r.r.Seek(offset, whence)
 }
 
 func (r *meteredReader) ReadAt(p []byte, off int64) (n int, err error) {
-	n, err = r.r.ReadAt(p, off)
+	n, err = r.Reader.ReadAt(p, off)
 	r.c.AddRead(uint64(n))
 	return n, err
 }
 
-func (r *meteredReader) Close() error {
-	return r.r.Close()
-}
-
 type meteredWriter struct {
-	w Writer
+	Writer
 	c *ioCounter
 }
 
 func (w *meteredWriter) Write(p []byte) (n int, err error) {
-	n, err = w.w.Write(p)
+	n, err = w.Writer.Write(p)
 	w.c.AddWrite(uint64(n))
 	return n, err
-}
-
-func (w *meteredWriter) Close() error {
-	return w.w.Close()
-}
-
-func (w *meteredWriter) Sync() error {
-	return w.w.Sync()
 }

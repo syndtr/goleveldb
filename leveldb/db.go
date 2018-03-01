@@ -168,7 +168,7 @@ func openDB(s *session) (*DB, error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
-	s, err := newSession(stor, o)
+	s, err := newSession(storage.IOCounterWrapper(stor), o)
 	if err != nil {
 		return
 	}
