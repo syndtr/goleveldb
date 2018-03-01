@@ -963,7 +963,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		}
 	case p == "iostats":
 		var r, w float64
-		if s, ok := db.s.stor.(storage.MeteredStorage); ok {
+		if s, ok := db.s.stor.(storage.IOCounter); ok {
 			r, w = float64(s.Reads())/1048576.0, float64(s.Writes())/1048576.0
 		}
 		value = fmt.Sprintf("Read(MB): %13.5f Write(MB): %13.5f", r, w)

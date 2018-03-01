@@ -245,14 +245,14 @@ func (ts *testingStorage) Remove(fd storage.FileDesc) error {
 }
 
 func (ts *testingStorage) Reads() uint64 {
-	if s, ok := ts.Storage.(storage.MeteredStorage); ok {
+	if s, ok := ts.Storage.(storage.IOCounter); ok {
 		return s.Reads()
 	}
 	return 0
 }
 
 func (ts *testingStorage) Writes() uint64 {
-	if s, ok := ts.Storage.(storage.MeteredStorage); ok {
+	if s, ok := ts.Storage.(storage.IOCounter); ok {
 		return s.Writes()
 	}
 	return 0

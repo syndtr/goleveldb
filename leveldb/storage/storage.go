@@ -179,88 +179,93 @@ type Storage interface {
 	Close() error
 }
 
-// MeteredStorage collects read and write statistics.
-type MeteredStorage interface {
+// IOCounter collects read and write statistics.
+type IOCounter interface {
 	// Reads returns the cumulative number of read bytes of the underlying storage.
 	Reads() uint64
 	// Writes returns the cumulative number of written bytes of the underlying storage.
 	Writes() uint64
 }
 
-type meteredStorage struct {
+type ioCounter struct {
 	s     Storage
 	read  uint64
 	write uint64
 }
 
-func (ms *meteredStorage) Lock() (Locker, error) {
-	return ms.s.Lock()
+func (c *ioCounter) Lock() (Locker, error) {
+	return c.s.Lock()
 }
 
-func (ms *meteredStorage) Log(str string) {
-	ms.s.Log(str)
+func (c *ioCounter) Log(str string) {
+	c.s.Log(str)
 }
 
-func (ms *meteredStorage) SetMeta(fd FileDesc) error {
-	return ms.s.SetMeta(fd)
+func (c *ioCounter) SetMeta(fd FileDesc) error {
+	return c.s.SetMeta(fd)
 }
 
-func (ms *meteredStorage) GetMeta() (FileDesc, error) {
-	return ms.s.GetMeta()
+func (c *ioCounter) GetMeta() (FileDesc, error) {
+	return c.s.GetMeta()
 }
 
-func (ms *meteredStorage) List(ft FileType) ([]FileDesc, error) {
-	return ms.s.List(ft)
+func (c *ioCounter) List(ft FileType) ([]FileDesc, error) {
+	return c.s.List(ft)
 }
 
-func (ms *meteredStorage) Open(fd FileDesc) (Reader, error) {
-	r, err := ms.s.Open(fd)
-	return &meteredReader{r: r, ms: ms}, err
+func (c *ioCounter) Open(fd FileDesc) (Reader, error) {
+	r, err := c.s.Open(fd)
+	return &meteredReader{r: r, c: c}, err
 }
 
-func (ms *meteredStorage) Create(fd FileDesc) (Writer, error) {
-	w, err := ms.s.Create(fd)
-	return &meteredWriter{w: w, ms: ms}, err
+func (c *ioCounter) Create(fd FileDesc) (Writer, error) {
+	w, err := c.s.Create(fd)
+	return &meteredWriter{w: w, c: c}, err
 }
 
-func (ms *meteredStorage) Remove(fd FileDesc) error {
-	return ms.s.Remove(fd)
+func (c *ioCounter) Remove(fd FileDesc) error {
+	return c.s.Remove(fd)
 }
 
-func (ms *meteredStorage) Rename(oldfd, newfd FileDesc) error {
-	return ms.s.Rename(oldfd, newfd)
+func (c *ioCounter) Rename(oldfd, newfd FileDesc) error {
+	return c.s.Rename(oldfd, newfd)
 }
 
-func (ms *meteredStorage) Close() error {
-	return ms.s.Close()
+func (c *ioCounter) Close() error {
+	return c.s.Close()
 }
 
-func (ms *meteredStorage) Reads() uint64 {
-	return atomic.LoadUint64(&ms.read)
+func (c *ioCounter) Reads() uint64 {
+	return atomic.LoadUint64(&c.read)
 }
 
-func (ms *meteredStorage) Writes() uint64 {
-	return atomic.LoadUint64(&ms.write)
+func (c *ioCounter) Writes() uint64 {
+	return atomic.LoadUint64(&c.write)
 }
 
 // AddRead increases the number of read bytes by n.
-func (ms *meteredStorage) AddRead(n uint64) uint64 {
-	return atomic.AddUint64(&ms.read, n)
+func (c *ioCounter) AddRead(n uint64) uint64 {
+	return atomic.AddUint64(&c.read, n)
 }
 
 // AddWrite increases the number of written bytes by n.
-func (ms *meteredStorage) AddWrite(n uint64) uint64 {
-	return atomic.AddUint64(&ms.write, n)
+func (c *ioCounter) AddWrite(n uint64) uint64 {
+	return atomic.AddUint64(&c.write, n)
+}
+
+// IOCounterWrapper returns the given storage wrapped by ioCounter.
+func IOCounterWrapper(s Storage) Storage {
+	return &ioCounter{s: s}
 }
 
 type meteredReader struct {
-	r  Reader
-	ms *meteredStorage
+	r Reader
+	c *ioCounter
 }
 
 func (r *meteredReader) Read(p []byte) (n int, err error) {
 	n, err = r.r.Read(p)
-	r.ms.AddRead(uint64(n))
+	r.c.AddRead(uint64(n))
 	return n, err
 }
 
@@ -270,7 +275,7 @@ func (r *meteredReader) Seek(offset int64, whence int) (int64, error) {
 
 func (r *meteredReader) ReadAt(p []byte, off int64) (n int, err error) {
 	n, err = r.r.ReadAt(p, off)
-	r.ms.AddRead(uint64(n))
+	r.c.AddRead(uint64(n))
 	return n, err
 }
 
@@ -279,13 +284,13 @@ func (r *meteredReader) Close() error {
 }
 
 type meteredWriter struct {
-	w  Writer
-	ms *meteredStorage
+	w Writer
+	c *ioCounter
 }
 
 func (w *meteredWriter) Write(p []byte) (n int, err error) {
 	n, err = w.w.Write(p)
-	w.ms.AddWrite(uint64(n))
+	w.c.AddWrite(uint64(n))
 	return n, err
 }
 

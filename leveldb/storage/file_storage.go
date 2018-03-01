@@ -113,7 +113,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		logSize:  logSize,
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
-	return &meteredStorage{s: fs}, nil
+	return IOCounterWrapper(fs), nil
 }
 
 func (fs *fileStorage) Lock() (Locker, error) {
