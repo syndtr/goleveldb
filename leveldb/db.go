@@ -168,7 +168,7 @@ func openDB(s *session) (*DB, error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
-	s, err := newSession(iStorageWrapper(stor), o)
+	s, err := newSession(stor, o)
 	if err != nil {
 		return
 	}
@@ -962,11 +962,9 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
 	case p == "iostats":
-		var r, w float64
-		if s, ok := db.s.stor.(IStorage); ok {
-			r, w = float64(s.Reads())/1048576.0, float64(s.Writes())/1048576.0
-		}
-		value = fmt.Sprintf("Read(MB): %13.5f Write(MB): %13.5f", r, w)
+		value = fmt.Sprintf("Read(MB):%.5f Write(MB):%.5f",
+			float64(db.s.stor.reads())/1048576.0,
+			float64(db.s.stor.writes())/1048576.0)
 	case p == "writedelay":
 		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), time.Duration(atomic.LoadInt64(&db.cWriteDelay))
 		value = fmt.Sprintf("DelayN:%d Delay:%s", writeDelayN, writeDelay)

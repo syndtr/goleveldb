@@ -244,20 +244,6 @@ func (ts *testingStorage) Remove(fd storage.FileDesc) error {
 	return ts.Storage.Remove(fd)
 }
 
-func (ts *testingStorage) Reads() uint64 {
-	if s, ok := ts.Storage.(leveldb.IStorage); ok {
-		return s.Reads()
-	}
-	return 0
-}
-
-func (ts *testingStorage) Writes() uint64 {
-	if s, ok := ts.Storage.(leveldb.IStorage); ok {
-		return s.Writes()
-	}
-	return 0
-}
-
 type latencyStats struct {
 	mark          time.Time
 	dur, min, max time.Duration
