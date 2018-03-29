@@ -8,6 +8,7 @@ package storage
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -61,5 +62,56 @@ func TestMemStorage(t *testing.T) {
 	}
 	if _, err := m.Open(FileDesc{TypeTable, 1}); err == nil {
 		t.Fatal("expecting error")
+	}
+}
+
+func TestMemStorageRename(t *testing.T) {
+	fd1 := FileDesc{Type: TypeTable, Num: 1}
+	fd2 := FileDesc{Type: TypeTable, Num: 2}
+
+	m := NewMemStorage()
+	w, err := m.Create(fd1)
+	if err != nil {
+		t.Fatalf("Storage.Create: %v", err)
+	}
+
+	fmt.Fprintf(w, "abc")
+	w.Close()
+
+	rd, err := m.Open(fd1)
+	if err != nil {
+		t.Fatalf("Storage.Open(%v): %v", fd1, err)
+	}
+	rd.Close()
+
+	fds, err := m.List(TypeAll)
+	if err != nil {
+		t.Fatalf("Storage.List: %v", err)
+	}
+	for _, fd := range fds {
+		if !FileDescOk(fd) {
+			t.Errorf("Storage.List -> FileDescOk(%q)", fd)
+		}
+	}
+
+	err = m.Rename(fd1, fd2)
+	if err != nil {
+		t.Fatalf("Storage.Rename: %v", err)
+	}
+
+	rd, err = m.Open(fd2)
+	if err != nil {
+		t.Fatalf("Storage.Open(%v): %v", fd2, err)
+	}
+	rd.Close()
+
+	fds, err = m.List(TypeAll)
+	if err != nil {
+		t.Fatalf("Storage.List: %v", err)
+	}
+	for _, fd := range fds {
+		if !FileDescOk(fd) {
+			t.Errorf("Storage.List -> FileDescOk(%q)", fd)
+		}
 	}
 }
