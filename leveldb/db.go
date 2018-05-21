@@ -1002,6 +1002,7 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 type DBStats struct {
 	WriteDelayCount    int32
 	WriteDelayDuration time.Duration
+	WritePaused        bool
 
 	AliveSnapshots int32
 	AliveIterators int32
@@ -1030,6 +1031,7 @@ func (db *DB) Stats(s *DBStats) error {
 	s.IOWrite = db.s.stor.writes()
 	s.WriteDelayCount = atomic.LoadInt32(&db.cWriteDelayN)
 	s.WriteDelayDuration = time.Duration(atomic.LoadInt64(&db.cWriteDelay))
+	s.WritePaused = atomic.LoadInt32(&db.inWritePaused) == 1
 
 	s.OpenedTablesCount = db.s.tops.cache.Size()
 	if db.s.tops.bcache != nil {
