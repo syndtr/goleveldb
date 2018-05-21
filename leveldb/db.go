@@ -35,6 +35,7 @@ type DB struct {
 	// Stats. Need 64-bit alignment.
 	cWriteDelay            int64 // The cumulative duration of write delays
 	cWriteDelayN           int32 // The cumulative number of write delays
+	inWritePaused          int32 // The indicator whether write operation is paused by compaction
 	aliveSnaps, aliveIters int32
 
 	// Session.
@@ -967,7 +968,8 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 			float64(db.s.stor.writes())/1048576.0)
 	case p == "writedelay":
 		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), time.Duration(atomic.LoadInt64(&db.cWriteDelay))
-		value = fmt.Sprintf("DelayN:%d Delay:%s", writeDelayN, writeDelay)
+		paused := atomic.LoadInt32(&db.inWritePaused) == 1
+		value = fmt.Sprintf("DelayN:%d Delay:%s Paused:%t", writeDelayN, writeDelay, paused)
 	case p == "sstables":
 		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
