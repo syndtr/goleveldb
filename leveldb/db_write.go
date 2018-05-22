@@ -258,38 +258,7 @@ func (db *DB) Write(batch *Batch, wo *opt.WriteOptions) error {
 	merge := !wo.GetNoWriteMerge() && !db.s.o.GetNoWriteMerge()
 	sync := wo.GetSync() && !db.s.o.GetNoSync()
 
-	// Acquire write lock.
-	if merge {
-		select {
-		case db.writeMergeC <- writeMerge{sync: sync, batch: batch}:
-			if <-db.writeMergedC {
-				// Write is merged.
-				return <-db.writeAckC
-			}
-			// Write is not merged, the write lock is handed to us. Continue.
-		case db.writeLockC <- struct{}{}:
-			// Write lock acquired.
-		case err := <-db.compPerErrC:
-			// Compaction error.
-			return err
-		case <-db.closeC:
-			// Closed
-			return ErrClosed
-		}
-	} else {
-		select {
-		case db.writeLockC <- struct{}{}:
-			// Write lock acquired.
-		case err := <-db.compPerErrC:
-			// Compaction error.
-			return err
-		case <-db.closeC:
-			// Closed
-			return ErrClosed
-		}
-	}
-
-	return db.writeLocked(batch, merge, sync)
+	return db.write(batch, merge, sync)
 }
 
 func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error {
@@ -305,36 +274,33 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 	batch.Reset()
 	batch.appendRec(kt, key, value)
 
-	// Acquire write lock.
+	return db.write(batch, merge, sync)
+}
+
+func (db *DB) write(batch *Batch, merge, sync bool) error {
+	var mergeCh chan writeMerge
 	if merge {
-		select {
-		case db.writeMergeC <- writeMerge{sync: sync, batch: batch}:
-			if <-db.writeMergedC {
-				// Write is merged.
-				return <-db.writeAckC
-			}
-			// Write is not merged, the write lock is handed to us. Continue.
-		case db.writeLockC <- struct{}{}:
-			// Write lock acquired.
-		case err := <-db.compPerErrC:
-			// Compaction error.
-			return err
-		case <-db.closeC:
-			// Closed
-			return ErrClosed
-		}
-	} else {
-		select {
-		case db.writeLockC <- struct{}{}:
-			// Write lock acquired.
-		case err := <-db.compPerErrC:
-			// Compaction error.
-			return err
-		case <-db.closeC:
-			// Closed
-			return ErrClosed
-		}
+		mergeCh = db.writeMergeC
 	}
+
+	// Acquire write lock.
+	select {
+	case mergeCh <- writeMerge{sync: sync, batch: batch}:
+		if <-db.writeMergedC {
+			// Write is merged.
+			return <-db.writeAckC
+		}
+		// Write is not merged, the write lock is handed to us. Continue.
+	case db.writeLockC <- struct{}{}:
+		// Write lock acquired.
+	case err := <-db.compPerErrC:
+		// Compaction error.
+		return err
+	case <-db.closeC:
+		// Closed
+		return ErrClosed
+	}
+
 	return db.writeLocked(batch, merge, sync)
 }
 
