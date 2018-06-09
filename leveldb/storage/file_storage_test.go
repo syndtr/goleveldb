@@ -8,8 +8,11 @@ package storage
 
 import (
 	"fmt"
+	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,11 +56,238 @@ var invalidCases = []string{
 	"100.lop",
 }
 
+func tempDir(t *testing.T) string {
+	dir, err := ioutil.TempDir("", "goleveldb-")
+	if err != nil {
+		t.Fatal(t)
+	}
+	t.Log("Using temp-dir:", dir)
+	return dir
+}
+
 func TestFileStorage_CreateFileName(t *testing.T) {
 	for _, c := range cases {
 		if name := fsGenName(FileDesc{c.ftype, c.num}); name != c.name {
 			t.Errorf("invalid filename got '%s', want '%s'", name, c.name)
 		}
+	}
+}
+
+func TestFileStorage_MetaSetGet(t *testing.T) {
+	temp := tempDir(t)
+	fs, err := OpenFile(temp, false)
+	if err != nil {
+		t.Fatal("OpenFile: got error: ", err)
+	}
+
+	for i := 0; i < 10; i++ {
+		num := rand.Int63()
+		fd := FileDesc{Type: TypeManifest, Num: num}
+		w, err := fs.Create(fd)
+		if err != nil {
+			t.Fatalf("Create(%d): got error: %v", i, err)
+		}
+		w.Write([]byte("TEST"))
+		w.Close()
+		if err := fs.SetMeta(fd); err != nil {
+			t.Fatalf("SetMeta(%d): got error: %v", i, err)
+		}
+		rfd, err := fs.GetMeta()
+		if err != nil {
+			t.Fatalf("GetMeta(%d): got error: %v", i, err)
+		}
+		if fd != rfd {
+			t.Fatalf("Invalid meta (%d): got '%s', want '%s'", i, rfd, fd)
+		}
+	}
+	os.RemoveAll(temp)
+}
+
+func TestFileStorage_Meta(t *testing.T) {
+	type current struct {
+		num      int64
+		backup   bool
+		current  bool
+		manifest bool
+		corrupt  bool
+	}
+	type testCase struct {
+		currents []current
+		notExist bool
+		corrupt  bool
+		expect   int64
+	}
+	cases := []testCase{
+		{
+			currents: []current{
+				{num: 2, backup: true, manifest: true},
+				{num: 1, current: true},
+			},
+			expect: 2,
+		},
+		{
+			currents: []current{
+				{num: 2, backup: true, manifest: true},
+				{num: 1, current: true, manifest: true},
+			},
+			expect: 1,
+		},
+		{
+			currents: []current{
+				{num: 2, manifest: true},
+				{num: 3, manifest: true},
+				{num: 4, current: true, manifest: true},
+			},
+			expect: 4,
+		},
+		{
+			currents: []current{
+				{num: 2, manifest: true},
+				{num: 3, manifest: true},
+				{num: 4, current: true, manifest: true, corrupt: true},
+			},
+			expect: 3,
+		},
+		{
+			currents: []current{
+				{num: 2, manifest: true},
+				{num: 3, manifest: true},
+				{num: 5, current: true, manifest: true, corrupt: true},
+				{num: 4, backup: true, manifest: true},
+			},
+			expect: 4,
+		},
+		{
+			currents: []current{
+				{num: 4, manifest: true},
+				{num: 3, manifest: true},
+				{num: 2, current: true, manifest: true},
+			},
+			expect: 4,
+		},
+		{
+			currents: []current{
+				{num: 4, manifest: true, corrupt: true},
+				{num: 3, manifest: true},
+				{num: 2, current: true, manifest: true},
+			},
+			expect: 3,
+		},
+		{
+			currents: []current{
+				{num: 4, manifest: true, corrupt: true},
+				{num: 3, manifest: true, corrupt: true},
+				{num: 2, current: true, manifest: true},
+			},
+			expect: 2,
+		},
+		{
+			currents: []current{
+				{num: 4},
+				{num: 3, manifest: true},
+				{num: 2, current: true, manifest: true},
+			},
+			expect: 3,
+		},
+		{
+			currents: []current{
+				{num: 4},
+				{num: 3, manifest: true},
+				{num: 6, current: true},
+				{num: 5, backup: true, manifest: true},
+			},
+			expect: 5,
+		},
+		{
+			currents: []current{
+				{num: 4},
+				{num: 3},
+				{num: 6, current: true},
+				{num: 5, backup: true},
+			},
+			notExist: true,
+		},
+		{
+			currents: []current{
+				{num: 4, corrupt: true},
+				{num: 3},
+				{num: 6, current: true},
+				{num: 5, backup: true},
+			},
+			corrupt: true,
+		},
+	}
+	for i, tc := range cases {
+		t.Logf("Test-%d", i)
+		temp := tempDir(t)
+		fs, err := OpenFile(temp, false)
+		if err != nil {
+			t.Fatal("OpenFile: got error: ", err)
+		}
+		for _, cur := range tc.currents {
+			var curName string
+			switch {
+			case cur.current:
+				curName = "CURRENT"
+			case cur.backup:
+				curName = "CURRENT.bak"
+			default:
+				curName = fmt.Sprintf("CURRENT.%d", cur.num)
+			}
+			fd := FileDesc{Type: TypeManifest, Num: cur.num}
+			content := fmt.Sprintf("%s\n", fsGenName(fd))
+			if cur.corrupt {
+				content = content[:len(content)-1-rand.Intn(3)]
+			}
+			if err := ioutil.WriteFile(filepath.Join(temp, curName), []byte(content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if cur.manifest {
+				w, err := fs.Create(fd)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.Write([]byte("TEST")); err != nil {
+					t.Fatal(err)
+				}
+				w.Close()
+			}
+		}
+		ret, err := fs.GetMeta()
+		if tc.notExist {
+			if err != os.ErrNotExist {
+				t.Fatalf("expect ErrNotExist, got: %v", err)
+			}
+		} else if tc.corrupt {
+			if !isCorrupted(err) {
+				t.Fatalf("expect ErrCorrupted, got: %v", err)
+			}
+		} else {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ret.Type != TypeManifest {
+				t.Fatalf("expecting manifest, got: %s", ret.Type)
+			}
+			if ret.Num != tc.expect {
+				t.Fatalf("invalid num, expect=%d got=%d", tc.expect, ret.Num)
+			}
+			fis, err := ioutil.ReadDir(temp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, fi := range fis {
+				if strings.HasPrefix(fi.Name(), "CURRENT") {
+					switch fi.Name() {
+					case "CURRENT", "CURRENT.bak":
+					default:
+						t.Fatalf("found rouge CURRENT file: %s", fi.Name())
+					}
+				}
+				t.Logf("-> %s", fi.Name())
+			}
+		}
+		os.RemoveAll(temp)
 	}
 }
 
@@ -88,18 +318,15 @@ func TestFileStorage_InvalidFileName(t *testing.T) {
 }
 
 func TestFileStorage_Locking(t *testing.T) {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldb-testrwlock-%d", os.Getuid()))
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-		t.Fatal("RemoveAll: got error: ", err)
-	}
-	defer os.RemoveAll(path)
+	temp := tempDir(t)
+	defer os.RemoveAll(temp)
 
-	p1, err := OpenFile(path, false)
+	p1, err := OpenFile(temp, false)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	p2, err := OpenFile(path, false)
+	p2, err := OpenFile(temp, false)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -110,7 +337,7 @@ func TestFileStorage_Locking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(path, false)
+	p3, err := OpenFile(temp, false)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
@@ -134,18 +361,15 @@ func TestFileStorage_Locking(t *testing.T) {
 }
 
 func TestFileStorage_ReadOnlyLocking(t *testing.T) {
-	path := filepath.Join(os.TempDir(), fmt.Sprintf("goleveldb-testrolock-%d", os.Getuid()))
-	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
-		t.Fatal("RemoveAll: got error: ", err)
-	}
-	defer os.RemoveAll(path)
+	temp := tempDir(t)
+	defer os.RemoveAll(temp)
 
-	p1, err := OpenFile(path, false)
+	p1, err := OpenFile(temp, false)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	_, err = OpenFile(path, true)
+	_, err = OpenFile(temp, true)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -154,17 +378,17 @@ func TestFileStorage_ReadOnlyLocking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(path, true)
+	p3, err := OpenFile(temp, true)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
 
-	p4, err := OpenFile(path, true)
+	p4, err := OpenFile(temp, true)
 	if err != nil {
 		t.Fatal("OpenFile(4): got error: ", err)
 	}
 
-	_, err = OpenFile(path, false)
+	_, err = OpenFile(temp, false)
 	if err != nil {
 		t.Logf("OpenFile(5): got error: %s (expected)", err)
 	} else {

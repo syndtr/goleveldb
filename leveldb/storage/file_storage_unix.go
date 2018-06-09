@@ -79,6 +79,13 @@ func isErrInvalid(err error) bool {
 }
 
 func syncDir(name string) error {
+	// As per fsync manpage, Linux seems to expect fsync on directory, however
+	// some system don't support this, so we will ignore syscall.EINVAL.
+	//
+	// From fsync(2):
+	//   Calling fsync() does not necessarily ensure that the entry in the
+	//   directory containing the file has also reached disk. For that an
+	//   explicit fsync() on a file descriptor for the directory is also needed.
 	f, err := os.Open(name)
 	if err != nil {
 		return err
