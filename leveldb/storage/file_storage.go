@@ -86,7 +86,7 @@ type fileStorage struct {
 	day  int
 }
 
-// OpenFile returns a new filesytem-backed storage implementation with the given
+// OpenFile returns a new filesystem-backed storage implementation with the given
 // path. This also acquire a file lock, so any subsequent attempt to open the
 // same path will fail.
 //
