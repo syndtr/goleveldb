@@ -75,6 +75,7 @@ type DB struct {
 	compErrSetC      chan error
 	compWriteLocking bool
 	compStats        cStats
+	wpCompStat       pStat
 	memdbMaxLevel    int // For testing.
 
 	// Close.
@@ -968,8 +969,13 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 			float64(db.s.stor.writes())/1048576.0)
 	case p == "writedelay":
 		writeDelayN, writeDelay := atomic.LoadInt32(&db.cWriteDelayN), time.Duration(atomic.LoadInt64(&db.cWriteDelay))
+		count, total, processed, start := db.wpCompStat.get()
 		paused := atomic.LoadInt32(&db.inWritePaused) == 1
 		value = fmt.Sprintf("DelayN:%d Delay:%s Paused:%t", writeDelayN, writeDelay, paused)
+		if paused {
+			value += fmt.Sprintf(" Start:%s Count:%d Total(MB):%13.5f Processed(MB):%13.5f",
+				start.Format(time.RFC3339), count, float64(total)/1048576.0, float64(processed)/1048576.0)
+		}
 	case p == "sstables":
 		for level, tables := range v.levels {
 			value += fmt.Sprintf("--- level %d ---\n", level)
@@ -1000,9 +1006,16 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 
 // DBStats is database statistics.
 type DBStats struct {
+	// Cumulative Write delay statistics
 	WriteDelayCount    int32
 	WriteDelayDuration time.Duration
-	WritePaused        bool
+
+	// In-flight write pause statistics
+	WritePaused       bool
+	WritePauseStart   time.Time
+	InflightCount     int32
+	InflightTotal     int64
+	InflightProcessed int64
 
 	AliveSnapshots int32
 	AliveIterators int32
@@ -1032,6 +1045,7 @@ func (db *DB) Stats(s *DBStats) error {
 	s.WriteDelayCount = atomic.LoadInt32(&db.cWriteDelayN)
 	s.WriteDelayDuration = time.Duration(atomic.LoadInt64(&db.cWriteDelay))
 	s.WritePaused = atomic.LoadInt32(&db.inWritePaused) == 1
+	s.InflightCount, s.InflightTotal, s.InflightProcessed, s.WritePauseStart = db.wpCompStat.get()
 
 	s.OpenedTablesCount = db.s.tops.cache.Size()
 	if db.s.tops.bcache != nil {
@@ -1063,7 +1077,6 @@ func (db *DB) Stats(s *DBStats) error {
 		s.LevelSizes = append(s.LevelSizes, tables.size())
 		s.LevelTablesCounts = append(s.LevelTablesCounts, len(tables))
 	}
-
 	return nil
 }
 

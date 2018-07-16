@@ -94,6 +94,7 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 			err = db.compTriggerWait(db.tcompCmdC)
 			// Unset the write paused flag.
 			atomic.StoreInt32(&db.inWritePaused, 0)
+			db.wpCompStat.clean()
 			if err != nil {
 				return false
 			}

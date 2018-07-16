@@ -8,6 +8,7 @@ package leveldb
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -80,6 +81,51 @@ func (p *cStats) getStat(level int) (duration time.Duration, read, write int64) 
 		return p.stats[level].get()
 	}
 	return
+}
+
+// pStat wraps accumulated compaction statistics during the write pause stage.
+type pStat struct {
+	lk        sync.RWMutex
+	count     int32     // Cumulative compaction number during the write pause stage.
+	total     int64     // Cumulative amount of data that the compaction needs to process.
+	processed int64     // Cumulative amount of data that the compaction has processed.
+	start     time.Time // The start time of write pause stage.
+}
+
+// init accumulates the amount of data that needs to be processed and marks the stage start time if necessary.
+func (p *pStat) init(total int64) {
+	p.lk.Lock()
+	p.count += 1
+	if p.start == (time.Time{}) {
+		p.start = time.Now()
+	}
+	p.total += total
+	p.lk.Unlock()
+}
+
+// update updates the amount of data already processed.
+func (p *pStat) update(processed int64) {
+	p.lk.Lock()
+	p.processed += processed
+	// Cap if processed data exceeds the total.
+	if p.processed > p.total {
+		p.processed = p.total
+	}
+	p.lk.Unlock()
+}
+
+// clean cleans all statistic data when write pause stage is over.
+func (p *pStat) clean() {
+	p.lk.Lock()
+	p.count, p.total, p.processed, p.start = 0, 0, 0, time.Time{}
+	p.lk.Unlock()
+}
+
+// get fetches compaction progress data of write pause stage.
+func (p *pStat) get() (int32, int64, int64, time.Time) {
+	p.lk.RLock()
+	defer p.lk.RUnlock()
+	return p.count, p.total, p.processed, p.start
 }
 
 func (db *DB) compactionError() {
@@ -426,6 +472,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	lastSeq := b.snapLastSeq
 	b.kerrCnt = b.snapKerrCnt
 	b.dropCnt = b.snapDropCnt
+	processed := int64(0)
 	// Restore compaction state.
 	b.c.restore()
 
@@ -454,6 +501,15 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 		ikey := iter.Key()
 		ukey, seq, kt, kerr := parseInternalKey(ikey)
 
+		// Note the statistical method here is not accurate.
+		// Because `total` is the cumulative size of all sstable files, while `processed` data is only the accumulation
+		// of the data part of the sstable.
+		// Besides, the key of consecutive data items are compressed and stored in sstable, but here we use the
+		// full internal key length for statistics.
+		// But considering that the proportion of data part in sstable is large enough, and the accuracy requirement
+		// of the progress data is not very high, so we use this method to approximate the progress data.
+		processed += int64(len(iter.Key()) + len(iter.Value()))
+
 		if kerr == nil {
 			shouldStop := !resumed && b.c.shouldStopBefore(ikey)
 
@@ -465,6 +521,11 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 					if err := b.flush(); err != nil {
 						return err
 					}
+					// Update compaction progress statistic if we are in write paused status.
+					if atomic.LoadInt32(&b.db.inWritePaused) == 1 {
+						b.db.wpCompStat.update(processed)
+					}
+					processed = 0
 
 					// Creates snapshot of the state.
 					b.c.save()
@@ -563,6 +624,11 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	sourceSize := int(stats[0].read + stats[1].read)
 	minSeq := db.minSeq()
 	db.logf("table@compaction L%d·%d -> L%d·%d S·%s Q·%d", c.sourceLevel, len(c.levels[0]), c.sourceLevel+1, len(c.levels[1]), shortenb(sourceSize), minSeq)
+
+	// Update accumulated compaction statistic when write operation is paused.
+	if atomic.LoadInt32(&db.inWritePaused) == 1 {
+		db.wpCompStat.init(int64(sourceSize))
+	}
 
 	b := &tableCompactionBuilder{
 		db:        db,
