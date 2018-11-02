@@ -78,7 +78,7 @@ func newTableFile(fd storage.FileDesc, size int64, imin, imax internalKey) *tFil
 }
 
 func tableFileFromRecord(r atRecord) *tFile {
-	return newTableFile(storage.FileDesc{storage.TypeTable, r.num}, r.size, r.imin, r.imax)
+	return newTableFile(storage.FileDesc{Type: storage.TypeTable, Num: r.num}, r.size, r.imin, r.imax)
 }
 
 // tFiles hold multiple tFile.
@@ -299,7 +299,7 @@ type tOps struct {
 
 // Creates an empty table and returns table writer.
 func (t *tOps) create() (*tWriter, error) {
-	fd := storage.FileDesc{storage.TypeTable, t.s.allocFileNum()}
+	fd := storage.FileDesc{Type: storage.TypeTable, Num: t.s.allocFileNum()}
 	fw, err := t.s.stor.Create(fd)
 	if err != nil {
 		return nil, err

@@ -147,7 +147,10 @@ func packFile(fd storage.FileDesc) uint64 {
 }
 
 func unpackFile(x uint64) storage.FileDesc {
-	return storage.FileDesc{storage.FileType(x) & storage.TypeAll, int64(x >> typeCount)}
+	return storage.FileDesc{
+		Type: storage.FileType(x) & storage.TypeAll,
+		Num:  int64(x >> typeCount),
+	}
 }
 
 type emulatedError struct {

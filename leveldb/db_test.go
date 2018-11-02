@@ -431,7 +431,7 @@ func (h *dbHarness) compactRange(min, max string) {
 
 func (h *dbHarness) sizeOf(start, limit string) int64 {
 	sz, err := h.db.SizeOf([]util.Range{
-		{[]byte(start), []byte(limit)},
+		{Start: []byte(start), Limit: []byte(limit)},
 	})
 	if err != nil {
 		h.t.Error("SizeOf: got error: ", err)
@@ -1592,7 +1592,7 @@ func TestDB_ClosedIsClosed(t *testing.T) {
 	_, err = db.GetProperty("leveldb.stats")
 	assertErr(t, err, true)
 
-	_, err = db.SizeOf([]util.Range{{[]byte("a"), []byte("z")}})
+	_, err = db.SizeOf([]util.Range{{Start: []byte("a"), Limit: []byte("z")}})
 	assertErr(t, err, true)
 
 	assertErr(t, db.CompactRange(util.Range{}), true)
