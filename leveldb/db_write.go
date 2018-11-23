@@ -131,10 +131,8 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 }
 
 type writeMerge struct {
-	sync       bool
-	batch      *Batch
-	keyType    keyType
-	key, value []byte
+	sync  bool
+	batch *Batch
 }
 
 func (db *DB) unlockWrite(overflow bool, merged int, err error) {
@@ -184,31 +182,13 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 		for mergeLimit > 0 {
 			select {
 			case incoming := <-db.writeMergeC:
-				if incoming.batch != nil {
-					// Merge batch.
-					if incoming.batch.internalLen > mergeLimit {
-						overflow = true
-						break merge
-					}
-					batches = append(batches, incoming.batch)
-					mergeLimit -= incoming.batch.internalLen
-				} else {
-					// Merge put.
-					internalLen := len(incoming.key) + len(incoming.value) + 8
-					if internalLen > mergeLimit {
-						overflow = true
-						break merge
-					}
-					if ourBatch == nil {
-						ourBatch = db.batchPool.Get().(*Batch)
-						ourBatch.Reset()
-						batches = append(batches, ourBatch)
-					}
-					// We can use same batch since concurrent write doesn't
-					// guarantee write order.
-					ourBatch.appendRec(incoming.keyType, incoming.key, incoming.value)
-					mergeLimit -= internalLen
+				// Merge batch.
+				if incoming.batch.internalLen > mergeLimit {
+					overflow = true
+					break merge
 				}
+				batches = append(batches, incoming.batch)
+				mergeLimit -= incoming.batch.internalLen
 				sync = sync || incoming.sync
 				merged++
 				db.writeMergedC <- true
@@ -325,10 +305,14 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 	merge := !wo.GetNoWriteMerge() && !db.s.o.GetNoWriteMerge()
 	sync := wo.GetSync() && !db.s.o.GetNoSync()
 
+	batch := db.batchPool.Get().(*Batch)
+	batch.Reset()
+	batch.appendRec(kt, key, value)
+
 	// Acquire write lock.
 	if merge {
 		select {
-		case db.writeMergeC <- writeMerge{sync: sync, keyType: kt, key: key, value: value}:
+		case db.writeMergeC <- writeMerge{sync: sync, batch: batch}:
 			if <-db.writeMergedC {
 				// Write is merged.
 				return <-db.writeAckC
@@ -355,10 +339,6 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 			return ErrClosed
 		}
 	}
-
-	batch := db.batchPool.Get().(*Batch)
-	batch.Reset()
-	batch.appendRec(kt, key, value)
 	return db.writeLocked(batch, batch, merge, sync)
 }
 
