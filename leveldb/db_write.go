@@ -149,7 +149,7 @@ func (db *DB) unlockWrite(overflow bool, merged int, err error) {
 }
 
 // ourBatch is batch that we can modify.
-func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
+func (db *DB) writeLocked(batch *Batch, merge, sync bool) error {
 	// Try to flush memdb. This method would also trying to throttle writes
 	// if it is too fast and compaction cannot catch-up.
 	mdb, mdbFree, err := db.flush(batch.internalLen)
@@ -197,11 +197,6 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 				break merge
 			}
 		}
-	}
-
-	// Release ourBatch if any.
-	if ourBatch != nil {
-		defer db.batchPool.Put(ourBatch)
 	}
 
 	// Seq number.
@@ -294,7 +289,7 @@ func (db *DB) Write(batch *Batch, wo *opt.WriteOptions) error {
 		}
 	}
 
-	return db.writeLocked(batch, nil, merge, sync)
+	return db.writeLocked(batch, merge, sync)
 }
 
 func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error {
@@ -306,6 +301,7 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 	sync := wo.GetSync() && !db.s.o.GetNoSync()
 
 	batch := db.batchPool.Get().(*Batch)
+	defer db.batchPool.Put(batch)
 	batch.Reset()
 	batch.appendRec(kt, key, value)
 
@@ -339,7 +335,7 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 			return ErrClosed
 		}
 	}
-	return db.writeLocked(batch, batch, merge, sync)
+	return db.writeLocked(batch, merge, sync)
 }
 
 // Put sets the value for the given key. It overwrites any previous value
