@@ -777,8 +777,8 @@ func (db *DB) mCompaction() {
 
 func (db *DB) tCompaction() {
 	var (
-		x           cCmd
-		ackQ, waitQ []cCmd
+		x     cCmd
+		waitQ []cCmd
 	)
 
 	defer func() {
@@ -786,10 +786,6 @@ func (db *DB) tCompaction() {
 			if x != errCompactionTransactExiting {
 				panic(x)
 			}
-		}
-		for i := range ackQ {
-			ackQ[i].ack(ErrClosed)
-			ackQ[i] = nil
 		}
 		for i := range waitQ {
 			waitQ[i].ack(ErrClosed)
@@ -821,11 +817,6 @@ func (db *DB) tCompaction() {
 				waitQ = waitQ[:0]
 			}
 		} else {
-			for i := range ackQ {
-				ackQ[i].ack(nil)
-				ackQ[i] = nil
-			}
-			ackQ = ackQ[:0]
 			for i := range waitQ {
 				waitQ[i].ack(nil)
 				waitQ[i] = nil
@@ -850,8 +841,6 @@ func (db *DB) tCompaction() {
 					} else {
 						waitQ = append(waitQ, x)
 					}
-				} else {
-					ackQ = append(ackQ, x)
 				}
 			case cRange:
 				x.ack(db.tableRangeCompaction(cmd.level, cmd.min, cmd.max))
