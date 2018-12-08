@@ -72,8 +72,9 @@ const logSizeThreshold = 1024 * 1024 // 1 MiB
 
 // fileStorage is a file-system backed storage.
 type fileStorage struct {
-	path     string
-	readOnly bool
+	initialized bool
+	path        string
+	readOnly    bool
 
 	mu      sync.Mutex
 	flock   fileLock
@@ -132,11 +133,22 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 	}
 
 	fs := &fileStorage{
-		path:     path,
-		readOnly: readOnly,
-		flock:    flock,
-		logw:     logw,
-		logSize:  logSize,
+		initialized: false,
+		path:        path,
+		readOnly:    readOnly,
+		flock:       flock,
+		logw:        logw,
+		logSize:     logSize,
+	}
+	// check whether we have leveldb files
+	if readOnly {
+		levelDBFiles, err := fs.List(TypeAll)
+		if err != nil {
+			return nil, err
+		}
+		if len(levelDBFiles) > 0 {
+			fs.initialized = true
+		}
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
@@ -280,7 +292,7 @@ func (fs *fileStorage) SetMeta(fd FileDesc) error {
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
 	}
-	if fs.readOnly {
+	if fs.readOnly && fs.initialized {
 		return errReadOnly
 	}
 
@@ -492,7 +504,7 @@ func (fs *fileStorage) Create(fd FileDesc) (Writer, error) {
 	if !FileDescOk(fd) {
 		return nil, ErrInvalidFile
 	}
-	if fs.readOnly {
+	if fs.readOnly && fs.initialized {
 		return nil, errReadOnly
 	}
 
