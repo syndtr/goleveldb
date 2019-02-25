@@ -468,7 +468,7 @@ func recoverTable(s *session, o *opt.Options) error {
 	}
 
 	// Commit.
-	return s.commit(rec)
+	return s.commit(rec, false)
 }
 
 func (db *DB) recoverJournal() error {
@@ -538,7 +538,7 @@ func (db *DB) recoverJournal() error {
 
 				rec.setJournalNum(fd.Num)
 				rec.setSeqNum(db.seq)
-				if err := db.s.commit(rec); err != nil {
+				if err := db.s.commit(rec, false); err != nil {
 					fr.Close()
 					return err
 				}
@@ -617,7 +617,7 @@ func (db *DB) recoverJournal() error {
 	// Commit.
 	rec.setJournalNum(db.journalFd.Num)
 	rec.setSeqNum(db.seq)
-	if err := db.s.commit(rec); err != nil {
+	if err := db.s.commit(rec, false); err != nil {
 		// Close journal on error.
 		if db.journal != nil {
 			db.journal.Close()

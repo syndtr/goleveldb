@@ -515,7 +515,7 @@ func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 				if o == nil {
 					o = &opt.Options{
 						DisableLargeBatchTransaction: true,
-						Filter: testingBloomFilter,
+						Filter:                       testingBloomFilter,
 					}
 				} else {
 					old := o
@@ -2558,7 +2558,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 		}
 		rec := &sessionRecord{}
 		rec.addTableFile(i, tf)
-		if err := s.commit(rec); err != nil {
+		if err := s.commit(rec, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2582,7 +2582,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 	for _, t := range c.levels[0] {
 		rec.delTable(c.sourceLevel, t.fd.Num)
 	}
-	if err := s.commit(rec); err != nil {
+	if err := s.commit(rec, false); err != nil {
 		t.Fatal(err)
 	}
 	c.release()
@@ -2611,7 +2611,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 		rec.delTable(2, t.fd.Num)
 		rec.addTableFile(3, t)
 	}
-	if err := s.commit(rec); err != nil {
+	if err := s.commit(rec, false); err != nil {
 		t.Fatal(err)
 	}
 	c.release()
@@ -2653,7 +2653,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 			break
 		}
 	}
-	if err := s.commit(rec); err != nil {
+	if err := s.commit(rec, false); err != nil {
 		t.Fatal(err)
 	}
 	c.release()
