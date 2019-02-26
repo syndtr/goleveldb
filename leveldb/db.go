@@ -957,15 +957,27 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		value = "Compactions\n" +
 			" Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)\n" +
 			"-------+------------+---------------+---------------+---------------+---------------\n"
+		var totalTables int
+		var totalSize, totalRead, totalWrite int64
+		var totalDuration time.Duration
 		for level, tables := range v.levels {
 			duration, read, write := db.compStats.getStat(level)
 			if len(tables) == 0 && duration == 0 {
 				continue
 			}
+			totalTables += len(tables)
+			totalSize += tables.size()
+			totalRead += read
+			totalWrite += write
+			totalDuration += duration
 			value += fmt.Sprintf(" %3d   | %10d | %13.5f | %13.5f | %13.5f | %13.5f\n",
 				level, len(tables), float64(tables.size())/1048576.0, duration.Seconds(),
 				float64(read)/1048576.0, float64(write)/1048576.0)
 		}
+		value += "-------+------------+---------------+---------------+---------------+---------------\n"
+		value += fmt.Sprintf(" Total | %10d | %13.5f | %13.5f | %13.5f | %13.5f\n",
+			totalTables, float64(totalSize)/1048576.0, totalDuration.Seconds(),
+			float64(totalRead)/1048576.0, float64(totalWrite)/1048576.0)
 	case p == "iostats":
 		value = fmt.Sprintf("Read(MB):%.5f Write(MB):%.5f",
 			float64(db.s.stor.reads())/1048576.0,
