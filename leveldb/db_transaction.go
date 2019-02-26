@@ -209,7 +209,7 @@ func (tr *Transaction) Commit() error {
 		tr.stats.startTimer()
 		var cerr error
 		for retry := 0; retry < 3; retry++ {
-			cerr = tr.db.s.commit(&tr.rec)
+			cerr = tr.db.s.commit(&tr.rec, false)
 			if cerr != nil {
 				tr.db.logf("transaction@commit error R·%d %q", retry, cerr)
 				select {
