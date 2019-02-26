@@ -305,7 +305,7 @@ func TestGrow(t *testing.T) {
 	}
 }
 
-// Was a bug: used to give EOF reading empty slice at EOF.
+// TestReadEmptyAtEOF: Was a bug: used to give EOF reading empty slice at EOF.
 func TestReadEmptyAtEOF(t *testing.T) {
 	b := new(Buffer)
 	slice := make([]byte, 0)
@@ -318,7 +318,7 @@ func TestReadEmptyAtEOF(t *testing.T) {
 	}
 }
 
-// Tests that we occasionally compact. Issue 5154.
+// TestBufferGrowth tests that we occasionally compact. Issue 5154.
 func TestBufferGrowth(t *testing.T) {
 	var b Buffer
 	buf := make([]byte, 1024)
@@ -339,7 +339,7 @@ func TestBufferGrowth(t *testing.T) {
 	}
 }
 
-// From Issue 5154.
+// BenchmarkBufferNotEmptyWriteRead: From Issue 5154.
 func BenchmarkBufferNotEmptyWriteRead(b *testing.B) {
 	buf := make([]byte, 1024)
 	for i := 0; i < b.N; i++ {
@@ -352,7 +352,7 @@ func BenchmarkBufferNotEmptyWriteRead(b *testing.B) {
 	}
 }
 
-// Check that we don't compact too often. From Issue 5154.
+// BenchmarkBufferFullSmallReads checks that we don't compact too often. From Issue 5154.
 func BenchmarkBufferFullSmallReads(b *testing.B) {
 	buf := make([]byte, 1024)
 	for i := 0; i < b.N; i++ {
