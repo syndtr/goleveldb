@@ -1029,10 +1029,10 @@ type DBStats struct {
 	BlockCacheSize    int
 	OpenedTablesCount int
 
-	LevelSizes        []int64
+	LevelSizes        Sizes
 	LevelTablesCounts []int
-	LevelRead         []int64
-	LevelWrite        []int64
+	LevelRead         Sizes
+	LevelWrite        Sizes
 	LevelDurations    []time.Duration
 }
 
