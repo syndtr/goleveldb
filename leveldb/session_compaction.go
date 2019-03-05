@@ -52,16 +52,27 @@ func (s *session) pickCompaction() *compaction {
 	var t0 tFiles
 	if v.cScore >= 1 {
 		sourceLevel = v.cLevel
+		seedN := s.o.GetCompactionSeedFileNumber(v.cScore)
+		// Disable seed file expansion for level0
+		if sourceLevel == 0 || seedN == 0 {
+			seedN = 1
+		}
 		cptr := s.getCompPtr(sourceLevel)
 		tables := v.levels[sourceLevel]
 		for _, t := range tables {
 			if cptr == nil || s.icmp.Compare(t.imax, cptr) > 0 {
 				t0 = append(t0, t)
-				break
+				if len(t0) >= seedN {
+					break
+				}
 			}
 		}
 		if len(t0) == 0 {
-			t0 = append(t0, tables[0])
+			for index := range tables {
+				if len(t0) < seedN {
+					t0 = append(t0, tables[index])
+				}
+			}
 		}
 	} else {
 		if p := atomic.LoadPointer(&v.cSeek); p != nil {
