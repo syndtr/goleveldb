@@ -4,7 +4,9 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/onsi/gomega"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -24,6 +26,10 @@ func TestVersionStaging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		s.close()
+		s.release()
+	}()
 
 	v := newVersion(s)
 	v.newStaging()
@@ -222,6 +228,102 @@ func TestVersionStaging(t *testing.T) {
 	}
 }
 
+func TestVersionReference(t *testing.T) {
+	gomega.RegisterTestingT(t)
+	stor := testutil.NewStorage()
+	defer stor.Close()
+	s, err := newSession(stor, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		s.close()
+		s.release()
+	}()
+
+	tmp := make([]byte, 4)
+	mik := func(i uint64) []byte {
+		binary.BigEndian.PutUint32(tmp, uint32(i))
+		return []byte(makeInternalKey(nil, tmp, 0, keyTypeVal))
+	}
+
+	refc := make(chan map[int64]int)
+
+	for i, x := range []struct {
+		add, del []testFileRec
+		expect   map[int64]int
+	}{
+		{
+			[]testFileRec{{0, 1}, {0, 2}},
+			nil,
+			map[int64]int{1: 1, 2: 1},
+		},
+		{
+			[]testFileRec{{0, 3}, {0, 4}},
+			[]testFileRec{{0, 1}},
+			map[int64]int{2: 1, 3: 1, 4: 1},
+		},
+		{
+			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
+			[]testFileRec{{0, 2}, {0, 3}, {0, 4}},
+			map[int64]int{1: 1, 5: 1, 6: 1, 7: 1},
+		},
+		{
+			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
+			nil,
+			map[int64]int{1: 2, 5: 2, 6: 2, 7: 2},
+		},
+		{
+			nil,
+			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
+			map[int64]int{1: 1, 5: 1, 6: 1, 7: 1},
+		},
+		{
+			nil,
+			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
+			map[int64]int{},
+		},
+	} {
+		rec := &sessionRecord{}
+		for n, f := range x.add {
+			rec.addTable(f.level, f.num, 1, mik(uint64(i+n)), mik(uint64(i+n)))
+		}
+		for _, f := range x.del {
+			rec.delTable(f.level, f.num)
+		}
+
+		// Simulate some read operations
+		var wg sync.WaitGroup
+		readN := rand.Intn(300)
+		for i := 0; i < readN; i++ {
+			wg.Add(1)
+			go func() {
+				v := s.version()
+				time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+				v.release()
+				wg.Done()
+			}()
+		}
+
+		v := s.version()
+		vs := v.newStaging()
+		vs.commit(rec)
+		s.setVersion(rec, vs.finish(false))
+		v.release()
+
+		// Wait all read operations
+		wg.Wait()
+
+		time.Sleep(100 * time.Millisecond) // Wait lazy reference finish tasks
+
+		s.fileRefCh <- refc
+		ref := <-refc
+		if !reflect.DeepEqual(ref, x.expect) {
+			t.Errorf("case %d failed, file reference mismatch, GOT %v, WANT %v", i, ref, x.expect)
+		}
+	}
+}
+
 func BenchmarkVersionStagingNonTrivial(b *testing.B) {
 	benchmarkVersionStaging(b, false, 100000)
 }
@@ -237,9 +339,10 @@ func benchmarkVersionStaging(b *testing.B, trivial bool, size int) {
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	v := newVersion(s)
-	v.newStaging()
+	defer func() {
+		s.close()
+		s.release()
+	}()
 
 	tmp := make([]byte, 4)
 	mik := func(i uint64) []byte {
@@ -252,6 +355,8 @@ func benchmarkVersionStaging(b *testing.B, trivial bool, size int) {
 		ik := mik(uint64(i))
 		rec.addTable(1, int64(i), 1, ik, ik)
 	}
+
+	v := newVersion(s)
 	vs := v.newStaging()
 	vs.commit(rec)
 	v = vs.finish(false)
