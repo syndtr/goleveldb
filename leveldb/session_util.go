@@ -39,20 +39,6 @@ func (s *session) newTemp() storage.FileDesc {
 	return storage.FileDesc{Type: storage.TypeTemp, Num: num}
 }
 
-// addFileRef adds file reference counter with specified file number and
-// reference value; need external synchronization.
-func (s *session) addFileRef(fnum int64, ref int) int {
-	ref += s.fileRef[fnum]
-	if ref > 0 {
-		s.fileRef[fnum] = ref
-	} else if ref == 0 {
-		delete(s.fileRef, fnum)
-	} else {
-		panic(fmt.Sprintf("negative ref: %v", fnum))
-	}
-	return ref
-}
-
 // Session state.
 
 const cachedTaskBound = 256
@@ -73,12 +59,35 @@ type vTask struct {
 
 func (s *session) refLoop() {
 	var (
-		ref        = make(map[int64][]tFiles)
+		fileRef    = make(map[int64]int)      // Table file reference counter
+		ref        = make(map[int64][]tFiles) // Current referencing version store
 		deltas     = make(map[int64]*vDelta)
 		referenced = make(map[int64]struct{})
-		released   = make(map[int64]*vDelta)
+		released   = make(map[int64]*vDelta)  // Released version that waiting for processing
+		abandoned  = make(map[int64]struct{}) // Abandoned version id
 		next, last int64
 	)
+	// addFileRef adds file reference counter with specified file number and
+	// reference value
+	addFileRef := func(fnum int64, ref int) int {
+		ref += fileRef[fnum]
+		if ref > 0 {
+			fileRef[fnum] = ref
+		} else if ref == 0 {
+			delete(fileRef, fnum)
+		} else {
+			panic(fmt.Sprintf("negative ref: %v", fnum))
+		}
+		return ref
+	}
+	// skipAbandon skips useless abandoned version id.
+	skipAbandon := func(vid int64) bool {
+		if _, exist := abandoned[next]; exist {
+			delete(abandoned, next)
+			return true
+		}
+		return false
+	}
 	// processTasks processes version tasks in strict order.
 	//
 	// If we want to use delta to reduce the cost of file references and dereferences,
@@ -92,6 +101,10 @@ func (s *session) refLoop() {
 	processTasks := func() {
 		// Make sure we don't cache too many version tasks.
 		for {
+			if skipAbandon(next) {
+				next += 1
+				continue
+			}
 			if last-next < cachedTaskBound {
 				break
 			}
@@ -103,7 +116,7 @@ func (s *session) refLoop() {
 			}
 			for _, tt := range ref[next] {
 				for _, t := range tt {
-					s.addFileRef(t.fd.Num, 1)
+					addFileRef(t.fd.Num, 1)
 				}
 			}
 			referenced[next] = struct{}{}
@@ -114,13 +127,17 @@ func (s *session) refLoop() {
 
 		// Use delta information to process all released versions.
 		for {
+			if skipAbandon(next) {
+				next += 1
+				continue
+			}
 			if d, exist := released[next]; exist {
 				if d != nil {
 					for _, t := range d.added {
-						s.addFileRef(t, 1)
+						addFileRef(t, 1)
 					}
 					for _, t := range d.deleted {
-						if s.addFileRef(t, -1) == 0 {
+						if addFileRef(t, -1) == 0 {
 							s.tops.remove(storage.FileDesc{Type: storage.TypeTable, Num: t})
 						}
 					}
@@ -159,7 +176,7 @@ func (s *session) refLoop() {
 			if _, exist := referenced[t.vid]; exist {
 				for _, tt := range t.files {
 					for _, t := range tt {
-						if s.addFileRef(t.fd.Num, -1) == 0 {
+						if addFileRef(t.fd.Num, -1) == 0 {
 							s.tops.remove(t.fd)
 						}
 					}
@@ -174,9 +191,14 @@ func (s *session) refLoop() {
 			delete(deltas, t.vid)
 			delete(ref, t.vid)
 
+		case id := <-s.abandon:
+			if id >= next {
+				abandoned[id] = struct{}{}
+			}
+
 		case r := <-s.fileRefCh:
 			ref := make(map[int64]int)
-			for f, c := range s.fileRef {
+			for f, c := range fileRef {
 				ref[f] = c
 			}
 			r <- ref

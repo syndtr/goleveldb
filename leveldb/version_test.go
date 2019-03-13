@@ -252,36 +252,49 @@ func TestVersionReference(t *testing.T) {
 	for i, x := range []struct {
 		add, del []testFileRec
 		expect   map[int64]int
+		failed   bool
 	}{
 		{
 			[]testFileRec{{0, 1}, {0, 2}},
 			nil,
 			map[int64]int{1: 1, 2: 1},
+			false,
 		},
 		{
 			[]testFileRec{{0, 3}, {0, 4}},
 			[]testFileRec{{0, 1}},
 			map[int64]int{2: 1, 3: 1, 4: 1},
+			false,
 		},
 		{
 			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
 			[]testFileRec{{0, 2}, {0, 3}, {0, 4}},
 			map[int64]int{1: 1, 5: 1, 6: 1, 7: 1},
+			false,
+		},
+		{
+			nil,
+			nil,
+			map[int64]int{1: 1, 5: 1, 6: 1, 7: 1},
+			true,
 		},
 		{
 			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
 			nil,
 			map[int64]int{1: 2, 5: 2, 6: 2, 7: 2},
+			false,
 		},
 		{
 			nil,
 			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
 			map[int64]int{1: 1, 5: 1, 6: 1, 7: 1},
+			false,
 		},
 		{
 			nil,
 			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
 			map[int64]int{},
+			false,
 		},
 	} {
 		rec := &sessionRecord{}
@@ -308,7 +321,13 @@ func TestVersionReference(t *testing.T) {
 		v := s.version()
 		vs := v.newStaging()
 		vs.commit(rec)
-		s.setVersion(rec, vs.finish(false))
+		nv := vs.finish(false)
+
+		if x.failed {
+			s.abandon <- nv.id
+		} else {
+			s.setVersion(rec, nv)
+		}
 		v.release()
 
 		// Wait all read operations

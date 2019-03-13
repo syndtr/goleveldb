@@ -47,7 +47,6 @@ type session struct {
 	o        *cachedOptions
 	icmp     *iComparer
 	tops     *tOps
-	fileRef  map[int64]int
 
 	manifest       *journal.Writer
 	manifestWriter storage.Writer
@@ -59,6 +58,7 @@ type session struct {
 	refCh       chan *vTask
 	relCh       chan *vTask
 	deltaCh     chan *vDelta
+	abandon     chan int64
 	closeC      chan struct{}
 	closeW      sync.WaitGroup
 	vmu         sync.Mutex
@@ -79,10 +79,10 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 	s = &session{
 		stor:      newIStorage(stor),
 		storLock:  storLock,
-		fileRef:   make(map[int64]int),
 		refCh:     make(chan *vTask),
 		relCh:     make(chan *vTask),
 		deltaCh:   make(chan *vDelta),
+		abandon:   make(chan int64),
 		fileRefCh: make(chan chan map[int64]int),
 		closeC:    make(chan struct{}),
 	}
@@ -214,6 +214,14 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 
 	// spawn new version based on current version
 	nv := v.spawn(r, trivial)
+
+	// abandon useless version id to prevent blocking version processing loop.
+	defer func() {
+		if err != nil {
+			s.abandon <- nv.id
+			s.logf("commit@abandon useless vid D%d", nv.id)
+		}
+	}()
 
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
