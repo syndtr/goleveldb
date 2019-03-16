@@ -41,7 +41,9 @@ func (s *session) newTemp() storage.FileDesc {
 
 // Session state.
 
-const cachedTaskBound = 256
+// maxCachedNumber represents the maximum number of version tasks
+// that can be cached in the ref loop.
+const maxCachedNumber = 256
 
 // vDelta indicates the change information between the next version
 // and the currently specified version
@@ -80,13 +82,24 @@ func (s *session) refLoop() {
 		}
 		return ref
 	}
-	// skipAbandon skips useless abandoned version id.
-	skipAbandon := func(vid int64) bool {
+	// skipAbandoned skips useless abandoned version id.
+	skipAbandoned := func() bool {
 		if _, exist := abandoned[next]; exist {
 			delete(abandoned, next)
 			return true
 		}
 		return false
+	}
+	// applyDelta applies version change to current file reference.
+	applyDelta := func(d *vDelta) {
+		for _, t := range d.added {
+			addFileRef(t, 1)
+		}
+		for _, t := range d.deleted {
+			if addFileRef(t, -1) == 0 {
+				s.tops.remove(storage.FileDesc{Type: storage.TypeTable, Num: t})
+			}
+		}
 	}
 	// processTasks processes version tasks in strict order.
 	//
@@ -101,23 +114,32 @@ func (s *session) refLoop() {
 	processTasks := func() {
 		// Make sure we don't cache too many version tasks.
 		for {
-			if skipAbandon(next) {
+			// Skip any abandoned version number to prevent blocking processing.
+			if skipAbandoned() {
 				next += 1
 				continue
 			}
-			if last-next < cachedTaskBound {
+			if last-next < maxCachedNumber {
 				break
 			}
+			// Don't bother the version that has been released.
 			if _, exist := released[next]; exist {
 				break
 			}
+			// Ensure the specified version has been referenced.
 			if _, exist := ref[next]; !exist {
 				break
 			}
+			// Convert version task into full file references and releases mode.
+			// Reference version(i+1) first and wait version(i) to release.
+			// FileRef(i+1) = FileRef(i) + Delta(i)
 			for _, tt := range ref[next] {
 				for _, t := range tt {
 					addFileRef(t.fd.Num, 1)
 				}
+			}
+			if d := deltas[next]; d != nil {
+				applyDelta(d)
 			}
 			referenced[next] = struct{}{}
 			delete(ref, next)
@@ -127,20 +149,13 @@ func (s *session) refLoop() {
 
 		// Use delta information to process all released versions.
 		for {
-			if skipAbandon(next) {
+			if skipAbandoned() {
 				next += 1
 				continue
 			}
 			if d, exist := released[next]; exist {
 				if d != nil {
-					for _, t := range d.added {
-						addFileRef(t, 1)
-					}
-					for _, t := range d.deleted {
-						if addFileRef(t, -1) == 0 {
-							s.tops.remove(storage.FileDesc{Type: storage.TypeTable, Num: t})
-						}
-					}
+					applyDelta(d)
 				}
 				delete(released, next)
 				next += 1

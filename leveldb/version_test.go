@@ -247,6 +247,7 @@ func TestVersionReference(t *testing.T) {
 		return []byte(makeInternalKey(nil, tmp, 0, keyTypeVal))
 	}
 
+	// Test normal version task correctness
 	refc := make(chan map[int64]int)
 
 	for i, x := range []struct {
@@ -291,9 +292,9 @@ func TestVersionReference(t *testing.T) {
 			false,
 		},
 		{
-			nil,
+			[]testFileRec{{0, 0}},
 			[]testFileRec{{0, 1}, {0, 5}, {0, 6}, {0, 7}},
-			map[int64]int{},
+			map[int64]int{0: 1},
 			false,
 		},
 	} {
@@ -312,7 +313,7 @@ func TestVersionReference(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				v := s.version()
-				time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+				time.Sleep(time.Millisecond * time.Duration(rand.Intn(300)))
 				v.release()
 				wg.Done()
 			}()
@@ -340,6 +341,36 @@ func TestVersionReference(t *testing.T) {
 		if !reflect.DeepEqual(ref, x.expect) {
 			t.Errorf("case %d failed, file reference mismatch, GOT %v, WANT %v", i, ref, x.expect)
 		}
+	}
+
+	// Test version task overflow
+	var longV = s.version() // This version is held by some long-time operation
+	var exp = map[int64]int{0: 1, maxCachedNumber: 1}
+	for i := 1; i <= maxCachedNumber; i++ {
+		rec := &sessionRecord{}
+		rec.addTable(0, int64(i), 1, mik(uint64(i)), mik(uint64(i)))
+		rec.delTable(0, int64(i-1))
+		v := s.version()
+		vs := v.newStaging()
+		vs.commit(rec)
+		nv := vs.finish(false)
+		s.setVersion(rec, nv)
+		v.release()
+	}
+	time.Sleep(100 * time.Millisecond) // Wait lazy reference finish tasks
+
+	s.fileRefCh <- refc
+	ref := <-refc
+	if !reflect.DeepEqual(exp, ref) {
+		t.Errorf("file reference mismatch, GOT %v, WANT %v", ref, exp)
+	}
+
+	longV.release()
+	s.fileRefCh <- refc
+	ref = <-refc
+	delete(exp, 0)
+	if !reflect.DeepEqual(exp, ref) {
+		t.Errorf("file reference mismatch, GOT %v, WANT %v", ref, exp)
 	}
 }
 
