@@ -9,6 +9,7 @@ package leveldb
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/journal"
 	"github.com/syndtr/goleveldb/leveldb/storage"
@@ -41,9 +42,15 @@ func (s *session) newTemp() storage.FileDesc {
 
 // Session state.
 
-// maxCachedNumber represents the maximum number of version tasks
-// that can be cached in the ref loop.
-const maxCachedNumber = 256
+const (
+	// maxCachedNumber represents the maximum number of version tasks
+	// that can be cached in the ref loop.
+	maxCachedNumber = 256
+
+	// maxCachedTime represents the maximum time for ref loop to cache
+	// a version task.
+	maxCachedTime = 5 * time.Minute
+)
 
 // vDelta indicates the change information between the next version
 // and the currently specified version
@@ -55,14 +62,15 @@ type vDelta struct {
 
 // vTask defines a version task for either reference or release.
 type vTask struct {
-	vid   int64
-	files []tFiles
+	vid     int64
+	files   []tFiles
+	created time.Time
 }
 
 func (s *session) refLoop() {
 	var (
-		fileRef    = make(map[int64]int)      // Table file reference counter
-		ref        = make(map[int64][]tFiles) // Current referencing version store
+		fileRef    = make(map[int64]int)    // Table file reference counter
+		ref        = make(map[int64]*vTask) // Current referencing version store
 		deltas     = make(map[int64]*vDelta)
 		referenced = make(map[int64]struct{})
 		released   = make(map[int64]*vDelta)  // Released version that waiting for processing
@@ -119,9 +127,6 @@ func (s *session) refLoop() {
 				next += 1
 				continue
 			}
-			if last-next < maxCachedNumber {
-				break
-			}
 			// Don't bother the version that has been released.
 			if _, exist := released[next]; exist {
 				break
@@ -130,14 +135,21 @@ func (s *session) refLoop() {
 			if _, exist := ref[next]; !exist {
 				break
 			}
+			if last-next < maxCachedNumber && time.Since(ref[next].created) < maxCachedTime {
+				break
+			}
 			// Convert version task into full file references and releases mode.
 			// Reference version(i+1) first and wait version(i) to release.
 			// FileRef(i+1) = FileRef(i) + Delta(i)
-			for _, tt := range ref[next] {
+			for _, tt := range ref[next].files {
 				for _, t := range tt {
 					addFileRef(t.fd.Num, 1)
 				}
 			}
+			// Note, if some compactions take a long time, even more than 5 minutes,
+			// we may miss the corresponding delta information here.
+			// Fortunately it will not affect the correctness of the file reference,
+			// and we can apply the delta once we receive it.
 			if d := deltas[next]; d != nil {
 				applyDelta(d)
 			}
@@ -173,7 +185,7 @@ func (s *session) refLoop() {
 			if _, exist := ref[t.vid]; exist {
 				panic("duplicate reference request")
 			}
-			ref[t.vid] = t.files
+			ref[t.vid] = t
 			if t.vid > last {
 				last = t.vid
 			}
@@ -183,6 +195,9 @@ func (s *session) refLoop() {
 				if _, exist2 := referenced[d.vid]; !exist2 {
 					panic("invalid release request")
 				}
+				// The reference opt is already expired, apply
+				// delta here.
+				applyDelta(d)
 				continue
 			}
 			deltas[d.vid] = d

@@ -9,6 +9,7 @@ package leveldb
 import (
 	"fmt"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -55,7 +56,7 @@ func (v *version) incref() {
 	v.ref++
 	if v.ref == 1 {
 		select {
-		case v.s.refCh <- &vTask{vid: v.id, files: v.levels}:
+		case v.s.refCh <- &vTask{vid: v.id, files: v.levels, created: time.Now()}:
 			// We can use v.levels directly here since it is immutable.
 		case <-v.s.closeC:
 			v.s.log("reference loop already exist")
@@ -71,7 +72,7 @@ func (v *version) releaseNB() {
 		panic("negative version ref")
 	}
 	select {
-	case v.s.relCh <- &vTask{vid: v.id, files: v.levels}:
+	case v.s.relCh <- &vTask{vid: v.id, files: v.levels, created: time.Now()}:
 		// We can use v.levels directly here since it is immutable.
 	case <-v.s.closeC:
 		v.s.log("reference loop already exist")
