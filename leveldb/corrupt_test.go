@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -481,6 +482,7 @@ func TestCorruptDB_RecoverTable(t *testing.T) {
 	h.compactRangeAt(0, "", "")
 	h.compactRangeAt(1, "", "")
 	seq := h.db.seq
+	time.Sleep(100 * time.Millisecond) // Wait lazy reference finish tasks
 	h.closeDB()
 	h.corrupt(storage.TypeTable, 0, 1000, 1)
 	h.corrupt(storage.TypeTable, 3, 10000, 1)
