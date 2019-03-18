@@ -109,6 +109,11 @@ func (s *session) refLoop() {
 			}
 		}
 	}
+
+	timer := time.NewTimer(0)
+	<-timer.C // discard the initial tick
+	defer timer.Stop()
+
 	// processTasks processes version tasks in strict order.
 	//
 	// If we want to use delta to reduce the cost of file references and dereferences,
@@ -120,6 +125,7 @@ func (s *session) refLoop() {
 	// the entire processing queue, we will properly convert some of the version tasks
 	// into full file references and releases.
 	processTasks := func() {
+		timer.Reset(maxCachedTime)
 		// Make sure we don't cache too many version tasks.
 		for {
 			// Skip any abandoned version number to prevent blocking processing.
@@ -225,6 +231,8 @@ func (s *session) refLoop() {
 			if id >= next {
 				abandoned[id] = struct{}{}
 			}
+
+		case <-timer.C:
 
 		case r := <-s.fileRefCh:
 			ref := make(map[int64]int)
