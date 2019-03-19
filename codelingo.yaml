@@ -1,0 +1,5 @@
+tenets:
+  - import: codelingo/effective-go/comment-first-word-as-subject
+  - import: codelingo/effective-go/single-method-interface-name
+  - import: codelingo/effective-go/avoid-annotations-in-comments
+  - import: codelingo/effective-go/underscores-in-name
