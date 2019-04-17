@@ -392,7 +392,7 @@ func TestFileStorage_ReadOnlyLocking(t *testing.T) {
 	if err != nil {
 		t.Logf("OpenFile(5): got error: %s (expected)", err)
 	} else {
-		t.Fatal("OpenFile(2): expect error")
+		t.Fatal("OpenFile(5): expect error")
 	}
 
 	p3.Close()
