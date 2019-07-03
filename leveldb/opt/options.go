@@ -635,6 +635,12 @@ type ReadOptions struct {
 	// Strict will be OR'ed with global DB 'strict level' unless StrictOverride
 	// is present. Currently only StrictReader that has effect here.
 	Strict Strict
+
+	// DontTriggerCompaction defines whether this 'read operation' allowed to trigger
+	// compaction. If false then compaction is allowed to be triggered.
+	//
+	// The default value is false.
+	DontTriggerCompaction bool
 }
 
 func (ro *ReadOptions) GetDontFillCache() bool {
@@ -649,6 +655,13 @@ func (ro *ReadOptions) GetStrict(strict Strict) bool {
 		return false
 	}
 	return ro.Strict&strict != 0
+}
+
+func (ro *ReadOptions) GetDontTriggerCompaction() bool {
+	if ro == nil {
+		return false
+	}
+	return ro.DontTriggerCompaction
 }
 
 // WriteOptions holds the optional parameters for 'write operation'. The
