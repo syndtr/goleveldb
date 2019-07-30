@@ -1,18 +1,50 @@
+// +build js,wasm
+
 // Copyright (c) 2012, Suryandaru Triandana <syndtr@gmail.com>
 // All rights reserved.
 //
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// +build js,wasm
-
 package storage
 
 import (
+	"errors"
 	"os"
 	"sync"
 	"syscall"
+	"syscall/js"
 )
+
+// TODO(albrow): Adding full WebAssembly support should be as simple as
+// implementing the methods below.
+func OSStat(name string) (os.FileInfo, error) {
+	if js.Global().Get("fs") != js.Undefined() && js.Global().Get("fs").Get("stat") != js.Undefined() {
+		return os.Stat(name)
+	}
+	return nil, errors.New("OSStat not yet implemented")
+}
+
+func OSOpenFile(name string, flag int, perm os.FileMode) (OSFile, error) {
+	if js.Global().Get("fs") != js.Undefined() {
+		return os.OpenFile(name, flag, perm)
+	}
+	return nil, errors.New("OSOpenFile not yet implemented")
+}
+
+func OSOpen(name string) (OSFile, error) {
+	if js.Global().Get("fs") != js.Undefined() {
+		return os.Open(name)
+	}
+	return nil, errors.New("OSOpen not yet implemented")
+}
+
+func OSRemove(name string) error {
+	if js.Global().Get("fs") != js.Undefined() {
+		return os.Remove(name)
+	}
+	return errors.New("OSRemove not yet implemented")
+}
 
 // Note: JavaScript doesn't have an flock syscall so we have to fake it. This
 // won't work if another process tries to read/write to the same file. It only
@@ -24,7 +56,7 @@ var locksMu = sync.Mutex{}
 // readLocks is a map of path to the number of readers.
 var readLocks = map[string]uint{}
 
-// writeLocks keeps track
+// writeLocks keeps track of files which are locked for writing.
 var writeLocks = map[string]struct{}{}
 
 type jsFileLock struct {

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Go/WebAssembly QUnit Bindings - Tests</title>
+	<link rel="stylesheet" href="resources/qunit-2.9.2.css">
+	<script src="resources/qunit-2.9.2.js"></script>
+	<script src="resources/wasm_exec.js"></script>
+	<script>
+		QUnit.config.autostart = false;
+		const go = new Go();
+		WebAssembly.instantiateStreaming(fetch("main.wasm"), go.importObject).then((result) => {
+			go.run(result.instance);
+		});
+	</script>
+</head>
+<body>
+	<div id="qunit"></div>
+	<div id="qunit-fixture"></div>
+</body>
+</html>
