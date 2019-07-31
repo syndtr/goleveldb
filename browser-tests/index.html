@@ -5,6 +5,27 @@
 	<title>Go/WebAssembly QUnit Bindings - Tests</title>
 	<link rel="stylesheet" href="resources/qunit-2.9.2.css">
 	<script src="resources/qunit-2.9.2.js"></script>
+	<script src="resources/browserfs-1.4.3.js"></script>
+	<script>
+		// Installs globals onto window:
+		// * Buffer
+		// * require (monkey-patches if already defined)
+		// * process
+		// You can pass in an arbitrary object if you do not wish to pollute
+		// the global namespace.
+		// BrowserFS.install(window);
+		// Configures BrowserFS to use the LocalStorage file system.
+		BrowserFS.configure({
+			fs: "LocalStorage"
+		}, function(e) {
+			if (e) {
+				// An error happened!
+				throw e;
+			}
+			// Otherwise, BrowserFS is ready-to-use!
+		});
+		window.browserFS = BrowserFS.BFSRequire('fs');
+	</script>
 	<script src="resources/wasm_exec.js"></script>
 	<script>
 		QUnit.config.autostart = false;

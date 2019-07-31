@@ -7,6 +7,7 @@
 package storage
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,9 @@ func (lock *fileStorageLock) Unlock() {
 }
 
 type OSFile interface {
+	// Stat returns the FileInfo structure describing file. If there is an error,
+	// it will be of type *PathError.
+	Stat() (os.FileInfo, error)
 	// Read reads up to len(b) bytes from the File. It returns the number of bytes
 	// read and any error encountered. At end of file, Read returns 0, io.EOF.
 	Read(b []byte) (n int, err error)
@@ -53,18 +57,6 @@ type OSFile interface {
 	// returns a non-nil error when n < len(b). At end of file, that error is
 	// io.EOF.
 	ReadAt(b []byte, off int64) (n int, err error)
-	// Readdirnames reads and returns a slice of names from the directory f.
-	//
-	// If n > 0, Readdirnames returns at most n names. In this case, if
-	// Readdirnames returns an empty slice, it will return a non-nil error
-	// explaining why. At the end of a directory, the error is io.EOF.
-	//
-	// If n <= 0, Readdirnames returns all the names from the directory in a
-	// single slice. In this case, if Readdirnames succeeds (reads all the way to
-	// the end of the directory), it returns the slice and a nil error. If it
-	// encounters an error before the end of the directory, Readdirnames returns
-	// the names read until that point and a non-nil error.
-	Readdirnames(n int) (names []string, err error)
 	// Write writes len(b) bytes to the File. It returns the number of bytes
 	// written and an error, if any. Write returns a non-nil error when n !=
 	// len(b).
@@ -83,6 +75,30 @@ type OSFile interface {
 	// SetDeadline, any pending I/O operations will be canceled and return
 	// immediately with an error.
 	Close() error
+}
+
+func ReadFile(filename string) ([]byte, error) {
+	f, err := OSOpen(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	// It's a good but not certain bet that FileInfo will tell us exactly how much to
+	// read, so let's try it but be prepared for the answer to be wrong.
+	var n int64 = bytes.MinRead
+
+	if fi, err := f.Stat(); err == nil {
+		// As initial capacity for readAll, use Size + a little extra in case Size
+		// is zero, and to avoid another allocation after Read has filled the
+		// buffer. The readAll call will read into its allocated internal buffer
+		// cheaply. If the size was wrong, we'll either waste some space off the end
+		// or reallocate as needed, but in the overwhelmingly common case we'll get
+		// it just right.
+		if size := fi.Size() + bytes.MinRead; size > n {
+			n = size
+		}
+	}
+	return ioutil.ReadAll(f)
 }
 
 type int64Slice []int64
@@ -138,9 +154,11 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
 		}
 	} else if os.IsNotExist(err) && !readOnly {
-		if err := os.MkdirAll(path, 0755); err != nil {
+		fmt.Println("file does not exist. creating it...")
+		if err := MkdirAll(path, 0755); err != nil {
 			return nil, err
 		}
+		fmt.Println("done creating file")
 	} else {
 		return nil, err
 	}
@@ -180,6 +198,8 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		logSize:  logSize,
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
+
+	fmt.Println("Reached end of storage.OpenFile")
 	return fs, nil
 }
 
@@ -279,11 +299,12 @@ func (fs *fileStorage) log(str string) {
 }
 
 func (fs *fileStorage) setMeta(fd FileDesc) error {
+	fmt.Println("inside fs.setMeta")
 	content := fsGenName(fd) + "\n"
 	// Check and backup old CURRENT file.
 	currentPath := filepath.Join(fs.path, "CURRENT")
 	if _, err := OSStat(currentPath); err == nil {
-		b, err := ioutil.ReadFile(currentPath)
+		b, err := ReadFile(currentPath)
 		if err != nil {
 			fs.log(fmt.Sprintf("backup CURRENT: %v", err))
 			return err
@@ -310,7 +331,9 @@ func (fs *fileStorage) setMeta(fd FileDesc) error {
 		return err
 	}
 	// Sync root directory.
+	fmt.Println("calling syncDir")
 	if err := syncDir(fs.path); err != nil {
+		fmt.Println("syncDir returned error:", err)
 		fs.log(fmt.Sprintf("syncDir: %v", err))
 		return err
 	}
@@ -318,6 +341,7 @@ func (fs *fileStorage) setMeta(fd FileDesc) error {
 }
 
 func (fs *fileStorage) SetMeta(fd FileDesc) error {
+	fmt.Println("inside fileStorage.SetMeta")
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
 	}
@@ -334,23 +358,18 @@ func (fs *fileStorage) SetMeta(fd FileDesc) error {
 }
 
 func (fs *fileStorage) GetMeta() (FileDesc, error) {
+	fmt.Println("inside GetMeta")
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	if fs.open < 0 {
 		return FileDesc{}, ErrClosed
 	}
-	dir, err := OSOpen(fs.path)
+	fmt.Println("calling Readdirnames")
+	names, err := Readdirnames(fs.path, 0)
 	if err != nil {
 		return FileDesc{}, err
 	}
-	names, err := dir.Readdirnames(0)
-	// Close the dir first before checking for Readdirnames error.
-	if ce := dir.Close(); ce != nil {
-		fs.log(fmt.Sprintf("close dir: %v", ce))
-	}
-	if err != nil {
-		return FileDesc{}, err
-	}
+	fmt.Println("Readdirnames returned: ", names)
 	// Try this in order:
 	// - CURRENT.[0-9]+ ('pending rename' file, descending order)
 	// - CURRENT
@@ -362,7 +381,9 @@ func (fs *fileStorage) GetMeta() (FileDesc, error) {
 		fd   FileDesc
 	}
 	tryCurrent := func(name string) (*currentFile, error) {
-		b, err := ioutil.ReadFile(filepath.Join(fs.path, name))
+		fmt.Println("calling ReadFile")
+		b, err := ReadFile(filepath.Join(fs.path, name))
+		fmt.Println("ReadFile returned. err =", err)
 		if err != nil {
 			if os.IsNotExist(err) {
 				err = os.ErrNotExist
@@ -485,15 +506,7 @@ func (fs *fileStorage) List(ft FileType) (fds []FileDesc, err error) {
 	if fs.open < 0 {
 		return nil, ErrClosed
 	}
-	dir, err := OSOpen(fs.path)
-	if err != nil {
-		return
-	}
-	names, err := dir.Readdirnames(0)
-	// Close the dir first before checking for Readdirnames error.
-	if cerr := dir.Close(); cerr != nil {
-		fs.log(fmt.Sprintf("close dir: %v", cerr))
-	}
+	names, err := Readdirnames(fs.path, 0)
 	if err == nil {
 		for _, name := range names {
 			if fd, ok := fsParseName(name); ok && fd.Type&ft != 0 {
