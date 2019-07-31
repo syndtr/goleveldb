@@ -69,9 +69,11 @@ type session struct {
 
 // Creates new initialized session instance.
 func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
+	fmt.Println("inside newSession")
 	if stor == nil {
 		return nil, os.ErrInvalid
 	}
+	fmt.Println("calling stor.Lock")
 	storLock, err := stor.Lock()
 	if err != nil {
 		return
@@ -93,6 +95,7 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 	go s.refLoop()
 	s.setVersion(nil, newVersion(s))
 	s.log("log@legend F·NumFile S·FileSize N·Entry C·BadEntry B·BadBlock Ke·KeyError D·DroppedEntry L·Level Q·SeqNum T·TimeElapsed")
+	fmt.Println("reached end of newSession. err =", err)
 	return
 }
 
@@ -137,11 +140,13 @@ func (s *session) recover() (err error) {
 		}
 	}()
 
+	fmt.Println("calling GetMeta")
 	fd, err := s.stor.GetMeta()
 	if err != nil {
 		return
 	}
 
+	fmt.Println("calling s.stor.Open")
 	reader, err := s.stor.Open(fd)
 	if err != nil {
 		return

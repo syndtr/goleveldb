@@ -402,11 +402,15 @@ func (s *session) recordCommited(rec *sessionRecord) {
 
 // Create a new manifest file; need external synchronization.
 func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
+	fmt.Println("inside newManifest")
 	fd := storage.FileDesc{Type: storage.TypeManifest, Num: s.allocFileNum()}
+	fmt.Println("calling s.stor.Create")
 	writer, err := s.stor.Create(fd)
 	if err != nil {
+		fmt.Println("s.stor.Create returned error:", err)
 		return
 	}
+	fmt.Println("s.stor.Create returned without error")
 	jw := journal.NewWriter(writer)
 
 	if v == nil {
@@ -453,7 +457,9 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	if err != nil {
 		return
 	}
+	fmt.Println("calling s.Store.SetMeta")
 	err = s.stor.SetMeta(fd)
+	fmt.Println("returning from newManifest. err =", err)
 	return
 }
 
