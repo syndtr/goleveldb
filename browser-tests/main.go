@@ -3,8 +3,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/google/uuid"
 
 	"github.com/0xProject/qunit"
@@ -29,8 +27,6 @@ func main() {
 		// Close the database.
 		err = db.Close()
 		assertNoError(assert, err, "could not close db")
-
-		fmt.Printf("\n\n\n")
 
 		// Re-open the database and the data should still be there.
 		db, err = leveldb.OpenFile(dbPath, nil)

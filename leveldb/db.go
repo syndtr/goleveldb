@@ -85,7 +85,6 @@ type DB struct {
 }
 
 func openDB(s *session) (*DB, error) {
-	fmt.Println("inside openDB")
 	s.log("db@open opening")
 	start := time.Now()
 	db := &DB{
@@ -114,24 +113,20 @@ func openDB(s *session) (*DB, error) {
 	}
 
 	// Read-only mode.
-	fmt.Println("calling GetReadOnly")
 	readOnly := s.o.GetReadOnly()
 
 	if readOnly {
 		// Recover journals (read-only mode).
-		fmt.Println("calling recoverJournalRD")
 		if err := db.recoverJournalRO(); err != nil {
 			return nil, err
 		}
 	} else {
 		// Recover journals.
-		fmt.Println("calling recoverJournal")
 		if err := db.recoverJournal(); err != nil {
 			return nil, err
 		}
 
 		// Remove any obsolete files.
-		fmt.Println("calling checkAndCleanFiles")
 		if err := db.checkAndCleanFiles(); err != nil {
 			// Close journal.
 			if db.journal != nil {
@@ -174,8 +169,6 @@ func openDB(s *session) (*DB, error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
-	fmt.Println("inside db.Open")
-	fmt.Println("calling newSession")
 	s, err := newSession(stor, o)
 	if err != nil {
 		return
@@ -187,14 +180,11 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 		}
 	}()
 
-	fmt.Println("calling s.recover")
 	err = s.recover()
-	fmt.Println("s.recover returned. err =", err)
 	if err != nil {
 		if !os.IsNotExist(err) || s.o.GetErrorIfMissing() || s.o.GetReadOnly() {
 			return
 		}
-		fmt.Println("calling s.create")
 		err = s.create()
 		if err != nil {
 			return
@@ -222,19 +212,16 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
-	fmt.Println("inside db.OpenFile")
 	stor, err := storage.OpenFile(path, o.GetReadOnly())
 	if err != nil {
 		return
 	}
-	fmt.Println("calling db.Open")
 	db, err = Open(stor, o)
 	if err != nil {
 		stor.Close()
 	} else {
 		db.closer = stor
 	}
-	fmt.Println("Reached end of db.OpenFile. err =", err)
 	return
 }
 

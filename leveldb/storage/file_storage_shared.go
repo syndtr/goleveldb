@@ -154,11 +154,9 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
 		}
 	} else if os.IsNotExist(err) && !readOnly {
-		fmt.Println("file does not exist. creating it...")
 		if err := MkdirAll(path, 0755); err != nil {
 			return nil, err
 		}
-		fmt.Println("done creating file")
 	} else {
 		return nil, err
 	}
@@ -199,7 +197,6 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 
-	fmt.Println("Reached end of storage.OpenFile")
 	return fs, nil
 }
 
@@ -299,7 +296,6 @@ func (fs *fileStorage) log(str string) {
 }
 
 func (fs *fileStorage) setMeta(fd FileDesc) error {
-	fmt.Println("inside fs.setMeta")
 	content := fsGenName(fd) + "\n"
 	// Check and backup old CURRENT file.
 	currentPath := filepath.Join(fs.path, "CURRENT")
@@ -331,9 +327,7 @@ func (fs *fileStorage) setMeta(fd FileDesc) error {
 		return err
 	}
 	// Sync root directory.
-	fmt.Println("calling syncDir")
 	if err := syncDir(fs.path); err != nil {
-		fmt.Println("syncDir returned error:", err)
 		fs.log(fmt.Sprintf("syncDir: %v", err))
 		return err
 	}
@@ -341,7 +335,6 @@ func (fs *fileStorage) setMeta(fd FileDesc) error {
 }
 
 func (fs *fileStorage) SetMeta(fd FileDesc) error {
-	fmt.Println("inside fileStorage.SetMeta")
 	if !FileDescOk(fd) {
 		return ErrInvalidFile
 	}
@@ -358,18 +351,15 @@ func (fs *fileStorage) SetMeta(fd FileDesc) error {
 }
 
 func (fs *fileStorage) GetMeta() (FileDesc, error) {
-	fmt.Println("inside GetMeta")
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 	if fs.open < 0 {
 		return FileDesc{}, ErrClosed
 	}
-	fmt.Println("calling Readdirnames")
 	names, err := Readdirnames(fs.path, 0)
 	if err != nil {
 		return FileDesc{}, err
 	}
-	fmt.Println("Readdirnames returned: ", names)
 	// Try this in order:
 	// - CURRENT.[0-9]+ ('pending rename' file, descending order)
 	// - CURRENT
@@ -381,9 +371,7 @@ func (fs *fileStorage) GetMeta() (FileDesc, error) {
 		fd   FileDesc
 	}
 	tryCurrent := func(name string) (*currentFile, error) {
-		fmt.Println("calling ReadFile")
 		b, err := ReadFile(filepath.Join(fs.path, name))
-		fmt.Println("ReadFile returned. err =", err)
 		if err != nil {
 			if os.IsNotExist(err) {
 				err = os.ErrNotExist
