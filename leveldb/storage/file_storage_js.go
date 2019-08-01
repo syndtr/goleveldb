@@ -9,8 +9,10 @@
 package storage
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -74,8 +76,30 @@ func (f jsFile) Stat() (os.FileInfo, error) {
 
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
-func (f jsFile) Read(b []byte) (n int, err error) {
-	return 0, errors.New("jsFile.Read not yet implemented")
+func (f *jsFile) Read(b []byte) (n int, err error) {
+	fmt.Println("inside jsFile.Read")
+	defer func() {
+		if e := recover(); e != nil {
+			fmt.Printf("jsFile.Read recovered from panic: (%T) %s\n", e, e)
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
+		}
+	}()
+	buffer := js.Global().Get("Uint8Array").New(len(b))
+	rawBytesRead := js.Global().Get("browserFS").Call("readSync", f.fd, buffer, 0, len(b), f.currOffset)
+	bytesRead := rawBytesRead.Int()
+	fmt.Println("Reading from	", f.name)
+	if bytesRead == 0 {
+		fmt.Println("EOF")
+		return 0, io.EOF
+	}
+	for i := 0; i < bytesRead; i++ {
+		b[i] = byte(buffer.Index(i).Int())
+	}
+	fmt.Println(hex.Dump(b[0:512]))
+	f.currOffset += int64(bytesRead)
+	return bytesRead, nil
 }
 
 // ReadAt reads len(b) bytes from the File starting at byte offset off. It
@@ -83,15 +107,55 @@ func (f jsFile) Read(b []byte) (n int, err error) {
 // returns a non-nil error when n < len(b). At end of file, that error is
 // io.EOF.
 func (f jsFile) ReadAt(b []byte, off int64) (n int, err error) {
-	return 0, errors.New("jsFile.ReadAt not yet implemented")
+	fmt.Println("inside jsFile.ReadAt. off =", off)
+	fmt.Println("Reading from	", f.name)
+	defer func() {
+		if e := recover(); e != nil {
+			fmt.Printf("jsFile.ReadAt recovered from panic: (%T) %s\n", e, e)
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
+		}
+	}()
+	buffer := js.Global().Get("Uint8Array").New(len(b))
+	rawBytesRead := js.Global().Get("browserFS").Call("readSync", f.fd, buffer, 0, len(b), off)
+	bytesRead := rawBytesRead.Int()
+	fmt.Println("bytesRead:", bytesRead)
+	for i := 0; i < bytesRead; i++ {
+		b[i] = byte(buffer.Index(i).Int())
+	}
+	fmt.Println(hex.Dump(b))
+	if bytesRead < len(b) {
+		fmt.Println("reached EOF")
+		return bytesRead, io.EOF
+	}
+	return bytesRead, nil
 }
 
 // Write writes len(b) bytes to the File. It returns the number of bytes
 // written and an error, if any. Write returns a non-nil error when n !=
 // len(b).
-func (f jsFile) Write(b []byte) (n int, err error) {
-	rawResult := js.Global().Get("browserFS").Call("writeSync", f.fd, string(b), f.currOffset)
-	return rawResult.Int(), nil
+func (f *jsFile) Write(b []byte) (n int, err error) {
+	fmt.Println("inside jsFile.Write")
+	defer func() {
+		if e := recover(); e != nil {
+			fmt.Printf("jsFile.Write recovered from panic: (%T) %s\n", e, e)
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
+		}
+	}()
+	fmt.Println("Writing to ", f.name)
+	fmt.Println("len(b): ", len(b))
+	fmt.Println(hex.Dump(b))
+	// The naive approach of using `string(b)` for the data to write doesn't work,
+	// semmlingly regardless of the encoding used. Encoding to hex seems like the
+	// most reliable way to do it.
+	rawBytesWritten := js.Global().Get("browserFS").Call("writeSync", f.fd, hex.EncodeToString(b), f.currOffset, "hex")
+	bytesWritten := rawBytesWritten.Int()
+	fmt.Println("bytesWritten: ", bytesWritten)
+	f.currOffset += int64(bytesWritten)
+	return bytesWritten, nil
 }
 
 // Seek sets the offset for the next Read or Write on file to offset,
@@ -100,6 +164,7 @@ func (f jsFile) Write(b []byte) (n int, err error) {
 // end. It returns the new offset and an error, if any. The behavior of Seek
 // on a file opened with O_APPEND is not specified.
 func (f *jsFile) Seek(offset int64, whence int) (ret int64, err error) {
+	fmt.Println("jsFile.Seek ", f.name, offset, whence)
 	switch whence {
 	case os.SEEK_SET:
 		f.currOffset = offset
@@ -182,15 +247,15 @@ func browserFSOpenFile(name string, flag int, perm os.FileMode) (file OSFile, er
 }
 
 func toJSFlag(flag int) (string, error) {
-	// fmt.Println("O_RDONLY: ", flag&os.O_RDONLY != 0)
-	// fmt.Println("O_WRONLY: ", flag&os.O_WRONLY != 0)
-	// fmt.Println("O_RDWR: ", flag&os.O_RDWR != 0)
-	// fmt.Println("O_APPEND: ", flag&os.O_APPEND != 0)
-	// fmt.Println("O_CREATE: ", flag&os.O_CREATE != 0)
-	// fmt.Println("O_EXCL: ", flag&os.O_EXCL != 0)
-	// fmt.Println("O_SYNC: ", flag&os.O_SYNC != 0)
-	// fmt.Println("O_TRUNC: ", flag&os.O_TRUNC != 0)
-	// fmt.Println()
+	fmt.Println("O_RDONLY: ", flag&os.O_RDONLY != 0)
+	fmt.Println("O_WRONLY: ", flag&os.O_WRONLY != 0)
+	fmt.Println("O_RDWR: ", flag&os.O_RDWR != 0)
+	fmt.Println("O_APPEND: ", flag&os.O_APPEND != 0)
+	fmt.Println("O_CREATE: ", flag&os.O_CREATE != 0)
+	fmt.Println("O_EXCL: ", flag&os.O_EXCL != 0)
+	fmt.Println("O_SYNC: ", flag&os.O_SYNC != 0)
+	fmt.Println("O_TRUNC: ", flag&os.O_TRUNC != 0)
+	fmt.Println()
 
 	// // Exactly one of O_RDONLY, O_WRONLY, or O_RDWR must be specified.
 	// O_RDONLY int = syscall.O_RDONLY // open the file read-only.
@@ -214,6 +279,13 @@ func toJSFlag(flag int) (string, error) {
 	} else if flag&os.O_RDWR != 0 {
 		jsFlag = "w+"
 	}
+
+	// if flag&os.O_CREATE != 0 {
+
+	// }
+	// if flag&os.O_TRUNC != 0 {
+
+	// }
 
 	// TODO(albrow) support other types of flags.
 	return jsFlag, nil
