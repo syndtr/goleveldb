@@ -2,7 +2,7 @@
 <html>
 <head>
 	<meta charset="utf-8">
-	<title>Go/WebAssembly QUnit Bindings - Tests</title>
+	<title>Browser/WebAssembly Tests for LevelDB</title>
 	<link rel="stylesheet" href="resources/qunit-2.9.2.css">
 	<script src="resources/qunit-2.9.2.js"></script>
 	<script src="resources/browserfs-1.4.3.js"></script>
@@ -14,6 +14,7 @@
 				throw e;
 			}
 		});
+		// In browsers, goleveldb expects the global variable "browserFS" to be set.
 		window.browserFS = BrowserFS.BFSRequire('fs');
 	</script>
 	<script src="resources/wasm_exec.js"></script>
