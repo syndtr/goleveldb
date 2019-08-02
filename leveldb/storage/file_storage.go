@@ -18,12 +18,12 @@ func osStat(name string) (os.FileInfo, error) {
 }
 
 // osOpenFile calls os.OpenFile.
-func osOpenFile(name string, flag int, perm os.FileMode) (OSFile, error) {
+func osOpenFile(name string, flag int, perm os.FileMode) (osFile, error) {
 	return os.OpenFile(name, flag, perm)
 }
 
 // osOpen calls os.Open.
-func osOpen(name string) (OSFile, error) {
+func osOpen(name string) (osFile, error) {
 	return os.Open(name)
 }
 
@@ -33,8 +33,8 @@ func osRemove(name string) error {
 }
 
 // Readdirnames opens the directory and calls Readdirnames on it.
-func Readdirnames(dir string, n int) (names []string, err error) {
-	dir, err := os.Open(dir)
+func Readdirnames(dirname string, n int) (names []string, err error) {
+	dir, err := os.Open(dirname)
 	if err != nil {
 		return nil, err
 	}
