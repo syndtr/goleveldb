@@ -21,26 +21,32 @@ import (
 	"time"
 )
 
-var _ os.FileInfo = jsFileInfo{}
+var _ os.FileInfo = browserFSFileInfo{}
 
-type jsFileInfo struct {
+// browserFSFileInfo is an implementation of os.FileInfo for JavaScript/Wasm.
+// It's backed by BrowserFS.
+type browserFSFileInfo struct {
 	js.Value
-	name string
+	path string
 }
 
-func (fi jsFileInfo) Name() string {
-	return fi.name
+// Name returns the base name of the file.
+func (fi browserFSFileInfo) Name() string {
+	return filepath.Base(fi.path)
 }
 
-func (fi jsFileInfo) Size() int64 {
+// Size returns the length of the file in bytes.
+func (fi browserFSFileInfo) Size() int64 {
 	return int64(fi.Value.Get("size").Int())
 }
 
-func (fi jsFileInfo) Mode() os.FileMode {
+// Mode returns the file mode bits.
+func (fi browserFSFileInfo) Mode() os.FileMode {
 	return os.FileMode(fi.Value.Get("size").Int())
 }
 
-func (fi jsFileInfo) ModTime() time.Time {
+// ModTime returns the modification time.
+func (fi browserFSFileInfo) ModTime() time.Time {
 	modifiedTimeString := fi.Value.Get("mtime").String()
 	modifiedTime, err := time.Parse(time.RFC3339, modifiedTimeString)
 	if err != nil {
@@ -49,19 +55,23 @@ func (fi jsFileInfo) ModTime() time.Time {
 	return modifiedTime
 }
 
-func (fi jsFileInfo) IsDir() bool {
+// IsDir is an abbreviation for Mode().IsDir().
+func (fi browserFSFileInfo) IsDir() bool {
 	return fi.Value.Call("isDirectory").Bool()
 }
 
-func (fi jsFileInfo) Sys() interface{} {
+// underlying data source (always returns nil for wasm/js).
+func (fi browserFSFileInfo) Sys() interface{} {
 	return nil
 }
 
-var _ OSFile = &jsFile{}
+var _ osFile = &browserFSFile{}
 
-type jsFile struct {
+// browserFSFile is an implementation of osFile for JavaScript/Wasm. It's backed
+// by BrowserFS.
+type browserFSFile struct {
 	// name is the name of the file (including path)
-	name string
+	path string
 	// fd is a file descriptor used as a reference to the file.
 	fd int
 	// currOffset is the current value of the offset used for reading or writing.
@@ -70,28 +80,16 @@ type jsFile struct {
 
 // Stat returns the FileInfo structure describing file. If there is an error,
 // it will be of type *PathError.
-func (f jsFile) Stat() (os.FileInfo, error) {
-	return OSStat(f.name)
+func (f browserFSFile) Stat() (os.FileInfo, error) {
+	return browserFSStat(f.path)
 }
 
 // Read reads up to len(b) bytes from the File. It returns the number of bytes
 // read and any error encountered. At end of file, Read returns 0, io.EOF.
-func (f *jsFile) Read(b []byte) (n int, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			if jsErr, ok := e.(js.Error); ok {
-				err = convertJSError(jsErr)
-			}
-		}
-	}()
-	buffer := js.Global().Get("Uint8Array").New(len(b))
-	rawBytesRead := js.Global().Get("browserFS").Call("readSync", f.fd, buffer, 0, len(b), f.currOffset)
-	bytesRead := rawBytesRead.Int()
+func (f *browserFSFile) Read(b []byte) (n int, err error) {
+	bytesRead, err := f.read(b, f.currOffset)
 	if bytesRead == 0 {
 		return 0, io.EOF
-	}
-	for i := 0; i < bytesRead; i++ {
-		b[i] = byte(buffer.Index(i).Int())
 	}
 	f.currOffset += int64(bytesRead)
 	return bytesRead, nil
@@ -101,7 +99,15 @@ func (f *jsFile) Read(b []byte) (n int, err error) {
 // returns the number of bytes read and the error, if any. ReadAt always
 // returns a non-nil error when n < len(b). At end of file, that error is
 // io.EOF.
-func (f jsFile) ReadAt(b []byte, off int64) (n int, err error) {
+func (f browserFSFile) ReadAt(b []byte, off int64) (n int, err error) {
+	bytesRead, err := f.read(b, off)
+	if bytesRead < len(b) {
+		return bytesRead, io.EOF
+	}
+	return bytesRead, nil
+}
+
+func (f browserFSFile) read(b []byte, off int64) (n int, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if jsErr, ok := e.(js.Error); ok {
@@ -109,14 +115,12 @@ func (f jsFile) ReadAt(b []byte, off int64) (n int, err error) {
 			}
 		}
 	}()
+	// JavaScript API expects a Uint8Array which we then convert into []byte.
 	buffer := js.Global().Get("Uint8Array").New(len(b))
 	rawBytesRead := js.Global().Get("browserFS").Call("readSync", f.fd, buffer, 0, len(b), off)
 	bytesRead := rawBytesRead.Int()
 	for i := 0; i < bytesRead; i++ {
 		b[i] = byte(buffer.Index(i).Int())
-	}
-	if bytesRead < len(b) {
-		return bytesRead, io.EOF
 	}
 	return bytesRead, nil
 }
@@ -124,7 +128,7 @@ func (f jsFile) ReadAt(b []byte, off int64) (n int, err error) {
 // Write writes len(b) bytes to the File. It returns the number of bytes
 // written and an error, if any. Write returns a non-nil error when n !=
 // len(b).
-func (f *jsFile) Write(b []byte) (n int, err error) {
+func (f *browserFSFile) Write(b []byte) (n int, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if jsErr, ok := e.(js.Error); ok {
@@ -133,11 +137,14 @@ func (f *jsFile) Write(b []byte) (n int, err error) {
 		}
 	}()
 	// The naive approach of using `string(b)` for the data to write doesn't work,
-	// semmlingly regardless of the encoding used. Encoding to hex seems like the
-	// most reliable way to do it.
+	// regardless of the encoding used. Encoding to hex seems like the most
+	// reliable way to do it.
 	rawBytesWritten := js.Global().Get("browserFS").Call("writeSync", f.fd, hex.EncodeToString(b), f.currOffset, "hex")
 	bytesWritten := rawBytesWritten.Int()
 	f.currOffset += int64(bytesWritten)
+	if bytesWritten != len(b) {
+		return bytesWritten, io.ErrShortWrite
+	}
 	return bytesWritten, nil
 }
 
@@ -146,7 +153,7 @@ func (f *jsFile) Write(b []byte) (n int, err error) {
 // file, 1 means relative to the current offset, and 2 means relative to the
 // end. It returns the new offset and an error, if any. The behavior of Seek
 // on a file opened with O_APPEND is not specified.
-func (f *jsFile) Seek(offset int64, whence int) (ret int64, err error) {
+func (f *browserFSFile) Seek(offset int64, whence int) (ret int64, err error) {
 	switch whence {
 	case os.SEEK_SET:
 		f.currOffset = offset
@@ -164,27 +171,7 @@ func (f *jsFile) Seek(offset int64, whence int) (ret int64, err error) {
 // Sync commits the current contents of the file to stable storage. Typically,
 // this means flushing the file system's in-memory copy of recently written
 // data to disk.
-func (f jsFile) Sync() error {
-	js.Global().Get("browserFS").Call("fsyncSync", f.fd)
-	return nil
-}
-
-// Close closes the File, rendering it unusable for I/O. On files that support
-// SetDeadline, any pending I/O operations will be canceled and return
-// immediately with an error.
-func (f jsFile) Close() error {
-	js.Global().Get("browserFS").Call("closeSync", f.fd)
-	return nil
-}
-
-func OSStat(name string) (os.FileInfo, error) {
-	if js.Global().Get("fs") != js.Undefined() && js.Global().Get("fs").Get("stat") != js.Undefined() {
-		return os.Stat(name)
-	}
-	return browserFSStat(name)
-}
-
-func browserFSStat(name string) (fileInfo os.FileInfo, err error) {
+func (f browserFSFile) Sync() (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if jsErr, ok := e.(js.Error); ok {
@@ -192,22 +179,59 @@ func browserFSStat(name string) (fileInfo os.FileInfo, err error) {
 			}
 		}
 	}()
-	rawFileInfo := js.Global().Get("browserFS").Call("statSync", name)
-	return jsFileInfo{Value: rawFileInfo, name: name}, nil
+	js.Global().Get("browserFS").Call("fsyncSync", f.fd)
+	return nil
 }
 
-func OSOpenFile(name string, flag int, perm os.FileMode) (OSFile, error) {
-	file, err := os.OpenFile(name, flag, perm)
-	if err != nil {
-		if isNotImplementedError(err) {
-			return browserFSOpenFile(name, flag, perm)
+// Close closes the File, rendering it unusable for I/O. On files that support
+// SetDeadline, any pending I/O operations will be canceled and return
+// immediately with an error.
+func (f browserFSFile) Close() (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
 		}
-		return nil, err
-	}
-	return file, nil
+	}()
+	js.Global().Get("browserFS").Call("closeSync", f.fd)
+	return nil
 }
 
-func browserFSOpenFile(name string, flag int, perm os.FileMode) (file OSFile, err error) {
+func osStat(path string) (os.FileInfo, error) {
+	if isBrowserFSSupported() {
+		return browserFSStat(path)
+	}
+	return os.Stat(path)
+}
+
+func browserFSStat(path string) (fileInfo os.FileInfo, err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
+		}
+	}()
+	rawFileInfo := js.Global().Get("browserFS").Call("statSync", path)
+	return browserFSFileInfo{Value: rawFileInfo, path: path}, nil
+}
+
+func osOpenFile(name string, flag int, perm os.FileMode) (osFile, error) {
+	if isBrowserFSSupported() {
+		return browserFSOpenFile(name, flag, perm)
+	}
+	return os.OpenFile(name, flag, perm)
+}
+
+func osOpen(path string) (osFile, error) {
+	if isBrowserFSSupported() {
+		return browserFSOpenFile(path, os.O_RDONLY, os.ModePerm)
+	}
+	return os.Open(path)
+}
+
+func browserFSOpenFile(path string, flag int, perm os.FileMode) (file osFile, err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if jsErr, ok := e.(js.Error); ok {
@@ -219,22 +243,25 @@ func browserFSOpenFile(name string, flag int, perm os.FileMode) (file OSFile, er
 	if err != nil {
 		return nil, err
 	}
-	rawFD := js.Global().Get("browserFS").Call("openSync", name, jsFlag, int(perm))
-	return &jsFile{name: name, fd: rawFD.Int()}, nil
+	rawFD := js.Global().Get("browserFS").Call("openSync", path, jsFlag, int(perm))
+	return &browserFSFile{path: path, fd: rawFD.Int()}, nil
 }
 
 func toJSFlag(flag int) (string, error) {
-
-	// // Exactly one of O_RDONLY, O_WRONLY, or O_RDWR must be specified.
+	// Exactly one of O_RDONLY, O_WRONLY, or O_RDWR must be specified.
+	//
 	// O_RDONLY int = syscall.O_RDONLY // open the file read-only.
 	// O_WRONLY int = syscall.O_WRONLY // open the file write-only.
 	// O_RDWR   int = syscall.O_RDWR   // open the file read-write.
-	// // The remaining values may be or'ed in to control behavior.
+	//
+	// The remaining values may be or'ed in to control behavior.
+	//
 	// O_APPEND int = syscall.O_APPEND // append data to the file when writing.
 	// O_CREATE int = syscall.O_CREAT  // create a new file if none exists.
 	// O_EXCL   int = syscall.O_EXCL   // used with O_CREATE, file must not exist.
 	// O_SYNC   int = syscall.O_SYNC   // open for synchronous I/O.
 	// O_TRUNC  int = syscall.O_TRUNC  // truncate regular writable file when opened.
+	//
 
 	jsFlag := "r"
 	if flag&os.O_APPEND != 0 {
@@ -252,23 +279,11 @@ func toJSFlag(flag int) (string, error) {
 	return jsFlag, nil
 }
 
-func OSOpen(name string) (OSFile, error) {
-	file, err := os.Open(name)
-	if err != nil {
-		if isNotImplementedError(err) {
-			return browserFSOpenFile(name, os.O_RDONLY, os.ModePerm)
-		}
-		return nil, err
-	}
-	return file, nil
-}
-
-func OSRemove(name string) error {
-	if js.Global().Get("fs") != js.Undefined() && js.Global().Get("fs").Get("unlink") != js.Undefined() {
-		return os.Remove(name)
-	} else {
+func osRemove(name string) error {
+	if isBrowserFSSupported() {
 		return browserFSRemove(name)
 	}
+	return os.Remove(name)
 }
 
 func browserFSRemove(name string) (err error) {
@@ -284,11 +299,12 @@ func browserFSRemove(name string) (err error) {
 }
 
 func Readdirnames(path string, n int) ([]string, error) {
+	if isBrowserFSSupported() {
+		return browserFSReaddirnames(path, n)
+	}
+	// In Go, this requires two steps. Open the dir, then call Readdirnames.
 	dir, err := os.Open(path)
 	if err != nil {
-		if isNotImplementedError(err) {
-			return browserFSReaddirnames(path, n)
-		}
 		return nil, err
 	}
 	return dir.Readdirnames(n)
@@ -309,10 +325,10 @@ func browserFSReaddirnames(path string, n int) ([]string, error) {
 }
 
 func MkdirAll(path string, perm os.FileMode) error {
-	if js.Global().Get("fs") != js.Undefined() && js.Global().Get("fs").Get("stat") != js.Undefined() {
-		return os.MkdirAll(path, perm)
+	if isBrowserFSSupported() {
+		return browserFSMkdirAll(path, perm)
 	}
-	return browserFSMkdirAll(path, perm)
+	return os.MkdirAll(path, perm)
 }
 
 func browserFSMkdirAll(path string, perm os.FileMode) (err error) {
@@ -323,24 +339,100 @@ func browserFSMkdirAll(path string, perm os.FileMode) (err error) {
 			}
 		}
 	}()
-	options := map[string]interface{}{
-		"mode":      int(perm),
-		"recursive": true,
+	// TODO(albrow): Add support for recursive mkdir. BrowserFS doesn't support it
+	// out of the box.
+	if len(filepath.SplitList(path)) > 1 {
+		return errors.New("recursive mkdir not supported in js/wasm")
 	}
-	js.Global().Get("browserFS").Call("mkdirSync", path, options)
+	js.Global().Get("browserFS").Call("mkdirSync", path, int(perm))
 	return nil
 }
 
 func rename(oldpath, newpath string) error {
-	if js.Global().Get("fs") != js.Undefined() && js.Global().Get("fs").Get("lstat") != js.Undefined() {
-		return os.Rename(oldpath, newpath)
+	if isBrowserFSSupported() {
+		return browserFSRename(oldpath, newpath)
 	}
-	return browserFSRename(oldpath, newpath)
+	return os.Rename(oldpath, newpath)
 }
 
 func browserFSRename(oldpath, newpath string) error {
 	js.Global().Get("browserFS").Call("renameSync", oldpath, newpath)
 	return nil
+}
+
+func syncDir(name string) error {
+	if isBrowserFSSupported() {
+		return browserFSSyncDir(name)
+	}
+
+	// In Go, this is two separate steps. Open the dir, then call Sync.
+	f, err := osOpen(name)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil && !isErrInvalid(err) {
+		return err
+	}
+	return nil
+}
+
+func browserFSSyncDir(dirname string) error {
+	// browserFS doesn't support syncDir directly so we need to implement it
+	// manually by walking through the directory.
+	names, err := browserFSReaddirnames(dirname, 0)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		path := filepath.Join(dirname, name)
+		info, err := osStat(path)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if err := browserFSSyncDir(path); err != nil {
+				return err
+			}
+		} else {
+			f, err := osOpen(path)
+			defer f.Close()
+			if err != nil {
+				return err
+			}
+			if err := f.Sync(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// isBrowserFSSupported returns true if BrowserFS is supported. It does this by
+// checking for the global "browserFS" object.
+func isBrowserFSSupported() bool {
+	return js.Global().Get("browserFS") != js.Null() && js.Global().Get("browserFS") != js.Undefined()
+}
+
+// convertJSError converts an error returned by the BrowserFS API into a Go
+// error. This is important because Go expects certain types of errors to be
+// returned (e.g. ENOENT when a file doesn't exist) and programs often change
+// their behavior depending on the type of error.
+func convertJSError(err js.Error) error {
+	if err.Value == js.Undefined() || err.Value == js.Null() {
+		return nil
+	}
+	// TODO(albrow): Convert to os.PathError when possible/appropriate.
+	if code := err.Get("code"); code != js.Undefined() && code != js.Null() {
+		switch code.String() {
+		case "ENOENT":
+			return os.ErrNotExist
+		case "EISDIR":
+			return syscall.EISDIR
+			// TODO(albrow): Fill in more codes here.
+		}
+	}
+	return err
 }
 
 // Note: JavaScript doesn't have an flock syscall so we have to fake it. This
@@ -356,13 +448,13 @@ var readLocks = map[string]uint{}
 // writeLocks keeps track of files which are locked for writing.
 var writeLocks = map[string]struct{}{}
 
-type jsFileLock struct {
+type browserFSFileLock struct {
 	path     string
 	readOnly bool
-	file     OSFile
+	file     osFile
 }
 
-func (fl *jsFileLock) release() error {
+func (fl *browserFSFileLock) release() error {
 	if fl.readOnly {
 		locksMu.Lock()
 		defer locksMu.Unlock()
@@ -389,9 +481,9 @@ func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	} else {
 		flag = os.O_RDWR
 	}
-	var file OSFile
-	if file, err = OSOpenFile(path, flag, 0); err != nil && os.IsNotExist(err) {
-		file, err = OSOpenFile(path, flag|os.O_CREATE, 0644)
+	var file osFile
+	if file, err = osOpenFile(path, flag, 0); err != nil && os.IsNotExist(err) {
+		file, err = osOpenFile(path, flag|os.O_CREATE, 0644)
 	}
 	if err != nil {
 		return
@@ -399,7 +491,7 @@ func newFileLock(path string, readOnly bool) (fl fileLock, err error) {
 	if err := setFileLock(path, readOnly); err != nil {
 		return nil, err
 	}
-	return &jsFileLock{file: file, path: path}, nil
+	return &browserFSFileLock{file: file, path: path}, nil
 }
 
 func setFileLock(path string, readOnly bool) error {
@@ -445,105 +537,4 @@ func isErrInvalid(err error) bool {
 		return true
 	}
 	return false
-}
-
-func syncDir(name string) error {
-	// As per fsync manpage, Linux seems to expect fsync on directory, however
-	// some system don't support this, so we will ignore syscall.EINVAL.
-	//
-	// From fsync(2):
-	//   Calling fsync() does not necessarily ensure that the entry in the
-	//   directory containing the file has also reached disk. For that an
-	//   explicit fsync() on a file descriptor for the directory is also needed.
-	f, err := OSOpen(name)
-	if err != nil {
-		if isIsDirectoryError(err) {
-			// browserFS doesn't support opening/syncing directories directly.
-			return browserFSSyncDir(name)
-		}
-		return err
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil && !isErrInvalid(err) {
-		return err
-	}
-	return nil
-}
-
-func browserFSSyncDir(dirname string) error {
-	names, err := browserFSReaddirnames(dirname, 0)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		path := filepath.Join(dirname, name)
-		info, err := OSStat(path)
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if err := browserFSSyncDir(path); err != nil {
-				return err
-			}
-		} else {
-			f, err := OSOpen(path)
-			defer f.Close()
-			if err != nil {
-				return err
-			}
-			if err := f.Sync(); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func isNotImplementedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	pathError, ok := err.(*os.PathError)
-	if !ok {
-		return false
-	}
-	errno, ok := pathError.Err.(syscall.Errno)
-	if !ok {
-		return false
-	}
-	return errno.Error() == "not implemented on js"
-}
-
-func isIsDirectoryError(err error) bool {
-	if err == nil {
-		return false
-	}
-	switch err := err.(type) {
-	case *os.PathError:
-		errno, ok := err.Err.(syscall.Errno)
-		if !ok {
-			return false
-		}
-		return errno == syscall.EISDIR
-	case syscall.Errno:
-		return err == syscall.EISDIR
-	}
-	return false
-}
-
-func convertJSError(err js.Error) error {
-	if err.Value == js.Undefined() || err.Value == js.Null() {
-		return nil
-	}
-	// TODO(albrow): Convert to os.PathError when possible/appropriate.
-	if code := err.Get("code"); code != js.Undefined() && code != js.Null() {
-		switch code.String() {
-		case "ENOENT":
-			return os.ErrNotExist
-		case "EISDIR":
-			return syscall.EISDIR
-			// TODO(albrow): Fill in more codes here.
-		}
-	}
-	return err
 }

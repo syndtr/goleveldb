@@ -12,30 +12,36 @@ import (
 	"os"
 )
 
-func OSStat(name string) (os.FileInfo, error) {
+// osStat calls os.Stat.
+func osStat(name string) (os.FileInfo, error) {
 	return os.Stat(name)
 }
 
-func OSOpenFile(name string, flag int, perm os.FileMode) (OSFile, error) {
+// osOpenFile calls os.OpenFile.
+func osOpenFile(name string, flag int, perm os.FileMode) (OSFile, error) {
 	return os.OpenFile(name, flag, perm)
 }
 
-func OSOpen(name string) (OSFile, error) {
+// osOpen calls os.Open.
+func osOpen(name string) (OSFile, error) {
 	return os.Open(name)
 }
 
-func OSRemove(name string) error {
+// osRemove calls os.Remove.
+func osRemove(name string) error {
 	return os.Remove(name)
 }
 
-func Readdirnames(path string, n int) (names []string, err error) {
-	dir, err := os.Open(path)
+// Readdirnames opens the directory and calls Readdirnames on it.
+func Readdirnames(dir string, n int) (names []string, err error) {
+	dir, err := os.Open(dir)
 	if err != nil {
 		return nil, err
 	}
 	return dir.Readdirnames(n)
 }
 
-func MkdirAll(path string, perm os.FileMode) error {
+// osMkdirAll calls os.MkdirAll.
+func osMkdirAll(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }

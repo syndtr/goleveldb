@@ -45,7 +45,10 @@ func (lock *fileStorageLock) Unlock() {
 	}
 }
 
-type OSFile interface {
+// osFile is an interface for interacting with a file. In Go, the underlying
+// type of osFile is always simply *os.File. In JavaScript/Wasm, the underlying
+// type is a wrapper type which mimics the functionality of os.File.
+type osFile interface {
 	// Stat returns the FileInfo structure describing file. If there is an error,
 	// it will be of type *PathError.
 	Stat() (os.FileInfo, error)
@@ -78,7 +81,7 @@ type OSFile interface {
 }
 
 func ReadFile(filename string) ([]byte, error) {
-	f, err := OSOpen(filename)
+	f, err := osOpen(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +111,7 @@ func (p int64Slice) Less(i, j int) bool { return p[i] < p[j] }
 func (p int64Slice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
 
 func writeFileSynced(filename string, data []byte, perm os.FileMode) error {
-	f, err := OSOpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, err := osOpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
@@ -135,7 +138,7 @@ type fileStorage struct {
 	mu      sync.Mutex
 	flock   fileLock
 	slock   *fileStorageLock
-	logw    OSFile
+	logw    osFile
 	logSize int64
 	buf     []byte
 	// Opened file counter; if open < 0 means closed.
@@ -149,7 +152,7 @@ type fileStorage struct {
 //
 // The storage must be closed after use, by calling Close method.
 func OpenFile(path string, readOnly bool) (Storage, error) {
-	if fi, err := OSStat(path); err == nil {
+	if fi, err := osStat(path); err == nil {
 		if !fi.IsDir() {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
 		}
@@ -173,11 +176,11 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 	}()
 
 	var (
-		logw    OSFile
+		logw    osFile
 		logSize int64
 	)
 	if !readOnly {
-		logw, err = OSOpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+		logw, err = osOpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +254,7 @@ func (fs *fileStorage) doLog(t time.Time, str string) {
 	}
 	if fs.logw == nil {
 		var err error
-		fs.logw, err = OSOpenFile(filepath.Join(fs.path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
+		fs.logw, err = osOpenFile(filepath.Join(fs.path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			return
 		}
@@ -299,7 +302,7 @@ func (fs *fileStorage) setMeta(fd FileDesc) error {
 	content := fsGenName(fd) + "\n"
 	// Check and backup old CURRENT file.
 	currentPath := filepath.Join(fs.path, "CURRENT")
-	if _, err := OSStat(currentPath); err == nil {
+	if _, err := osStat(currentPath); err == nil {
 		b, err := ReadFile(currentPath)
 		if err != nil {
 			fs.log(fmt.Sprintf("backup CURRENT: %v", err))
@@ -386,7 +389,7 @@ func (fs *fileStorage) GetMeta() (FileDesc, error) {
 			}
 			return nil, err
 		}
-		if _, err := OSStat(filepath.Join(fs.path, fsGenName(fd))); err != nil {
+		if _, err := osStat(filepath.Join(fs.path, fsGenName(fd))); err != nil {
 			if os.IsNotExist(err) {
 				fs.log(fmt.Sprintf("%s: missing target file: %s", name, fd))
 				err = os.ErrNotExist
@@ -472,7 +475,7 @@ func (fs *fileStorage) GetMeta() (FileDesc, error) {
 			if err := fs.setMeta(curCur.fd); err == nil {
 				// Remove 'pending rename' files.
 				for _, name := range pendNames {
-					if err := OSRemove(filepath.Join(fs.path, name)); err != nil {
+					if err := osRemove(filepath.Join(fs.path, name)); err != nil {
 						fs.log(fmt.Sprintf("remove %s: %v", name, err))
 					}
 				}
@@ -515,10 +518,10 @@ func (fs *fileStorage) Open(fd FileDesc) (Reader, error) {
 	if fs.open < 0 {
 		return nil, ErrClosed
 	}
-	of, err := OSOpenFile(filepath.Join(fs.path, fsGenName(fd)), os.O_RDONLY, 0)
+	of, err := osOpenFile(filepath.Join(fs.path, fsGenName(fd)), os.O_RDONLY, 0)
 	if err != nil {
 		if fsHasOldName(fd) && os.IsNotExist(err) {
-			of, err = OSOpenFile(filepath.Join(fs.path, fsGenOldName(fd)), os.O_RDONLY, 0)
+			of, err = osOpenFile(filepath.Join(fs.path, fsGenOldName(fd)), os.O_RDONLY, 0)
 			if err == nil {
 				goto ok
 			}
@@ -543,7 +546,7 @@ func (fs *fileStorage) Create(fd FileDesc) (Writer, error) {
 	if fs.open < 0 {
 		return nil, ErrClosed
 	}
-	of, err := OSOpenFile(filepath.Join(fs.path, fsGenName(fd)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	of, err := osOpenFile(filepath.Join(fs.path, fsGenName(fd)), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -564,10 +567,10 @@ func (fs *fileStorage) Remove(fd FileDesc) error {
 	if fs.open < 0 {
 		return ErrClosed
 	}
-	err := OSRemove(filepath.Join(fs.path, fsGenName(fd)))
+	err := osRemove(filepath.Join(fs.path, fsGenName(fd)))
 	if err != nil {
 		if fsHasOldName(fd) && os.IsNotExist(err) {
-			if e1 := OSRemove(filepath.Join(fs.path, fsGenOldName(fd))); !os.IsNotExist(e1) {
+			if e1 := osRemove(filepath.Join(fs.path, fsGenOldName(fd))); !os.IsNotExist(e1) {
 				fs.log(fmt.Sprintf("remove %s: %v (old name)", fd, err))
 				err = e1
 			}
@@ -617,7 +620,7 @@ func (fs *fileStorage) Close() error {
 }
 
 type fileWrap struct {
-	File   OSFile
+	File   osFile
 	fs     *fileStorage
 	fd     FileDesc
 	closed bool
