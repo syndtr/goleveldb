@@ -324,7 +324,7 @@ func browserFSReaddirnames(path string, n int) ([]string, error) {
 	return names, nil
 }
 
-func MkdirAll(path string, perm os.FileMode) error {
+func osMkdirAll(path string, perm os.FileMode) error {
 	if isBrowserFSSupported() {
 		return browserFSMkdirAll(path, perm)
 	}
