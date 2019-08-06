@@ -20,7 +20,7 @@ func TestInBrowser(t *testing.T) {
 	}
 
 	cmd = exec.Command("go", "build", "-o", "main.wasm", ".")
-	cmd.Env = append(os.Environ(), []string{"GOOS=js", "GOARCH=wasm"}...)
+	cmd.Env = append(os.Environ(), []string{"GOOS=js", "GOARCH=wasm", "GO111MODULE=on"}...)
 	cmd.Dir = "./browser-tests"
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Log(string(output))
