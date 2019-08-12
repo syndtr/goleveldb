@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"syscall/js"
@@ -339,12 +340,13 @@ func browserFSMkdirAll(path string, perm os.FileMode) (err error) {
 			}
 		}
 	}()
-	// TODO(albrow): Add support for recursive mkdir. BrowserFS doesn't support it
-	// out of the box.
-	if len(filepath.SplitList(path)) > 1 {
-		return errors.New("recursive mkdir not supported in js/wasm")
+	// Note: mkdirAll is not supported by BrowserFS so we have to manually create
+	// each directory.
+	names := strings.Split(path, string(os.PathSeparator))
+	for i := range names {
+		partialPath := filepath.Join(names[:i+1]...)
+		js.Global().Get("browserFS").Call("mkdirSync", partialPath, int(perm))
 	}
-	js.Global().Get("browserFS").Call("mkdirSync", path, int(perm))
 	return nil
 }
 

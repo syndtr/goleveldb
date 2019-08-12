@@ -3,16 +3,15 @@
 package main
 
 import (
-	"github.com/google/uuid"
-
 	"github.com/0xProject/qunit"
+	"github.com/google/uuid"
 	"github.com/syndtr/goleveldb/leveldb"
 )
 
 func main() {
 	qunit.Module("LevelDB")
 	qunit.Test("set and get", func(assert qunit.QUnitAssert) {
-		dbPath := "leveldb-testing-" + uuid.New().String()
+		dbPath := "leveldb/testing/db-" + uuid.New().String()
 		db, err := leveldb.OpenFile(dbPath, nil)
 		assertNoError(assert, err, "could not open db")
 
