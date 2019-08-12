@@ -345,8 +345,25 @@ func browserFSMkdirAll(path string, perm os.FileMode) (err error) {
 	names := strings.Split(path, string(os.PathSeparator))
 	for i := range names {
 		partialPath := filepath.Join(names[:i+1]...)
-		js.Global().Get("browserFS").Call("mkdirSync", partialPath, int(perm))
+		if err := browserFSMkdir(partialPath, perm); err != nil {
+			if os.IsExist(err) {
+				// If the directory already exists, that's fine.
+				continue
+			}
+		}
 	}
+	return nil
+}
+
+func browserFSMkdir(dir string, perm os.FileMode) (err error) {
+	defer func() {
+		if e := recover(); e != nil {
+			if jsErr, ok := e.(js.Error); ok {
+				err = convertJSError(jsErr)
+			}
+		}
+	}()
+	js.Global().Get("browserFS").Call("mkdirSync", dir, int(perm))
 	return nil
 }
 
@@ -431,6 +448,8 @@ func convertJSError(err js.Error) error {
 			return os.ErrNotExist
 		case "EISDIR":
 			return syscall.EISDIR
+		case "EEXIST":
+			return os.ErrExist
 			// TODO(albrow): Fill in more codes here.
 		}
 	}
