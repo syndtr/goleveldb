@@ -141,6 +141,19 @@ func (f *browserFSFile) Write(b []byte) (n int, err error) {
 	// regardless of the encoding used. Encoding to hex seems like the most
 	// reliable way to do it.
 	rawBytesWritten := js.Global().Get("browserFS").Call("writeSync", f.fd, hex.EncodeToString(b), f.currOffset, "hex")
+
+	// Note: This a workaround for an issue that can cause data inconsistency
+	// (specifically an empty MANIFEST file). Normally fsync is not required on
+	// every write unless WriteOptions.Sync is set to true. However, we have
+	// observed that leveldb does not call fsync after creating a new MANIFEST
+	// file and deleting the old one. In BrowserFS, this means that the contents
+	// are never actually written to the file. On the next boot, leveldb will
+	// attempt to read from the manifest file and return an error because it is
+	// empty.
+	if err := f.Sync(); err != nil {
+		return 0, err
+	}
+
 	bytesWritten := rawBytesWritten.Int()
 	f.currOffset += int64(bytesWritten)
 	if bytesWritten != len(b) {
