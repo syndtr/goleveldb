@@ -72,6 +72,14 @@ type Batch struct {
 	internalLen int
 }
 
+func NewBatch(n int) *Batch {
+	batch:= &Batch{}
+	if n > 0 {
+		batch.data = make([]byte, 0, n)
+	}
+	return batch
+}
+
 func (b *Batch) grow(n int) {
 	o := len(b.data)
 	if cap(b.data)-o < n {
