@@ -363,6 +363,11 @@ type Options struct {
 	//
 	// The default value is 8.
 	WriteL0SlowdownTrigger int
+	
+	// NoAutoCompaction allows disabling auto compaction.
+	//
+	// The default is false.
+	NoAutoCompaction bool
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -620,6 +625,13 @@ func (o *Options) GetWriteL0SlowdownTrigger() int {
 		return DefaultWriteL0SlowdownTrigger
 	}
 	return o.WriteL0SlowdownTrigger
+}
+
+func (o *Options) GetNoAutoCompaction() bool {
+	if o == nil {
+		return false
+	}
+	return o.NoAutoCompaction
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The

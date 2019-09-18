@@ -849,6 +849,8 @@ func (db *DB) tCompaction() {
 			}
 			x = nil
 		}
-		db.tableAutoCompaction()
+		if !db.s.o.GetNoAutoCompaction() {
+			db.tableAutoCompaction()
+		}
 	}
 }
