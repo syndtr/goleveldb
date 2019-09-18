@@ -232,7 +232,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 		return true
 	})
 
-	if tseek && tset.table.consumeSeek() <= 0 {
+	if !ro.GetDontTriggerCompaction() && tseek && tset.table.consumeSeek() <= 0 {
 		tcomp = atomic.CompareAndSwapPointer(&v.cSeek, nil, unsafe.Pointer(tset))
 	}
 

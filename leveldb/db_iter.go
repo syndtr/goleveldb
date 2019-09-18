@@ -78,13 +78,14 @@ func (db *DB) newIterator(auxm *memDB, auxt tFiles, seq uint64, slice *util.Rang
 	}
 	rawIter := db.newRawIterator(auxm, auxt, islice, ro)
 	iter := &dbIter{
-		db:     db,
-		icmp:   db.s.icmp,
-		iter:   rawIter,
-		seq:    seq,
-		strict: opt.GetStrict(db.s.o.Options, ro, opt.StrictReader),
-		key:    make([]byte, 0),
-		value:  make([]byte, 0),
+		db:       db,
+		icmp:     db.s.icmp,
+		iter:     rawIter,
+		seq:      seq,
+		dontComp: ro.GetDontTriggerCompaction(),
+		strict:   opt.GetStrict(db.s.o.Options, ro, opt.StrictReader),
+		key:      make([]byte, 0),
+		value:    make([]byte, 0),
 	}
 	atomic.AddInt32(&db.aliveIters, 1)
 	runtime.SetFinalizer(iter, (*dbIter).Release)
@@ -107,11 +108,12 @@ const (
 
 // dbIter represent an interator states over a database session.
 type dbIter struct {
-	db     *DB
-	icmp   *iComparer
-	iter   iterator.Iterator
-	seq    uint64
-	strict bool
+	db       *DB
+	icmp     *iComparer
+	iter     iterator.Iterator
+	seq      uint64
+	dontComp bool
+	strict   bool
 
 	smaplingGap int
 	dir         dir
@@ -122,6 +124,10 @@ type dbIter struct {
 }
 
 func (i *dbIter) sampleSeek() {
+	// Short circuit if seek compaction is disabled.
+	if i.dontComp {
+		return
+	}
 	ikey := i.iter.Key()
 	i.smaplingGap -= len(ikey) + len(i.iter.Value())
 	for i.smaplingGap < 0 {
