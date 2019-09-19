@@ -2565,7 +2565,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build grandparent.
 	v := s.version()
-	c := newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...))
+	c := newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction)
 	rec := &sessionRecord{}
 	b := &tableCompactionBuilder{
 		s:         s,
@@ -2589,7 +2589,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build level-1.
 	v = s.version()
-	c = newCompaction(s, v, 0, append(tFiles{}, v.levels[0]...))
+	c = newCompaction(s, v, 0, append(tFiles{}, v.levels[0]...), undefinedCompaction)
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,
@@ -2633,7 +2633,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Compaction with transient error.
 	v = s.version()
-	c = newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...))
+	c = newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction)
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,

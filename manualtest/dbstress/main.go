@@ -165,7 +165,7 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 
 	o := &opt.Options{
 		DisableLargeBatchTransaction: true,
-		Strict: opt.NoStrict,
+		Strict:                       opt.NoStrict,
 	}
 	if checksum {
 		o.Strict = opt.StrictBlockChecksum | opt.StrictReader
@@ -427,8 +427,9 @@ func main() {
 			blockpool, _ := db.GetProperty("leveldb.blockpool")
 			writeDelay, _ := db.GetProperty("leveldb.writedelay")
 			ioStats, _ := db.GetProperty("leveldb.iostats")
-			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q IOStats=%q",
-				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay, ioStats)
+			compCount, _ := db.GetProperty("leveldb.compcount")
+			log.Printf("> BlockCache=%s OpenedTables=%s AliveSnaps=%s AliveIter=%s BlockPool=%q WriteDelay=%q IOStats=%q CompCount=%q",
+				cachedblock, openedtables, alivesnaps, aliveiters, blockpool, writeDelay, ioStats, compCount)
 			log.Print("------------------------")
 		}
 	}()
