@@ -330,7 +330,7 @@ func (db *DB) memCompaction() {
 		stats.write += r.size
 	}
 	db.compStats.addStat(flushLevel, stats)
-	atomic.AddUint32(&db.minorComp, 1)
+	atomic.AddUint32(&db.memComp, 1)
 
 	// Drop frozen memdb.
 	db.dropFrozenMem()
