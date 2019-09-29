@@ -305,9 +305,9 @@ func (tf tFiles) newIndexIterator(tops *tOps, icmp *iComparer, slice *util.Range
 		} else {
 			limit = tf.Len()
 		}
+
 		if start > limit {
-			fmt.Printf("start is %d, limit is %d\n", start, limit)
-			ts = tf[start:start]
+			tf = tf[limit:limit]
 		} else {
 			tf = tf[start:limit]
 		}
