@@ -501,7 +501,6 @@ func (t *tOps) remove(fd storage.FileDesc) {
 // Closes the table ops instance. It will close all tables,
 // regadless still used or not.
 func (t *tOps) close() {
-	t.bpool.Close()
 	t.cache.Close()
 	if t.bcache != nil {
 		t.bcache.CloseWeak()
