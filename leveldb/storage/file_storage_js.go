@@ -118,7 +118,7 @@ func (f browserFSFile) read(b []byte, off int64) (n int, err error) {
 	}()
 	// JavaScript API expects a Uint8Array which we then convert into []byte.
 	buffer := js.Global().Get("Uint8Array").New(len(b))
-	rawBytesRead := js.Global().Get("browserFS").Call("readSync", f.fd, buffer, 0, len(b), off)
+	rawBytesRead := jsReadSync(f.fd, buffer, 0, len(b), int(off))
 	bytesRead := rawBytesRead.Int()
 	for i := 0; i < bytesRead; i++ {
 		b[i] = byte(buffer.Index(i).Int())
@@ -140,7 +140,7 @@ func (f *browserFSFile) Write(b []byte) (n int, err error) {
 	// The naive approach of using `string(b)` for the data to write doesn't work,
 	// regardless of the encoding used. Encoding to hex seems like the most
 	// reliable way to do it.
-	rawBytesWritten := js.Global().Get("browserFS").Call("writeSync", f.fd, hex.EncodeToString(b), f.currOffset, "hex")
+	rawBytesWritten := jsWriteSync(f.fd, hex.EncodeToString(b), int(f.currOffset), "hex")
 
 	// Note: This a workaround for an issue that can cause data inconsistency
 	// (specifically an empty MANIFEST file). Normally fsync is not required on
@@ -193,7 +193,7 @@ func (f browserFSFile) Sync() (err error) {
 			}
 		}
 	}()
-	js.Global().Get("browserFS").Call("fsyncSync", f.fd)
+	jsFsyncSync(f.fd)
 	return nil
 }
 
@@ -208,7 +208,7 @@ func (f browserFSFile) Close() (err error) {
 			}
 		}
 	}()
-	js.Global().Get("browserFS").Call("closeSync", f.fd)
+	jsCloseSync(f.fd)
 	return nil
 }
 
@@ -227,7 +227,7 @@ func browserFSStat(path string) (fileInfo os.FileInfo, err error) {
 			}
 		}
 	}()
-	rawFileInfo := js.Global().Get("browserFS").Call("statSync", path)
+	rawFileInfo := jsStatSync(path)
 	return browserFSFileInfo{Value: rawFileInfo, path: path}, nil
 }
 
@@ -257,7 +257,7 @@ func browserFSOpenFile(path string, flag int, perm os.FileMode) (file osFile, er
 	if err != nil {
 		return nil, err
 	}
-	rawFD := js.Global().Get("browserFS").Call("openSync", path, jsFlag, int(perm))
+	rawFD := jsOpenSync(path, jsFlag, int(perm))
 	return &browserFSFile{path: path, fd: rawFD.Int()}, nil
 }
 
@@ -308,7 +308,7 @@ func browserFSRemove(name string) (err error) {
 			}
 		}
 	}()
-	js.Global().Get("browserFS").Call("unlinkSync", name)
+	jsUnlinkSync(name)
 	return nil
 }
 
@@ -325,7 +325,7 @@ func Readdirnames(path string, n int) ([]string, error) {
 }
 
 func browserFSReaddirnames(path string, n int) ([]string, error) {
-	rawNames := js.Global().Get("browserFS").Call("readdirSync", path)
+	rawNames := jsReaddirSync(path)
 	length := rawNames.Get("length").Int()
 	if n != 0 && length > n {
 		// If n > 0, only return up to n names.
@@ -376,7 +376,7 @@ func browserFSMkdir(dir string, perm os.FileMode) (err error) {
 			}
 		}
 	}()
-	js.Global().Get("browserFS").Call("mkdirSync", dir, int(perm))
+	jsMkdirSync(dir, int(perm))
 	return nil
 }
 
@@ -388,7 +388,7 @@ func rename(oldpath, newpath string) error {
 }
 
 func browserFSRename(oldpath, newpath string) error {
-	js.Global().Get("browserFS").Call("renameSync", oldpath, newpath)
+	jsRenameSync(oldpath, newpath)
 	return nil
 }
 
@@ -571,4 +571,120 @@ func isErrInvalid(err error) bool {
 		return true
 	}
 	return false
+}
+
+func jsReadSync(fd int, buffer js.Value, offset, length, position int) js.Value {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("read", fd, buffer, offset, length, position, callback)
+	return waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsWriteSync(fd int, data string, position int, encoding string) js.Value {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("write", fd, data, position, encoding, callback)
+	return waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsFsyncSync(fd int) {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("fsync", fd, callback)
+	waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsCloseSync(fd int) {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("close", fd, callback)
+	waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsStatSync(path string) js.Value {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("stat", path, callback)
+	return waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsOpenSync(path string, flags string, mode int) js.Value {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("open", path, flags, mode, callback)
+	return waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsUnlinkSync(path string) {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("unlink", path, callback)
+	waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsReaddirSync(path string) js.Value {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("readdir", path, callback)
+	return waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsMkdirSync(path string, mode int) {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("mkdir", path, mode, callback)
+	waitForCallbackResults(resultsChan, errChan)
+}
+
+func jsRenameSync(oldPath string, newPath string) {
+	callback, resultsChan, errChan := makeAutoReleaseCallback()
+	js.Global().Get("browserFS").Call("rename", oldPath, newPath, callback)
+	waitForCallbackResults(resultsChan, errChan)
+}
+
+// makeAutoReleaseCallback creates and returns a js.Func that can be used as a
+// callback. The callback will be released immediately after being called. The
+// callback assumes the JavaScript callback convention and accepts two
+// arguments: (err, result). If err is not null or undefined, it will send err
+// through errChan. Otherwise, it will send result through resultsChan.
+func makeAutoReleaseCallback() (callback js.Func, resultsChan chan js.Value, errChan chan error) {
+	resultsChan = make(chan js.Value)
+	errChan = make(chan error)
+	callback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+		defer callback.Release()
+		go func() {
+			if len(args) == 0 {
+				select {
+				case resultsChan <- js.Undefined():
+				default:
+				}
+				return
+			}
+			err := args[0]
+			if err != js.Undefined() && err != js.Null() {
+				select {
+				case errChan <- js.Error{Value: err}:
+				default:
+				}
+				return
+			}
+			if len(args) >= 2 {
+				select {
+				case resultsChan <- args[1]:
+				default:
+				}
+			} else {
+				select {
+				case resultsChan <- js.Undefined():
+				default:
+				}
+			}
+		}()
+		return nil
+	})
+	return callback, resultsChan, errChan
+}
+
+// waitForCallbackResults blocks until receiving from either resultsChan or
+// errChan. If it receives from resultsChan first, it will return the result. If
+// it receives from errChan first, it will panic with the error.
+func waitForCallbackResults(resultsChan chan js.Value, errChan chan error) js.Value {
+	select {
+	case result := <-resultsChan:
+		return result
+	case err := <-errChan:
+		// Expected to be recovered up the call stack.
+		panic(err)
+	}
 }
