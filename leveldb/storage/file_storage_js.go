@@ -639,36 +639,24 @@ func jsRenameSync(oldPath string, newPath string) {
 // arguments: (err, result). If err is not null or undefined, it will send err
 // through errChan. Otherwise, it will send result through resultsChan.
 func makeAutoReleaseCallback() (callback js.Func, resultsChan chan js.Value, errChan chan error) {
-	resultsChan = make(chan js.Value)
-	errChan = make(chan error)
+	resultsChan = make(chan js.Value, 1)
+	errChan = make(chan error, 1)
 	callback = js.FuncOf(func(this js.Value, args []js.Value) interface{} {
 		defer callback.Release()
 		go func() {
 			if len(args) == 0 {
-				select {
-				case resultsChan <- js.Undefined():
-				default:
-				}
+				resultsChan <- js.Undefined()
 				return
 			}
 			err := args[0]
 			if err != js.Undefined() && err != js.Null() {
-				select {
-				case errChan <- js.Error{Value: err}:
-				default:
-				}
+				errChan <- js.Error{Value: err}
 				return
 			}
 			if len(args) >= 2 {
-				select {
-				case resultsChan <- args[1]:
-				default:
-				}
+				resultsChan <- args[1]
 			} else {
-				select {
-				case resultsChan <- js.Undefined():
-				default:
-				}
+				resultsChan <- js.Undefined()
 			}
 		}()
 		return nil
