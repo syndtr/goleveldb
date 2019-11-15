@@ -1,0 +1,7 @@
+{
+  "name": "go-leveldb",
+  "private": true,
+  "dependencies": {
+    "qunit-puppeteer": "^1.0.1"
+  }
+}
