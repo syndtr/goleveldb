@@ -463,6 +463,13 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 			if !hasLastUkey || b.s.icmp.uCompare(lastUkey, ukey) != 0 {
 				// First occurrence of this user key.
 
+				if hasLastUkey && !shouldStop {
+					// also stop if current ukey's affinity is different from lastUkey's
+					if opt := b.s.o; opt.GetKeyAffinity(lastUkey) != opt.GetKeyAffinity(ukey) {
+						shouldStop = true
+					}
+				}
+
 				// Only rotate tables if ukey doesn't hop across.
 				if b.tw != nil && (shouldStop || b.needFlush()) {
 					if err := b.flush(); err != nil {

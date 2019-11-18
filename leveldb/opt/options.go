@@ -373,6 +373,16 @@ type Options struct {
 	//
 	// The default value is 8.
 	WriteL0SlowdownTrigger int
+
+	// KeyAffinity defines the function to compute affinity value of the given key.
+	//
+	// Only keys with the same affinity value will appear in the same sst file. So we can use
+	// this option to effectively simulate namespace(bucket).
+	//
+	// ALWAYS use prefix based algorithm to produce affinity value.
+	//
+	// The default value is nil.
+	KeyAffinity func(key []byte) int
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -639,6 +649,13 @@ func (o *Options) GetWriteL0SlowdownTrigger() int {
 		return DefaultWriteL0SlowdownTrigger
 	}
 	return o.WriteL0SlowdownTrigger
+}
+
+func (o *Options) GetKeyAffinity(key []byte) int {
+	if o.KeyAffinity != nil {
+		return o.KeyAffinity(key)
+	}
+	return 0
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The
