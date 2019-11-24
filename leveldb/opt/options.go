@@ -373,6 +373,14 @@ type Options struct {
 	//
 	// The default value is 8.
 	WriteL0SlowdownTrigger int
+
+	// KeyVolatile provides the function to tell whether keys might be frequently modified.
+	//
+	// The purpose of this option is to optimize the compaction process for cases that have
+	// frequent key updates and deletions.
+	//
+	// The default value is nil.
+	KeyVolatile func(key []byte) bool
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -639,6 +647,13 @@ func (o *Options) GetWriteL0SlowdownTrigger() int {
 		return DefaultWriteL0SlowdownTrigger
 	}
 	return o.WriteL0SlowdownTrigger
+}
+
+func (o *Options) IsKeyVolatile(key []byte) bool {
+	if o == nil || o.KeyVolatile == nil {
+		return false
+	}
+	return o.KeyVolatile(key)
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The

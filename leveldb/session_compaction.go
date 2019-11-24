@@ -62,14 +62,47 @@ func (s *session) pickCompaction() *compaction {
 		sourceLevel = v.cLevel
 		cptr := s.getCompPtr(sourceLevel)
 		tables := v.levels[sourceLevel]
-		for _, t := range tables {
+
+		p := 0
+		// find p, the position of first table whose imax > cptr
+		for i, t := range tables {
 			if cptr == nil || s.icmp.Compare(t.imax, cptr) > 0 {
-				t0 = append(t0, t)
+				p = i
 				break
 			}
 		}
+
+		if sourceLevel > 0 {
+			// take key volatility into account, only for non level-0 compaction.
+			n := len(tables)
+		OUTER:
+			for i := 0; i < n; i++ {
+				t := tables[(i+p)%n]
+				umax := t.imax.ukey()
+
+				if !s.o.IsKeyVolatile(umax) {
+					t0 = append(t0, t)
+					break
+				}
+
+				// for volatile keys, see if we can skip it and let it stay in source level.
+				if sourceLevel+1 >= len(v.levels) {
+					// source level is highest.
+					continue
+				}
+
+				// to check if it overlaps with higher levels.
+				for _, higher := range v.levels[sourceLevel+1:] {
+					if higher.overlaps(s.icmp, t.imin.ukey(), umax, false) {
+						// if so, compact it to avoid issue like https://github.com/syndtr/goleveldb/issues/127.
+						t0 = append(t0, t)
+						break OUTER
+					}
+				}
+			}
+		}
 		if len(t0) == 0 {
-			t0 = append(t0, tables[0])
+			t0 = append(t0, tables[p])
 		}
 		if sourceLevel == 0 {
 			typ = level0Compaction

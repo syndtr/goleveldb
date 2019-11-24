@@ -427,6 +427,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
 	lastUkey := append([]byte{}, b.snapLastUkey...)
 	lastSeq := b.snapLastSeq
+	lastUkeyVolatile := false
 	b.kerrCnt = b.snapKerrCnt
 	b.dropCnt = b.snapDropCnt
 	// Restore compaction state.
@@ -463,6 +464,12 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 			if !hasLastUkey || b.s.icmp.uCompare(lastUkey, ukey) != 0 {
 				// First occurrence of this user key.
 
+				ukeyVolatile := b.s.o.IsKeyVolatile(ukey)
+				if hasLastUkey && ukeyVolatile != lastUkeyVolatile {
+					// also stop if current ukey's volatility is different from lastUkey's
+					shouldStop = true
+				}
+
 				// Only rotate tables if ukey doesn't hop across.
 				if b.tw != nil && (shouldStop || b.needFlush()) {
 					if err := b.flush(); err != nil {
@@ -482,6 +489,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 				hasLastUkey = true
 				lastUkey = append(lastUkey[:0], ukey...)
 				lastSeq = keyMaxSeq
+				lastUkeyVolatile = ukeyVolatile
 			}
 
 			switch {
