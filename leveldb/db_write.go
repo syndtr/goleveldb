@@ -381,6 +381,18 @@ func (db *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 	return db.putRec(keyTypeDel, key, nil, wo)
 }
 
+// Sync syncs the database to disk. All previous puts will persist after a
+// crash, even if they were written with WriteOptions.Sync set to false.
+func (db *DB) Sync() error {
+	if err := db.ok(); err != nil {
+		return err
+	}
+	if db.s.o.GetNoSync() {
+		return nil
+	}
+	return db.journalWriter.Sync()
+}
+
 func isMemOverlaps(icmp *iComparer, mem *memdb.DB, min, max []byte) bool {
 	iter := mem.NewIterator(nil)
 	defer iter.Release()
