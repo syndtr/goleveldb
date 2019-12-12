@@ -367,3 +367,46 @@ func BenchmarkBufferFullSmallReads(b *testing.B) {
 		}
 	}
 }
+
+func TestAtomicCopyUint32(t *testing.T) {
+	type testCase struct {
+		description string
+		src         []uint32
+		dst         []uint32
+		expect      int
+	}
+	for _, tc := range []testCase{
+		{
+			description: "CopyNilSrc",
+		},
+		{
+			description: "CopyEqual",
+			src:         []uint32{1, 2, 3},
+			dst:         make([]uint32, 3),
+			expect:      3,
+		},
+		{
+			description: "CopyNilDst",
+			src:         []uint32{1, 2},
+			expect:      0,
+		},
+		{
+			description: "CopyShortSrc",
+			src:         []uint32{1, 2},
+			dst:         make([]uint32, 3),
+			expect:      2,
+		},
+	} {
+		t.Run(tc.description, func(t *testing.T) {
+			n := atomicCopyUint32(tc.dst, tc.src)
+			if tc.expect != n {
+				t.Errorf("expected to copy %d, copied %d", tc.expect, n)
+			}
+			for i := 0; i < n; i++ {
+				if tc.src[i] != tc.dst[i] {
+					t.Errorf("expected src[%d] == dst[%d]; %v == %v", i, i, tc.src[i], tc.dst[i])
+				}
+			}
+		})
+	}
+}

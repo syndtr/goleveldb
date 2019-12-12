@@ -194,9 +194,17 @@ func (p *BufferPool) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-
+	var (
+		size, sizeMiss, sizeHalf [5]uint32
+	)
+	atomicCopyUint32(size[:], p.size[:])
+	atomicCopyUint32(sizeMiss[:], p.sizeMiss[:])
+	atomicCopyUint32(sizeHalf[:], p.sizeHalf[:])
 	return fmt.Sprintf("BufferPool{B·%d Z·%v Zm·%v Zh·%v G·%d P·%d H·%d <·%d =·%d >·%d M·%d}",
-		p.baseline0, p.size, p.sizeMiss, p.sizeHalf, p.get, p.put, p.half, p.less, p.equal, p.greater, p.miss)
+		p.baseline0, size, sizeMiss, sizeHalf,
+		atomic.LoadUint32(&p.get), atomic.LoadUint32(&p.put),
+		atomic.LoadUint32(&p.half), atomic.LoadUint32(&p.less),
+		atomic.LoadUint32(&p.equal), atomic.LoadUint32(&p.greater), atomic.LoadUint32(&p.miss))
 }
 
 func (p *BufferPool) drain() {
@@ -236,4 +244,11 @@ func NewBufferPool(baseline int) *BufferPool {
 	}
 	go p.drain()
 	return p
+}
+
+func atomicCopyUint32(dst, src []uint32) (i int) {
+	for i = 0; i < len(src) && i < len(dst); i++ {
+		dst[i] = atomic.LoadUint32(&src[i])
+	}
+	return
 }
