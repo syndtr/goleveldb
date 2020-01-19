@@ -92,6 +92,8 @@ type fileStorage struct {
 //
 // The storage must be closed after use, by calling Close method.
 func OpenFile(path string, readOnly bool) (Storage, error) {
+	var err error
+
 	if fi, err := os.Stat(path); err == nil {
 		if !fi.IsDir() {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
@@ -104,22 +106,23 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		return nil, err
 	}
 
-	flock, err := newFileLock(filepath.Join(path, "LOCK"), readOnly)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err != nil {
-			flock.release()
-		}
-	}()
-
 	var (
 		logw    *os.File
 		logSize int64
+		flock   fileLock = nil
 	)
 	if !readOnly {
+		flock, err = newFileLock(filepath.Join(path, "LOCK"), readOnly)
+		if err != nil {
+			return nil, err
+		}
+
+		defer func() {
+			if err != nil {
+				flock.release()
+			}
+		}()
+
 		logw, err = os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			return nil, err
@@ -571,7 +574,10 @@ func (fs *fileStorage) Close() error {
 	if fs.logw != nil {
 		fs.logw.Close()
 	}
-	return fs.flock.release()
+	if !fs.readOnly {
+		return fs.flock.release()
+	}
+	return nil
 }
 
 type fileWrap struct {
