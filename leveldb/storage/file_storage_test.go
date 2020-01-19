@@ -364,37 +364,25 @@ func TestFileStorage_ReadOnlyLocking(t *testing.T) {
 	temp := tempDir(t)
 	defer os.RemoveAll(temp)
 
-	p1, err := OpenFile(temp, false)
+	_, err := OpenFile(temp, true)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	_, err = OpenFile(temp, true)
+	p2, err := OpenFile(temp, false)
 	if err != nil {
-		t.Logf("OpenFile(2): got error: %s (expected)", err)
-	} else {
-		t.Fatal("OpenFile(2): expect error")
+		t.Fatal("OpenFile(2): got error: ", err)
 	}
 
-	p1.Close()
-
-	p3, err := OpenFile(temp, true)
+	_, err = OpenFile(temp, true)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
 
-	p4, err := OpenFile(temp, true)
+	p2.Close()
+
+	_, err = OpenFile(temp, true)
 	if err != nil {
 		t.Fatal("OpenFile(4): got error: ", err)
 	}
-
-	_, err = OpenFile(temp, false)
-	if err != nil {
-		t.Logf("OpenFile(5): got error: %s (expected)", err)
-	} else {
-		t.Fatal("OpenFile(2): expect error")
-	}
-
-	p3.Close()
-	p4.Close()
 }
