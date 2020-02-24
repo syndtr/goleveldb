@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"sort"
 	"sync/atomic"
 
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -63,46 +64,49 @@ func (s *session) pickCompaction() *compaction {
 		cptr := s.getCompPtr(sourceLevel)
 		tables := v.levels[sourceLevel]
 
-		p := 0
-		// find p, the position of first table whose imax > cptr
-		for i, t := range tables {
-			if cptr == nil || s.icmp.Compare(t.imax, cptr) > 0 {
-				p = i
-				break
+		if sourceLevel == 0 {
+			for _, t := range tables {
+				if cptr == nil || s.icmp.Compare(t.imax, cptr) > 0 {
+					t0 = append(t0, t)
+					break
+				}
 			}
-		}
-
-		if sourceLevel > 0 {
-			// take key volatility into account, only for non level-0 compaction.
+			if len(t0) == 0 {
+				t0 = append(t0, tables[0])
+			}
+		} else {
 			n := len(tables)
-		OUTER:
+			p := 0
+			if cptr != nil {
+				// find p, the position of first table whose imax > cptr
+				p = sort.Search(n, func(i int) bool {
+					return s.icmp.Compare(tables[i].imax, cptr) > 0
+				})
+				if p == n {
+					p = 0
+				}
+			}
+			// take key volatility into account
 			for i := 0; i < n; i++ {
 				t := tables[(i+p)%n]
 				umax := t.imax.ukey()
 
-				if !s.o.IsKeyVolatile(umax) {
+				// for volatile keys, see if we can skip it and let it stay in source level.
+				if sourceLevel < s.maxVolatileLevel || !s.o.IsKeyVolatile(umax) {
 					t0 = append(t0, t)
 					break
 				}
-
-				// for volatile keys, see if we can skip it and let it stay in source level.
-				if sourceLevel+1 >= len(v.levels) {
-					// source level is highest.
-					continue
-				}
-
-				// to check if it overlaps with higher levels.
-				for _, higher := range v.levels[sourceLevel+1:] {
-					if higher.overlaps(s.icmp, t.imin.ukey(), umax, false) {
-						// if so, compact it to avoid issue like https://github.com/syndtr/goleveldb/issues/127.
-						t0 = append(t0, t)
-						break OUTER
+			}
+			if len(t0) == 0 {
+				t := tables[p]
+				// if picked a volatile table, update max volatile level
+				if s.o.IsKeyVolatile(t.imax.ukey()) {
+					if targetLevel := sourceLevel + 1; targetLevel > s.maxVolatileLevel {
+						s.maxVolatileLevel = targetLevel
 					}
 				}
+				t0 = append(t0, t)
 			}
-		}
-		if len(t0) == 0 {
-			t0 = append(t0, tables[p])
 		}
 		if sourceLevel == 0 {
 			typ = level0Compaction
