@@ -7,7 +7,7 @@
 package leveldb
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/ucwong/goleveldb/leveldb/errors"
 )
 
 // Common errors.
