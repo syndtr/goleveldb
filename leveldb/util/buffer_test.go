@@ -339,6 +339,30 @@ func TestBufferGrowth(t *testing.T) {
 	}
 }
 
+func BenchmarkWriteByte(b *testing.B) {
+	const n = 4 << 10
+	b.SetBytes(n)
+	buf := NewBuffer(make([]byte, n))
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		for i := 0; i < n; i++ {
+			buf.WriteByte('x')
+		}
+	}
+}
+
+func BenchmarkAlloc(b *testing.B) {
+	const n = 4 << 10
+	b.SetBytes(n)
+	buf := NewBuffer(make([]byte, n))
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		for i := 0; i < n; i++ {
+			buf.Alloc(1)
+		}
+	}
+}
+
 // BenchmarkBufferNotEmptyWriteRead: From Issue 5154.
 func BenchmarkBufferNotEmptyWriteRead(b *testing.B) {
 	buf := make([]byte, 1024)
