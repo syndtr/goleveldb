@@ -22,25 +22,27 @@ const (
 )
 
 var (
-	DefaultBlockCacher                   = LRUCacher
-	DefaultBlockCacheCapacity            = 8 * MiB
-	DefaultBlockRestartInterval          = 16
-	DefaultBlockSize                     = 4 * KiB
-	DefaultCompactionExpandLimitFactor   = 25
-	DefaultCompactionGPOverlapsFactor    = 10
-	DefaultCompactionL0Trigger           = 4
-	DefaultCompactionSourceLimitFactor   = 1
-	DefaultCompactionTableSize           = 2 * MiB
-	DefaultCompactionTableSizeMultiplier = 1.0
-	DefaultCompactionTotalSize           = 10 * MiB
-	DefaultCompactionTotalSizeMultiplier = 10.0
-	DefaultCompressionType               = SnappyCompression
-	DefaultIteratorSamplingRate          = 1 * MiB
-	DefaultOpenFilesCacher               = LRUCacher
-	DefaultOpenFilesCacheCapacity        = 500
-	DefaultWriteBuffer                   = 4 * MiB
-	DefaultWriteL0PauseTrigger           = 12
-	DefaultWriteL0SlowdownTrigger        = 8
+	DefaultBlockCacher                        = LRUCacher
+	DefaultBlockCacheCapacity                 = 8 * MiB
+	DefaultBlockRestartInterval               = 16
+	DefaultBlockSize                          = 4 * KiB
+	DefaultCompactionExpandLimitFactor        = 25
+	DefaultCompactionGPOverlapsFactor         = 10
+	DefaultCompactionL0Trigger                = 4
+	DefaultCompactionSourceLimitFactor        = 1
+	DefaultCompactionTableSize                = 2 * MiB
+	DefaultCompactionTableSizeMultiplier      = 1.0
+	DefaultCompactionTotalSize                = 10 * MiB
+	DefaultCompactionTotalSizeMultiplier      = 10.0
+	DefaultCompactionSeedFileNumber           = 1
+	DefaultCompactionSeedFileNumberMultiplier = 2
+	DefaultCompressionType                    = SnappyCompression
+	DefaultIteratorSamplingRate               = 1 * MiB
+	DefaultOpenFilesCacher                    = LRUCacher
+	DefaultOpenFilesCacheCapacity             = 500
+	DefaultWriteBuffer                        = 4 * MiB
+	DefaultWriteL0PauseTrigger                = 12
+	DefaultWriteL0SlowdownTrigger             = 8
 )
 
 // Cacher is a caching algorithm.
@@ -235,6 +237,22 @@ type Options struct {
 	//
 	// The default value is 10.
 	CompactionTotalSizeMultiplier float64
+
+	// CompactionSeedFileNumber defines the seed file number of a compaction.
+	// This doesn't apply to level-0.
+	// The seed file number for each level will be calculated as:
+	//   SeedFileNumber = CompactionSeedFileNumber * (CompactionSeedFileNumberMultiplier ^ (CompactionScore-1))
+	//
+	// The default value is 1.
+	CompactionSeedFileNumber int
+
+	// CompactionSeedFileNumberMultiplier defines the multiplier for CompactionSeedFileNumber.
+	// This doesn't apply to level-0.
+	// The seed file number for each level will be calculated as:
+	//   SeedFileNumber = CompactionSeedFileNumber * (CompactionSeedFileNumberMultiplier ^ (CompactionScore-1))
+	//
+	// The default value is 2.
+	CompactionSeedFileNumberMultiplier int
 
 	// CompactionTotalSizeMultiplierPerLevel defines per-level multiplier for
 	// CompactionTotalSize.
@@ -492,6 +510,26 @@ func (o *Options) GetCompactionTotalSize(level int) int64 {
 		mult = math.Pow(DefaultCompactionTotalSizeMultiplier, float64(level))
 	}
 	return int64(float64(base) * mult)
+}
+
+func (o *Options) GetCompactionSeedFileNumber(score float64) int {
+	// Short circuit for invalid score
+	if score < 1 {
+		return 0
+	}
+	var (
+		base = DefaultCompactionSeedFileNumber
+		mult = DefaultCompactionSeedFileNumberMultiplier
+	)
+	if o != nil {
+		if o.CompactionSeedFileNumber > 0 {
+			base = o.CompactionSeedFileNumber
+		}
+		if o.CompactionSeedFileNumberMultiplier > 0 {
+			mult = o.CompactionSeedFileNumberMultiplier
+		}
+	}
+	return base * int(math.Pow(float64(mult), score-1))
 }
 
 func (o *Options) GetComparer() comparer.Comparer {
