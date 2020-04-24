@@ -172,6 +172,7 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 
 		disableBackoff = db.s.o.GetDisableCompactionBackoff()
 	)
+	defer backoffT.Stop()
 	for n := 0; ; n++ {
 		// Check whether the DB is closed.
 		if db.isClosed() {
