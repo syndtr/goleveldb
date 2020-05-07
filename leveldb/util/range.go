@@ -28,5 +28,8 @@ func BytesPrefix(prefix []byte) *Range {
 			break
 		}
 	}
+	if limit == nil {
+		panic("BytesPrefix doesn't work for all 0xff prefix")
+	}
 	return &Range{prefix, limit}
 }
