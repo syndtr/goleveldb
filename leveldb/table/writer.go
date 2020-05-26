@@ -8,15 +8,17 @@ package table
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 
 	"github.com/golang/snappy"
 
+	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -157,6 +159,11 @@ type Writer struct {
 	scratch            [50]byte
 	comparerScratch    []byte
 	compressionScratch []byte
+
+	// Metadata, assigned after the writer is committed.
+	// Can be reused if the writer is converted to reader.
+	dataEnd                   int64
+	metaBH, indexBH, filterBH blockHandle
 }
 
 func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh blockHandle, err error) {
@@ -299,33 +306,37 @@ func (w *Writer) Close() error {
 	w.flushPendingBH(nil)
 
 	// Write the filter block.
-	var filterBH blockHandle
 	w.filterBlock.finish()
 	if buf := &w.filterBlock.buf; buf.Len() > 0 {
-		filterBH, w.err = w.writeBlock(buf, opt.NoCompression)
+		w.filterBH, w.err = w.writeBlock(buf, opt.NoCompression)
 		if w.err != nil {
 			return w.err
 		}
 	}
 
 	// Write the metaindex block.
-	if filterBH.length > 0 {
+	if w.filterBH.length > 0 {
 		key := []byte("filter." + w.filter.Name())
-		n := encodeBlockHandle(w.scratch[:20], filterBH)
+		n := encodeBlockHandle(w.scratch[:20], w.filterBH)
 		w.dataBlock.append(key, w.scratch[:n])
 	}
 	w.dataBlock.finish()
-	metaindexBH, err := w.writeBlock(&w.dataBlock.buf, w.compression)
-	if err != nil {
-		w.err = err
+	w.metaBH, w.err = w.writeBlock(&w.dataBlock.buf, w.compression)
+	if w.err != nil {
 		return w.err
+	}
+
+	// Assign the data end offset
+	if w.filterBH.length > 0 {
+		w.dataEnd = int64(w.filterBH.offset)
+	} else {
+		w.dataEnd = int64(w.metaBH.offset)
 	}
 
 	// Write the index block.
 	w.indexBlock.finish()
-	indexBH, err := w.writeBlock(&w.indexBlock.buf, w.compression)
-	if err != nil {
-		w.err = err
+	w.indexBH, w.err = w.writeBlock(&w.indexBlock.buf, w.compression)
+	if w.err != nil {
 		return w.err
 	}
 
@@ -334,8 +345,8 @@ func (w *Writer) Close() error {
 	for i := range footer {
 		footer[i] = 0
 	}
-	n := encodeBlockHandle(footer, metaindexBH)
-	encodeBlockHandle(footer[n:], indexBH)
+	n := encodeBlockHandle(footer, w.metaBH)
+	encodeBlockHandle(footer[n:], w.indexBH)
 	copy(footer[footerLen-len(magic):], magic)
 	if _, err := w.writer.Write(footer); err != nil {
 		w.err = err
@@ -345,6 +356,60 @@ func (w *Writer) Close() error {
 
 	w.err = errors.New("leveldb/table: writer is closed")
 	return nil
+}
+
+// ToReader converts a committed writer to file reader with all meta reserved.
+// This function can only be called when the Close is called. The o, cache and
+// bpool is optional and can be nil.
+//
+// The returned table reader instance is safe for concurrent use.
+func (w *Writer) ToReader(f io.ReaderAt, fd storage.FileDesc, mcache, bcache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+	if w.err != nil {
+		return nil, w.err
+	}
+	if w.dataEnd == 0 {
+		return nil, errors.New("non-committed writer")
+	}
+	r := &Reader{
+		reader:         f,
+		fd:             fd,
+		mcache:         mcache,
+		bcache:         bcache,
+		bpool:          bpool,
+		o:              o,
+		cmp:            o.GetComparer(),
+		filter:         w.filter,
+		verifyChecksum: o.GetStrict(opt.StrictBlockChecksum),
+		metaBH:         w.metaBH,
+		indexBH:        w.indexBH,
+		filterBH:       w.filterBH,
+		dataEnd:        w.dataEnd,
+	}
+	// Cache index and filter block locally, since we don't have global cache.
+	// todo(rjl493456442) we can reuse the buff in index block and filter block,
+	// but util.Buffer doesn't support re-read.
+	if mcache == nil {
+		var err error
+		r.indexBlock, err = r.readBlock(r.indexBH, true)
+		if err != nil {
+			if errors.IsCorrupted(err) {
+				r.err = err
+				return r, nil
+			}
+			return nil, err
+		}
+		if r.filter != nil {
+			r.filterBlock, err = r.readFilterBlock(r.filterBH)
+			if err != nil {
+				if !errors.IsCorrupted(err) {
+					return nil, err
+				}
+				// Don't use filter then.
+				r.filter = nil
+			}
+		}
+	}
+	return r, nil
 }
 
 // NewWriter creates a new initialized table writer for the file.
