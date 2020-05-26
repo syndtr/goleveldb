@@ -21,6 +21,7 @@ import (
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/table"
@@ -350,6 +351,7 @@ func main() {
 		DisableBlockCache:      !enableBlockCache,
 		ErrorIfExist:           true,
 		Compression:            opt.NoCompression,
+		Filter:                 filter.NewBloomFilter(10),
 	}
 	if enableCompression {
 		o.Compression = opt.DefaultCompression

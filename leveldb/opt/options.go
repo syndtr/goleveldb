@@ -41,6 +41,7 @@ var (
 	DefaultWriteBuffer                   = 4 * MiB
 	DefaultWriteL0PauseTrigger           = 12
 	DefaultWriteL0SlowdownTrigger        = 8
+	DefaultFilterBaseLg                  = 11
 )
 
 // Cacher is a caching algorithm.
@@ -373,6 +374,11 @@ type Options struct {
 	//
 	// The default value is 8.
 	WriteL0SlowdownTrigger int
+
+	// FilterBaseLg is the log size for filter block to create a bloom filter.
+	//
+	// The default value is 11(as well as 2KB)
+	FilterBaseLg int
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -639,6 +645,13 @@ func (o *Options) GetWriteL0SlowdownTrigger() int {
 		return DefaultWriteL0SlowdownTrigger
 	}
 	return o.WriteL0SlowdownTrigger
+}
+
+func (o *Options) GetFilterBaseLg() int {
+	if o == nil || o.FilterBaseLg == 0 {
+		return DefaultFilterBaseLg
+	}
+	return o.FilterBaseLg
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The
