@@ -25,7 +25,7 @@ var (
 	DefaultBlockCacher                   = LRUCacher
 	DefaultBlockCacheCapacity            = 8 * MiB
 	DefaultMetadataCacher                = LRUCacher
-	DefaultMetadataCacheCapacity         = 4 * MiB
+	DefaultMetadataCacheCapacity         = 8 * MiB
 	DefaultOpenFilesCacher               = LRUCacher
 	DefaultOpenFilesCacheCapacity        = 500
 	DefaultBlockRestartInterval          = 16
@@ -169,7 +169,7 @@ type Options struct {
 	// MetadataCacheCapacity defines the capacity of the 'sorted table' metadata caching.
 	// Use -1 for zero, this has same effect as specifying NoCacher to MetadataCacher.
 	//
-	// The default value is 4MiB.
+	// The default value is 8MiB.
 	MetadataCacheCapacity int
 
 	// OpenFilesCacher provides cache algorithm for open files caching.
@@ -437,12 +437,12 @@ func (o *Options) GetBlockCacheCapacity() int {
 }
 
 func (o *Options) GetMetadataCacher() Cacher {
-	if o == nil || o.BlockCacher == nil {
-		return DefaultBlockCacher
-	} else if o.BlockCacher == NoCacher {
+	if o == nil || o.MetadataCacher == nil {
+		return DefaultMetadataCacher
+	} else if o.MetadataCacher == NoCacher {
 		return nil
 	}
-	return o.BlockCacher
+	return o.MetadataCacher
 }
 
 func (o *Options) GetMetadataCacheCapacity() int {
