@@ -1009,16 +1009,20 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		} else {
 			value = "<nil>"
 		}
+	case p == "cachestats":
+		value = fmt.Sprintf("DataCacheHit:%d DataDiskHit:%d MetaCacheHit:%d MetaDiskHit:%d",
+			atomic.LoadUint64(&table.DataCacheHit), atomic.LoadUint64(&table.DataDiskHit), atomic.LoadUint64(&table.MetaCacheHit), atomic.LoadUint64(&table.MetaDiskHit))
 	case p == "openedtables":
 		value = fmt.Sprintf("%d", db.s.tops.cache.Size())
 	case p == "alivesnaps":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveSnaps))
 	case p == "aliveiters":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveIters))
+	case p == "filterstats":
+		value = fmt.Sprintf("Hit:%d, Miss:%d", atomic.LoadUint64(&table.BloomFilterHit), atomic.LoadUint64(&table.BloomFilterMiss))
 	default:
 		err = ErrNotFound
 	}
-
 	return
 }
 
@@ -1047,6 +1051,16 @@ type DBStats struct {
 	Level0Comp    uint32
 	NonLevel0Comp uint32
 	SeekComp      uint32
+
+	// Cache hit rate stats.
+	DataCacheHit uint64 // The cumulative number of data hits in block cache
+	DataDiskHit  uint64 // The cumulative number of data hits in disk
+	MetaCacheHit uint64 // The cumulative number of data hits in metadata cache
+	MetaDiskHit  uint64 // The cumulative number of data hits in disk
+
+	// Bloom filter false positive stats.
+	BloomFilterMiss uint64 // The cumulative number of file hits in file cache
+	BloomFilterHit  uint64 // The cumulative number of file hits in file cache
 }
 
 // Stats populates s with database statistics.
@@ -1094,6 +1108,13 @@ func (db *DB) Stats(s *DBStats) error {
 	s.Level0Comp = atomic.LoadUint32(&db.level0Comp)
 	s.NonLevel0Comp = atomic.LoadUint32(&db.nonLevel0Comp)
 	s.SeekComp = atomic.LoadUint32(&db.seekComp)
+
+	s.DataCacheHit = atomic.LoadUint64(&table.DataCacheHit)
+	s.DataDiskHit = atomic.LoadUint64(&table.DataDiskHit)
+	s.MetaCacheHit = atomic.LoadUint64(&table.MetaCacheHit)
+	s.MetaDiskHit = atomic.LoadUint64(&table.MetaDiskHit)
+	s.BloomFilterHit = atomic.LoadUint64(&table.BloomFilterHit)
+	s.BloomFilterMiss = atomic.LoadUint64(&table.BloomFilterMiss)
 	return nil
 }
 
