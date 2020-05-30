@@ -437,8 +437,12 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 			mcache *cache.NamespaceGetter
 			bcache *cache.NamespaceGetter
 		)
+		// Cache metadata in a separate cache instance if metadata cache is enabled.
+		// Otherwise, mix them with the user-data for backward compatibility.
 		if t.mcache != nil {
 			mcache = &cache.NamespaceGetter{Cache: t.mcache, NS: uint64(f.fd.Num)}
+		} else if t.bcache != nil {
+			mcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
 		}
 		if t.bcache != nil {
 			bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
@@ -535,8 +539,12 @@ func (t *tOps) cacheCommittedWriter(w *tWriter) error {
 		mcache *cache.NamespaceGetter
 		bcache *cache.NamespaceGetter
 	)
+	// Cache metadata in a separate cache instance if metadata cache is enabled.
+	// Otherwise, mix them with the user-data for backward compatibility.
 	if t.mcache != nil {
 		mcache = &cache.NamespaceGetter{Cache: t.mcache, NS: uint64(w.fd.Num)}
+	} else if t.bcache != nil {
+		mcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(w.fd.Num)}
 	}
 	if t.bcache != nil {
 		bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(w.fd.Num)}
@@ -575,7 +583,7 @@ func newTableOps(s *session) *tOps {
 	if s.o.GetOpenFilesCacheCapacity() > 0 {
 		cacher = s.o.GetOpenFilesCacher().New(s.o.GetOpenFilesCacheCapacity())
 	}
-	if !s.o.GetDisableMetadataCache() {
+	if s.o.GetEnableMetadataCache() {
 		var mcacher cache.Cacher
 		if s.o.GetMetadataCacheCapacity() > 0 {
 			mcacher = s.o.GetMetadataCacher().New(s.o.GetMetadataCacheCapacity())
