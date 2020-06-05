@@ -182,9 +182,9 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			ferr        error
 		)
 		if noValue {
-			fikey, ferr = v.s.tops.findKey(t, ikey, ro)
+			fikey, ferr = v.s.tops.findKey(level, t, ikey, ro)
 		} else {
-			fikey, fval, ferr = v.s.tops.find(t, ikey, ro)
+			fikey, fval, ferr = v.s.tops.find(level, t, ikey, ro)
 		}
 
 		switch ferr {
@@ -215,6 +215,10 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 					default:
 						panic("leveldb: invalid internalKey type")
 					}
+					for len(*dist) < level+1 {
+						*dist = append(*dist, 0)
+					}
+					atomic.AddUint64(&((*dist)[level]), 1)
 					return false
 				}
 			}
@@ -234,10 +238,6 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			default:
 				panic("leveldb: invalid internalKey type")
 			}
-			for len(*dist) < level+1 {
-				*dist = append(*dist, 0)
-			}
-			atomic.AddUint64(&((*dist)[level]), 1)
 			return false
 		}
 		return true

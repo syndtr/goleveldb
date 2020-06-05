@@ -377,7 +377,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, size, fd, nil, bpool, o)
+		tr, err := table.NewReader(reader, 0, size, fd, nil, bpool, o)
 		if err != nil {
 			return err
 		}
@@ -1083,8 +1083,14 @@ type DBStats struct {
 	TotalReads    uint64
 	TotalMemHits  uint64
 	TotalFTouched uint64
+
 	LevelHits     []uint64
 	LevelTouches  []uint64
+
+	LevelDataCacheHit []uint64 // The cumulative number of data hits in block cache
+	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk
+	LevelMetaCacheHit []uint64 // The cumulative number of data hits in metadata cache
+	LevelMetaDiskHit  []uint64 // The cumulative number of data hits in disk
 }
 
 // Stats populates s with database statistics.
@@ -1153,6 +1159,22 @@ func (db *DB) Stats(s *DBStats) error {
 		s.LevelHits[i] = atomic.LoadUint64(&db.hitLevels[i])
 	}
 
+	s.LevelDataCacheHit = make([]uint64, len(table.LevelDataDiskHit))
+	for i := 0; i < len(table.LevelDataCacheHit); i++ {
+		s.LevelDataCacheHit[i] = atomic.LoadUint64(&table.LevelDataCacheHit[i])
+	}
+	s.LevelDataDiskHit = make([]uint64, len(table.LevelDataDiskHit))
+	for i := 0; i < len(table.LevelDataDiskHit); i++ {
+		s.LevelDataDiskHit[i] = atomic.LoadUint64(&table.LevelDataDiskHit[i])
+	}
+	s.LevelMetaCacheHit = make([]uint64, len(table.LevelMetaCacheHit))
+	for i := 0; i < len(table.LevelMetaCacheHit); i++ {
+		s.LevelMetaCacheHit[i] = atomic.LoadUint64(&table.LevelMetaCacheHit[i])
+	}
+	s.LevelMetaDiskHit = make([]uint64, len(table.LevelMetaDiskHit))
+	for i := 0; i < len(table.LevelMetaDiskHit); i++ {
+		s.LevelMetaDiskHit[i] = atomic.LoadUint64(&table.LevelMetaDiskHit[i])
+	}
 	return nil
 }
 
