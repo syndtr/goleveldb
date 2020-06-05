@@ -138,7 +138,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 	}
 }
 
-func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
+func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64) (value []byte, tcomp bool, err error) {
 	if v.closing {
 		return nil, false, ErrClosed
 	}
@@ -162,6 +162,9 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	// Since entries never hop across level, finding key/value
 	// in smaller level make later levels irrelevant.
 	v.walkOverlapping(aux, ikey, func(level int, t *tFile) bool {
+		// Mark the file is touched
+		atomic.AddUint64(counter, 1)
+
 		if sampleSeeks && level >= 0 && !tseek {
 			if tset == nil {
 				tset = &tSet{level, t}

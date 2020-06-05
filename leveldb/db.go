@@ -32,6 +32,11 @@ type DB struct {
 	// Need 64-bit alignment.
 	seq uint64
 
+	// Read stats, need 64-bit alignment.
+	readN    uint64 // The cumulative number of read operation
+	memdbN   uint64 // The cumulative number of read operation hit in memdb(alive, frozen)
+	ftouched uint64 // The cumulative number of touched files during the read operations
+
 	// Stats. Need 64-bit alignment.
 	cWriteDelay            int64 // The cumulative duration of write delays
 	cWriteDelayN           int32 // The cumulative number of write delays
@@ -761,10 +766,14 @@ func memGet(mdb *memdb.DB, ikey internalKey, icmp *iComparer) (ok bool, mv []byt
 }
 
 func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
+	// Mark the read operation
+	atomic.AddUint64(&db.readN, 1)
+
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
 	if auxm != nil {
 		if ok, mv, me := memGet(auxm, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return append([]byte{}, mv...), me
 		}
 	}
@@ -777,12 +786,13 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		defer m.decref()
 
 		if ok, mv, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return append([]byte{}, mv...), me
 		}
 	}
 
 	v := db.s.version()
-	value, cSched, err := v.get(auxt, ikey, ro, false)
+	value, cSched, err := v.get(auxt, ikey, ro, false, &db.ftouched)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -799,10 +809,14 @@ func nilIfNotFound(err error) error {
 }
 
 func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err error) {
+	// Mark the read operation
+	atomic.AddUint64(&db.readN, 1)
+
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
 	if auxm != nil {
 		if ok, _, me := memGet(auxm, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return me == nil, nilIfNotFound(me)
 		}
 	}
@@ -815,12 +829,13 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		defer m.decref()
 
 		if ok, _, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return me == nil, nilIfNotFound(me)
 		}
 	}
 
 	v := db.s.version()
-	_, cSched, err := v.get(auxt, ikey, ro, true)
+	_, cSched, err := v.get(auxt, ikey, ro, true, &db.ftouched)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -1061,6 +1076,11 @@ type DBStats struct {
 	// Bloom filter false positive stats.
 	BloomFilterMiss uint64 // The cumulative number of file hits in file cache
 	BloomFilterHit  uint64 // The cumulative number of file hits in file cache
+
+	// Read stats
+	TotalReads    uint64
+	TotalMemHits  uint64
+	TotalFTouched uint64
 }
 
 // Stats populates s with database statistics.
@@ -1115,6 +1135,10 @@ func (db *DB) Stats(s *DBStats) error {
 	s.MetaDiskHit = atomic.LoadUint64(&table.MetaDiskHit)
 	s.BloomFilterHit = atomic.LoadUint64(&table.BloomFilterHit)
 	s.BloomFilterMiss = atomic.LoadUint64(&table.BloomFilterMiss)
+
+	s.TotalReads = atomic.LoadUint64(&db.readN)
+	s.TotalMemHits = atomic.LoadUint64(&db.memdbN)
+	s.TotalFTouched = atomic.LoadUint64(&db.ftouched)
 	return nil
 }
 
