@@ -138,7 +138,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 	}
 }
 
-func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64) (value []byte, tcomp bool, err error) {
+func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64, dist *[]uint64, touch *[]uint64) (value []byte, tcomp bool, err error) {
 	if v.closing {
 		return nil, false, ErrClosed
 	}
@@ -164,6 +164,10 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	v.walkOverlapping(aux, ikey, func(level int, t *tFile) bool {
 		// Mark the file is touched
 		atomic.AddUint64(counter, 1)
+		for len(*touch) < level+1 {
+			*touch = append(*touch, 0)
+		}
+		atomic.AddUint64(&((*touch)[level]), 1)
 
 		if sampleSeeks && level >= 0 && !tseek {
 			if tset == nil {
@@ -230,9 +234,12 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			default:
 				panic("leveldb: invalid internalKey type")
 			}
+			for len(*dist) < level+1 {
+				*dist = append(*dist, 0)
+			}
+			atomic.AddUint64(&((*dist)[level]), 1)
 			return false
 		}
-
 		return true
 	})
 

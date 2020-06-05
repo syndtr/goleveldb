@@ -33,9 +33,11 @@ type DB struct {
 	seq uint64
 
 	// Read stats, need 64-bit alignment.
-	readN    uint64 // The cumulative number of read operation
-	memdbN   uint64 // The cumulative number of read operation hit in memdb(alive, frozen)
-	ftouched uint64 // The cumulative number of touched files during the read operations
+	readN     uint64 // The cumulative number of read operation
+	memdbN    uint64 // The cumulative number of read operation hit in memdb(alive, frozen)
+	ftouched  uint64 // The cumulative number of touched files during the read operations
+	hitLevels []uint64
+	touches   []uint64
 
 	// Stats. Need 64-bit alignment.
 	cWriteDelay            int64 // The cumulative duration of write delays
@@ -792,7 +794,7 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 	}
 
 	v := db.s.version()
-	value, cSched, err := v.get(auxt, ikey, ro, false, &db.ftouched)
+	value, cSched, err := v.get(auxt, ikey, ro, false, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -835,7 +837,7 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 	}
 
 	v := db.s.version()
-	_, cSched, err := v.get(auxt, ikey, ro, true, &db.ftouched)
+	_, cSched, err := v.get(auxt, ikey, ro, true, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -1081,6 +1083,8 @@ type DBStats struct {
 	TotalReads    uint64
 	TotalMemHits  uint64
 	TotalFTouched uint64
+	LevelHits     []uint64
+	LevelTouches  []uint64
 }
 
 // Stats populates s with database statistics.
@@ -1139,6 +1143,16 @@ func (db *DB) Stats(s *DBStats) error {
 	s.TotalReads = atomic.LoadUint64(&db.readN)
 	s.TotalMemHits = atomic.LoadUint64(&db.memdbN)
 	s.TotalFTouched = atomic.LoadUint64(&db.ftouched)
+
+	s.LevelTouches = make([]uint64, len(db.touches))
+	for i := 0; i < len(db.touches); i++ {
+		s.LevelTouches[i] = atomic.LoadUint64(&db.touches[i])
+	}
+	s.LevelHits = make([]uint64, len(db.hitLevels))
+	for i := 0; i < len(db.hitLevels); i++ {
+		s.LevelHits[i] = atomic.LoadUint64(&db.hitLevels[i])
+	}
+
 	return nil
 }
 
