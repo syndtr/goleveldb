@@ -672,7 +672,7 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 				} else {
 					atomic.AddUint64(&DataDiskHit, 1)
 					for len(LevelDataDiskHit) < r.level + 1 {
-						LevelMetaDiskHit = append(LevelDataDiskHit, 0)
+						LevelDataDiskHit = append(LevelDataDiskHit, 0)
 					}
 					atomic.AddUint64(&LevelDataDiskHit[r.level], 1)
 				}
@@ -707,7 +707,7 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 		} else {
 			atomic.AddUint64(&DataDiskHit, 1)
 			for len(LevelDataDiskHit) < r.level + 1 {
-				LevelMetaDiskHit = append(LevelDataDiskHit, 0)
+				LevelDataDiskHit = append(LevelDataDiskHit, 0)
 			}
 			atomic.AddUint64(&LevelDataDiskHit[r.level], 1)
 		}
