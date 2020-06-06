@@ -43,6 +43,10 @@ var (
 	// Bloom filter false positive stats.
 	BloomFilterMiss uint64 // The cumulative number of file hits in file cache
 	BloomFilterHit  uint64 // The cumulative number of file hits in file cache
+
+	//
+	FirstBlockHit  uint64
+	SecondBlockHit uint64
 )
 
 // Reader errors.
@@ -959,6 +963,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		}
 	}
 
+	var second bool
 	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
 	if !data.Seek(key) {
 		data.Release()
@@ -988,6 +993,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 			}
 			return
 		}
+		second = true
 	}
 
 	// Key doesn't use block buffer, no need to copy the buffer.
@@ -1002,6 +1008,11 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		}
 	}
 	data.Release()
+	if !second {
+		atomic.AddUint64(&FirstBlockHit, 1)
+	} else {
+		atomic.AddUint64(&SecondBlockHit, 1)
+	}
 	return
 }
 

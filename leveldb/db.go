@@ -1091,6 +1091,9 @@ type DBStats struct {
 	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk
 	LevelMetaCacheHit []uint64 // The cumulative number of data hits in metadata cache
 	LevelMetaDiskHit  []uint64 // The cumulative number of data hits in disk
+
+	FirstHit  uint64
+	SecondHit uint64
 }
 
 // Stats populates s with database statistics.
@@ -1175,6 +1178,8 @@ func (db *DB) Stats(s *DBStats) error {
 	for i := 0; i < len(table.LevelMetaDiskHit); i++ {
 		s.LevelMetaDiskHit[i] = atomic.LoadUint64(&table.LevelMetaDiskHit[i])
 	}
+	s.FirstHit = atomic.LoadUint64(&table.FirstBlockHit)
+	s.SecondHit = atomic.LoadUint64(&table.SecondBlockHit)
 	return nil
 }
 
