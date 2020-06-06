@@ -377,7 +377,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, 0, size, fd, nil, bpool, o)
+		tr, err := table.NewReader(reader, 0, size, fd, nil, nil, bpool, o)
 		if err != nil {
 			return err
 		}
@@ -1020,6 +1020,12 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		}
 	case p == "blockpool":
 		value = fmt.Sprintf("%v", db.s.tops.bpool)
+	case p == "cachedmetadata":
+		if db.s.tops.mcache != nil {
+			value = fmt.Sprintf("%d", db.s.tops.mcache.Size())
+		} else {
+			value = "<nil>"
+		}
 	case p == "cachedblock":
 		if db.s.tops.bcache != nil {
 			value = fmt.Sprintf("%d", db.s.tops.bcache.Size())
@@ -1056,6 +1062,7 @@ type DBStats struct {
 	IORead  uint64
 
 	BlockCacheSize    int
+	MetadataCacheSize int
 	OpenedTablesCount int
 
 	LevelSizes        Sizes
@@ -1110,6 +1117,11 @@ func (db *DB) Stats(s *DBStats) error {
 	s.WritePaused = atomic.LoadInt32(&db.inWritePaused) == 1
 
 	s.OpenedTablesCount = db.s.tops.cache.Size()
+	if db.s.tops.mcache != nil {
+		s.MetadataCacheSize = db.s.tops.mcache.Size()
+	} else {
+		s.MetadataCacheSize = 0
+	}
 	if db.s.tops.bcache != nil {
 		s.BlockCacheSize = db.s.tops.bcache.Size()
 	} else {

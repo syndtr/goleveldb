@@ -536,7 +536,8 @@ type Reader struct {
 	mu     sync.RWMutex
 	fd     storage.FileDesc
 	reader io.ReaderAt
-	cache  *cache.NamespaceGetter
+	mcache *cache.NamespaceGetter
+	bcache *cache.NamespaceGetter
 	err    error
 	bpool  *util.BufferPool
 
@@ -641,14 +642,18 @@ func (r *Reader) readBlock(bh blockHandle, verifyChecksum bool) (*block, error) 
 }
 
 func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool, metadata bool) (*block, util.Releaser, error) {
-	if r.cache != nil {
+	rcache := r.mcache
+	if !metadata {
+		rcache = r.bcache
+	}
+	if rcache != nil {
 		var (
 			err  error
 			ch   *cache.Handle
 			load bool
 		)
 		if fillCache {
-			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
+			ch = rcache.Get(bh.offset, func() (size int, value cache.Value) {
 				var b *block
 				b, err = r.readBlock(bh, verifyChecksum)
 				if err != nil {
@@ -658,7 +663,7 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 				return cap(b.data), b
 			})
 		} else {
-			ch = r.cache.Get(bh.offset, nil)
+			ch = rcache.Get(bh.offset, nil)
 		}
 		if ch != nil {
 			b, ok := ch.Value().(*block)
@@ -744,14 +749,14 @@ func (r *Reader) readFilterBlock(bh blockHandle) (*filterBlock, error) {
 }
 
 func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterBlock, util.Releaser, error) {
-	if r.cache != nil {
+	if r.mcache != nil {
 		var (
 			err  error
 			ch   *cache.Handle
 			load bool
 		)
 		if fillCache {
-			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
+			ch = r.mcache.Get(bh.offset, func() (size int, value cache.Value) {
 				var b *filterBlock
 				b, err = r.readFilterBlock(bh)
 				if err != nil {
@@ -761,7 +766,7 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 				return cap(b.data), b
 			})
 		} else {
-			ch = r.cache.Get(bh.offset, nil)
+			ch = r.mcache.Get(bh.offset, nil)
 		}
 		if ch != nil {
 			b, ok := ch.Value().(*filterBlock)
@@ -1121,7 +1126,8 @@ func (r *Reader) Release() {
 		r.filterBlock = nil
 	}
 	r.reader = nil
-	r.cache = nil
+	r.mcache = nil
+	r.bcache = nil
 	r.bpool = nil
 	r.err = ErrReaderReleased
 }
@@ -1130,7 +1136,7 @@ func (r *Reader) Release() {
 // The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is safe for concurrent use.
-func NewReader(f io.ReaderAt, level int, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+func NewReader(f io.ReaderAt, level int, size int64, fd storage.FileDesc, mcache, bcache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
 	}
@@ -1139,7 +1145,8 @@ func NewReader(f io.ReaderAt, level int, size int64, fd storage.FileDesc, cache 
 		level:          level,
 		fd:             fd,
 		reader:         f,
-		cache:          cache,
+		mcache:         mcache,
+		bcache:         bcache,
 		bpool:          bpool,
 		o:              o,
 		cmp:            o.GetComparer(),
@@ -1222,7 +1229,7 @@ func NewReader(f io.ReaderAt, level int, size int64, fd storage.FileDesc, cache 
 	metaBlock.Release()
 
 	// Cache index and filter block locally, since we don't have global cache.
-	if cache == nil {
+	if mcache == nil {
 		r.indexBlock, err = r.readBlock(r.indexBH, true)
 		if err != nil {
 			if errors.IsCorrupted(err) {
