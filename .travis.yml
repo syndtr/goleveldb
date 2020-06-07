@@ -2,7 +2,6 @@ language: go
 
 go:
   - 1.14.x
-  - tip
 
 script:
   - go vet ./...
