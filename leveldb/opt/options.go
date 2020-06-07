@@ -24,6 +24,10 @@ const (
 var (
 	DefaultBlockCacher                        = LRUCacher
 	DefaultBlockCacheCapacity                 = 8 * MiB
+	DefaultMetadataCacher                     = LRUCacher
+	DefaultMetadataCacheCapacity              = 8 * MiB
+	DefaultOpenFilesCacher                    = LRUCacher
+	DefaultOpenFilesCacheCapacity             = 500
 	DefaultBlockRestartInterval               = 16
 	DefaultBlockSize                          = 4 * KiB
 	DefaultCompactionExpandLimitFactor        = 25
@@ -38,8 +42,6 @@ var (
 	DefaultCompactionSeedFileNumberMultiplier = 2
 	DefaultCompressionType                    = SnappyCompression
 	DefaultIteratorSamplingRate               = 1 * MiB
-	DefaultOpenFilesCacher                    = LRUCacher
-	DefaultOpenFilesCacheCapacity             = 500
 	DefaultWriteBuffer                        = 4 * MiB
 	DefaultWriteL0PauseTrigger                = 12
 	DefaultWriteL0SlowdownTrigger             = 8
@@ -160,11 +162,66 @@ type Options struct {
 	// The default value is 8MiB.
 	BlockCacheCapacity int
 
+	// MetadataCacher provides cache algorithm for 'sorted table' metadata caching.
+	// Specify NoCacher to disable caching algorithm.
+	//
+	// The default value is LRUCacher.
+	MetadataCacher Cacher
+
+	// MetadataCacheCapacity defines the capacity of the 'sorted table' metadata caching.
+	// Use -1 for zero, this has same effect as specifying NoCacher to MetadataCacher.
+	//
+	// The default value is 8MiB.
+	MetadataCacheCapacity int
+
+	// OpenFilesCacher provides cache algorithm for open files caching.
+	// Specify NoCacher to disable caching algorithm.
+	//
+	// The default value is LRUCacher.
+	OpenFilesCacher Cacher
+
+	// OpenFilesCacheCapacity defines the capacity of the open files caching.
+	// Use -1 for zero, this has same effect as specifying NoCacher to OpenFilesCacher.
+	//
+	// The default value is 500.
+	OpenFilesCacheCapacity int
+
 	// BlockCacheEvictRemoved allows enable forced-eviction on cached block belonging
 	// to removed 'sorted table'.
 	//
 	// The default if false.
+	//
+	// Deprecated, please use CacheEvictRemoved instead.
 	BlockCacheEvictRemoved bool
+
+	// CacheAddCreated allows enable caching the file handler and metadata of newly created
+	// 'sorted table' automatically. This option will be effective for metadata cache, open
+	// file cache.
+	//
+	// The default if false.
+	CacheAddCreated bool
+
+	// CacheEvictRemoved allows enable forced-eviction on cached data belonging to removed
+	// 'sorted table'. This option will be effective for block cache, metadata cache, open
+	// file cache.
+	//
+	// The default if false.
+	CacheEvictRemoved bool
+
+	// DisableBlockCache allows disable use of cache.Cache functionality on 'sorted table'
+	// block.
+	//
+	// The default value is false.
+	DisableBlockCache bool
+
+	// EnableMetadataCache allows enable use of cache.Cache functionality on 'sorted table'
+	// metadata by caching them in a separate metadata cache.
+	//
+	// For compatibility consideration, if the metadata cache is disabled, all metadata
+	// will be cached in block cache with user-data if the block cache is enabled.
+	//
+	// The default value is false.
+	EnableMetadataCache bool
 
 	// BlockRestartInterval is the number of keys between restart points for
 	// delta encoding of keys.
@@ -278,12 +335,6 @@ type Options struct {
 	// The default value is false.
 	DisableBufferPool bool
 
-	// DisableBlockCache allows disable use of cache.Cache functionality on
-	// 'sorted table' block.
-	//
-	// The default value is false.
-	DisableBlockCache bool
-
 	// DisableCompactionBackoff allows disable compaction retry backoff.
 	//
 	// The default value is false.
@@ -351,18 +402,6 @@ type Options struct {
 	// The default is false.
 	NoWriteMerge bool
 
-	// OpenFilesCacher provides cache algorithm for open files caching.
-	// Specify NoCacher to disable caching algorithm.
-	//
-	// The default value is LRUCacher.
-	OpenFilesCacher Cacher
-
-	// OpenFilesCacheCapacity defines the capacity of the open files caching.
-	// Use -1 for zero, this has same effect as specifying NoCacher to OpenFilesCacher.
-	//
-	// The default value is 500.
-	OpenFilesCacheCapacity int
-
 	// If true then opens DB in read-only mode.
 	//
 	// The default value is false.
@@ -418,11 +457,75 @@ func (o *Options) GetBlockCacheCapacity() int {
 	return o.BlockCacheCapacity
 }
 
+func (o *Options) GetMetadataCacher() Cacher {
+	if o == nil || o.MetadataCacher == nil {
+		return DefaultMetadataCacher
+	} else if o.MetadataCacher == NoCacher {
+		return nil
+	}
+	return o.MetadataCacher
+}
+
+func (o *Options) GetMetadataCacheCapacity() int {
+	if o == nil || o.MetadataCacheCapacity == 0 {
+		return DefaultMetadataCacheCapacity
+	} else if o.MetadataCacheCapacity < 0 {
+		return 0
+	}
+	return o.MetadataCacheCapacity
+}
+
+func (o *Options) GetOpenFilesCacher() Cacher {
+	if o == nil || o.OpenFilesCacher == nil {
+		return DefaultOpenFilesCacher
+	} else if o.OpenFilesCacher == NoCacher {
+		return nil
+	}
+	return o.OpenFilesCacher
+}
+
+func (o *Options) GetOpenFilesCacheCapacity() int {
+	if o == nil || o.OpenFilesCacheCapacity == 0 {
+		return DefaultOpenFilesCacheCapacity
+	} else if o.OpenFilesCacheCapacity < 0 {
+		return 0
+	}
+	return o.OpenFilesCacheCapacity
+}
+
 func (o *Options) GetBlockCacheEvictRemoved() bool {
 	if o == nil {
 		return false
 	}
 	return o.BlockCacheEvictRemoved
+}
+
+func (o *Options) GetCacheAddCreated() bool {
+	if o == nil {
+		return false
+	}
+	return o.CacheAddCreated
+}
+
+func (o *Options) GetCacheEvictRemoved() bool {
+	if o == nil {
+		return false
+	}
+	return o.CacheEvictRemoved
+}
+
+func (o *Options) GetDisableBlockCache() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableBlockCache
+}
+
+func (o *Options) GetEnableMetadataCache() bool {
+	if o == nil {
+		return false
+	}
+	return o.EnableMetadataCache
 }
 
 func (o *Options) GetBlockRestartInterval() int {
@@ -553,13 +656,6 @@ func (o *Options) GetDisableBufferPool() bool {
 	return o.DisableBufferPool
 }
 
-func (o *Options) GetDisableBlockCache() bool {
-	if o == nil {
-		return false
-	}
-	return o.DisableBlockCache
-}
-
 func (o *Options) GetDisableCompactionBackoff() bool {
 	if o == nil {
 		return false
@@ -623,25 +719,6 @@ func (o *Options) GetNoWriteMerge() bool {
 		return false
 	}
 	return o.NoWriteMerge
-}
-
-func (o *Options) GetOpenFilesCacher() Cacher {
-	if o == nil || o.OpenFilesCacher == nil {
-		return DefaultOpenFilesCacher
-	}
-	if o.OpenFilesCacher == NoCacher {
-		return nil
-	}
-	return o.OpenFilesCacher
-}
-
-func (o *Options) GetOpenFilesCacheCapacity() int {
-	if o == nil || o.OpenFilesCacheCapacity == 0 {
-		return DefaultOpenFilesCacheCapacity
-	} else if o.OpenFilesCacheCapacity < 0 {
-		return 0
-	}
-	return o.OpenFilesCacheCapacity
 }
 
 func (o *Options) GetReadOnly() bool {

@@ -138,7 +138,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 	}
 }
 
-func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
+func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64, dist *[]uint64, touch *[]uint64) (value []byte, tcomp bool, err error) {
 	if v.closing {
 		return nil, false, ErrClosed
 	}
@@ -162,6 +162,13 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	// Since entries never hop across level, finding key/value
 	// in smaller level make later levels irrelevant.
 	v.walkOverlapping(aux, ikey, func(level int, t *tFile) bool {
+		// Mark the file is touched
+		atomic.AddUint64(counter, 1)
+		for len(*touch) < level+1 {
+			*touch = append(*touch, 0)
+		}
+		atomic.AddUint64(&((*touch)[level]), 1)
+
 		if sampleSeeks && level >= 0 && !tseek {
 			if tset == nil {
 				tset = &tSet{level, t}
@@ -175,9 +182,9 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			ferr        error
 		)
 		if noValue {
-			fikey, ferr = v.s.tops.findKey(t, ikey, ro)
+			fikey, ferr = v.s.tops.findKey(level, t, ikey, ro)
 		} else {
-			fikey, fval, ferr = v.s.tops.find(t, ikey, ro)
+			fikey, fval, ferr = v.s.tops.find(level, t, ikey, ro)
 		}
 
 		switch ferr {
@@ -208,6 +215,10 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 					default:
 						panic("leveldb: invalid internalKey type")
 					}
+					for len(*dist) < level+1 {
+						*dist = append(*dist, 0)
+					}
+					atomic.AddUint64(&((*dist)[level]), 1)
 					return false
 				}
 			}
@@ -229,7 +240,6 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			}
 			return false
 		}
-
 		return true
 	})
 

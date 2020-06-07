@@ -32,6 +32,13 @@ type DB struct {
 	// Need 64-bit alignment.
 	seq uint64
 
+	// Read stats, need 64-bit alignment.
+	readN     uint64 // The cumulative number of read operation
+	memdbN    uint64 // The cumulative number of read operation hit in memdb(alive, frozen)
+	ftouched  uint64 // The cumulative number of touched files during the read operations
+	hitLevels []uint64
+	touches   []uint64
+
 	// Stats. Need 64-bit alignment.
 	cWriteDelay            int64 // The cumulative duration of write delays
 	cWriteDelayN           int32 // The cumulative number of write delays
@@ -370,7 +377,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, size, fd, nil, bpool, o)
+		tr, err := table.NewReader(reader, 0, size, fd, nil, nil, bpool, o)
 		if err != nil {
 			return err
 		}
@@ -761,10 +768,14 @@ func memGet(mdb *memdb.DB, ikey internalKey, icmp *iComparer) (ok bool, mv []byt
 }
 
 func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
+	// Mark the read operation
+	atomic.AddUint64(&db.readN, 1)
+
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
 	if auxm != nil {
 		if ok, mv, me := memGet(auxm, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return append([]byte{}, mv...), me
 		}
 	}
@@ -777,12 +788,13 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		defer m.decref()
 
 		if ok, mv, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return append([]byte{}, mv...), me
 		}
 	}
 
 	v := db.s.version()
-	value, cSched, err := v.get(auxt, ikey, ro, false)
+	value, cSched, err := v.get(auxt, ikey, ro, false, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -799,10 +811,14 @@ func nilIfNotFound(err error) error {
 }
 
 func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (ret bool, err error) {
+	// Mark the read operation
+	atomic.AddUint64(&db.readN, 1)
+
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
 	if auxm != nil {
 		if ok, _, me := memGet(auxm, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return me == nil, nilIfNotFound(me)
 		}
 	}
@@ -815,12 +831,13 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		defer m.decref()
 
 		if ok, _, me := memGet(m.DB, ikey, db.s.icmp); ok {
+			atomic.AddUint64(&db.memdbN, 1)
 			return me == nil, nilIfNotFound(me)
 		}
 	}
 
 	v := db.s.version()
-	_, cSched, err := v.get(auxt, ikey, ro, true)
+	_, cSched, err := v.get(auxt, ikey, ro, true, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
@@ -1003,22 +1020,32 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		}
 	case p == "blockpool":
 		value = fmt.Sprintf("%v", db.s.tops.bpool)
+	case p == "cachedmetadata":
+		if db.s.tops.mcache != nil {
+			value = fmt.Sprintf("%d", db.s.tops.mcache.Size())
+		} else {
+			value = "<nil>"
+		}
 	case p == "cachedblock":
 		if db.s.tops.bcache != nil {
 			value = fmt.Sprintf("%d", db.s.tops.bcache.Size())
 		} else {
 			value = "<nil>"
 		}
+	case p == "cachestats":
+		value = fmt.Sprintf("DataCacheHit:%d DataDiskHit:%d MetaCacheHit:%d MetaDiskHit:%d",
+			atomic.LoadUint64(&table.DataCacheHit), atomic.LoadUint64(&table.DataDiskHit), atomic.LoadUint64(&table.MetaCacheHit), atomic.LoadUint64(&table.MetaDiskHit))
 	case p == "openedtables":
 		value = fmt.Sprintf("%d", db.s.tops.cache.Size())
 	case p == "alivesnaps":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveSnaps))
 	case p == "aliveiters":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveIters))
+	case p == "filterstats":
+		value = fmt.Sprintf("Hit:%d, Miss:%d", atomic.LoadUint64(&table.BloomFilterHit), atomic.LoadUint64(&table.BloomFilterMiss))
 	default:
 		err = ErrNotFound
 	}
-
 	return
 }
 
@@ -1035,6 +1062,7 @@ type DBStats struct {
 	IORead  uint64
 
 	BlockCacheSize    int
+	MetadataCacheSize int
 	OpenedTablesCount int
 
 	LevelSizes        Sizes
@@ -1047,6 +1075,32 @@ type DBStats struct {
 	Level0Comp    uint32
 	NonLevel0Comp uint32
 	SeekComp      uint32
+
+	// Cache hit rate stats.
+	DataCacheHit uint64 // The cumulative number of data hits in block cache
+	DataDiskHit  uint64 // The cumulative number of data hits in disk
+	MetaCacheHit uint64 // The cumulative number of data hits in metadata cache
+	MetaDiskHit  uint64 // The cumulative number of data hits in disk
+
+	// Bloom filter false positive stats.
+	BloomFilterMiss uint64 // The cumulative number of file hits in file cache
+	BloomFilterHit  uint64 // The cumulative number of file hits in file cache
+
+	// Read stats
+	TotalReads    uint64
+	TotalMemHits  uint64
+	TotalFTouched uint64
+
+	LevelHits    []uint64
+	LevelTouches []uint64
+
+	LevelDataCacheHit []uint64 // The cumulative number of data hits in block cache
+	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk
+	LevelMetaCacheHit []uint64 // The cumulative number of data hits in metadata cache
+	LevelMetaDiskHit  []uint64 // The cumulative number of data hits in disk
+
+	FirstHit  uint64
+	SecondHit uint64
 }
 
 // Stats populates s with database statistics.
@@ -1063,6 +1117,11 @@ func (db *DB) Stats(s *DBStats) error {
 	s.WritePaused = atomic.LoadInt32(&db.inWritePaused) == 1
 
 	s.OpenedTablesCount = db.s.tops.cache.Size()
+	if db.s.tops.mcache != nil {
+		s.MetadataCacheSize = db.s.tops.mcache.Size()
+	} else {
+		s.MetadataCacheSize = 0
+	}
 	if db.s.tops.bcache != nil {
 		s.BlockCacheSize = db.s.tops.bcache.Size()
 	} else {
@@ -1094,6 +1153,45 @@ func (db *DB) Stats(s *DBStats) error {
 	s.Level0Comp = atomic.LoadUint32(&db.level0Comp)
 	s.NonLevel0Comp = atomic.LoadUint32(&db.nonLevel0Comp)
 	s.SeekComp = atomic.LoadUint32(&db.seekComp)
+
+	s.DataCacheHit = atomic.LoadUint64(&table.DataCacheHit)
+	s.DataDiskHit = atomic.LoadUint64(&table.DataDiskHit)
+	s.MetaCacheHit = atomic.LoadUint64(&table.MetaCacheHit)
+	s.MetaDiskHit = atomic.LoadUint64(&table.MetaDiskHit)
+	s.BloomFilterHit = atomic.LoadUint64(&table.BloomFilterHit)
+	s.BloomFilterMiss = atomic.LoadUint64(&table.BloomFilterMiss)
+
+	s.TotalReads = atomic.LoadUint64(&db.readN)
+	s.TotalMemHits = atomic.LoadUint64(&db.memdbN)
+	s.TotalFTouched = atomic.LoadUint64(&db.ftouched)
+
+	s.LevelTouches = make([]uint64, len(db.touches))
+	for i := 0; i < len(db.touches); i++ {
+		s.LevelTouches[i] = atomic.LoadUint64(&db.touches[i])
+	}
+	s.LevelHits = make([]uint64, len(db.hitLevels))
+	for i := 0; i < len(db.hitLevels); i++ {
+		s.LevelHits[i] = atomic.LoadUint64(&db.hitLevels[i])
+	}
+
+	s.LevelDataCacheHit = make([]uint64, len(table.LevelDataDiskHit))
+	for i := 0; i < len(table.LevelDataCacheHit); i++ {
+		s.LevelDataCacheHit[i] = atomic.LoadUint64(&table.LevelDataCacheHit[i])
+	}
+	s.LevelDataDiskHit = make([]uint64, len(table.LevelDataDiskHit))
+	for i := 0; i < len(table.LevelDataDiskHit); i++ {
+		s.LevelDataDiskHit[i] = atomic.LoadUint64(&table.LevelDataDiskHit[i])
+	}
+	s.LevelMetaCacheHit = make([]uint64, len(table.LevelMetaCacheHit))
+	for i := 0; i < len(table.LevelMetaCacheHit); i++ {
+		s.LevelMetaCacheHit[i] = atomic.LoadUint64(&table.LevelMetaCacheHit[i])
+	}
+	s.LevelMetaDiskHit = make([]uint64, len(table.LevelMetaDiskHit))
+	for i := 0; i < len(table.LevelMetaDiskHit); i++ {
+		s.LevelMetaDiskHit[i] = atomic.LoadUint64(&table.LevelMetaDiskHit[i])
+	}
+	s.FirstHit = atomic.LoadUint64(&table.FirstBlockHit)
+	s.SecondHit = atomic.LoadUint64(&table.SecondBlockHit)
 	return nil
 }
 

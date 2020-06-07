@@ -357,12 +357,27 @@ func (x *tFilesSortByNum) Less(i, j int) bool {
 
 // Table operations.
 type tOps struct {
-	s            *session
-	noSync       bool
+	s      *session
+	noSync bool
+
+	// evictBlockRemoved is an option to evict cached block data when the
+	// file is removed by compaction.
+	//
+	// The option is deprecated, keep it here for backward compatibility
+	evictBlockRemoved bool
+
+	// addCreated is an option to cache the opened file handler and metadata
+	// when the file is created by compaction.
+	addCreated bool
+
+	// evictRemoved is an option to evict the metadata and all cached blocks
+	// when the file is removed by compaction
 	evictRemoved bool
-	cache        *cache.Cache
-	bcache       *cache.Cache
-	bpool        *util.BufferPool
+
+	cache  *cache.Cache
+	mcache *cache.Cache
+	bcache *cache.Cache
+	bpool  *util.BufferPool
 }
 
 // Creates an empty table and returns table writer.
@@ -411,27 +426,34 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 
 // Opens table. It returns a cache handle, which should
 // be released after use.
-func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
+func (t *tOps) open(f *tFile, level int) (ch *cache.Handle, err error) {
 	ch = t.cache.Get(0, uint64(f.fd.Num), func() (size int, value cache.Value) {
 		var r storage.Reader
 		r, err = t.s.stor.Open(f.fd)
 		if err != nil {
 			return 0, nil
 		}
-
-		var bcache *cache.NamespaceGetter
+		var (
+			mcache *cache.NamespaceGetter
+			bcache *cache.NamespaceGetter
+		)
+		// Cache metadata in a separate cache instance if metadata cache is enabled.
+		// Otherwise, mix them with the user-data for backward compatibility.
+		if t.mcache != nil {
+			mcache = &cache.NamespaceGetter{Cache: t.mcache, NS: uint64(f.fd.Num)}
+		} else if t.bcache != nil {
+			mcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
+		}
 		if t.bcache != nil {
 			bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(f.fd.Num)}
 		}
-
 		var tr *table.Reader
-		tr, err = table.NewReader(r, f.size, f.fd, bcache, t.bpool, t.s.o.Options)
+		tr, err = table.NewReader(r, level, f.size, f.fd, mcache, bcache, t.bpool, t.s.o.Options)
 		if err != nil {
 			r.Close()
 			return 0, nil
 		}
 		return 1, tr
-
 	})
 	if ch == nil && err == nil {
 		err = ErrClosed
@@ -441,8 +463,8 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 
 // Finds key/value pair whose key is greater than or equal to the
 // given key.
-func (t *tOps) find(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
-	ch, err := t.open(f)
+func (t *tOps) find(level int, f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
+	ch, err := t.open(f, level)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -451,8 +473,8 @@ func (t *tOps) find(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []b
 }
 
 // Finds key that is greater than or equal to the given key.
-func (t *tOps) findKey(f *tFile, key []byte, ro *opt.ReadOptions) (rkey []byte, err error) {
-	ch, err := t.open(f)
+func (t *tOps) findKey(level int, f *tFile, key []byte, ro *opt.ReadOptions) (rkey []byte, err error) {
+	ch, err := t.open(f, level)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +484,7 @@ func (t *tOps) findKey(f *tFile, key []byte, ro *opt.ReadOptions) (rkey []byte, 
 
 // Returns approximate offset of the given key.
 func (t *tOps) offsetOf(f *tFile, key []byte) (offset int64, err error) {
-	ch, err := t.open(f)
+	ch, err := t.open(f, 0)
 	if err != nil {
 		return
 	}
@@ -472,7 +494,7 @@ func (t *tOps) offsetOf(f *tFile, key []byte) (offset int64, err error) {
 
 // Creates an iterator from the given table.
 func (t *tOps) newIterator(f *tFile, slice *util.Range, ro *opt.ReadOptions) iterator.Iterator {
-	ch, err := t.open(f)
+	ch, err := t.open(f, 0)
 	if err != nil {
 		return iterator.NewEmptyIterator(err)
 	}
@@ -490,12 +512,51 @@ func (t *tOps) remove(fd storage.FileDesc) {
 		} else {
 			t.s.logf("table@remove removed @%d", fd.Num)
 		}
-		if t.evictRemoved && t.bcache != nil {
+		if (t.evictRemoved || t.evictBlockRemoved) && t.bcache != nil {
 			t.bcache.EvictNS(uint64(fd.Num))
+		}
+		if t.evictRemoved && t.mcache != nil {
+			t.mcache.EvictNS(uint64(fd.Num))
+		}
+		if t.evictRemoved && t.cache != nil {
+			t.cache.Evict(0, uint64(fd.Num))
 		}
 		// Try to reuse file num, useful for discarded transaction.
 		t.s.reuseFileNum(fd.Num)
 	})
+}
+
+// cacheCommittedWriter takes a committed writer and cache it.
+func (t *tOps) cacheCommittedWriter(w *tWriter) error {
+	if !t.addCreated || t.cache == nil {
+		return nil
+	}
+	r, err := t.s.stor.Open(w.fd)
+	if err != nil {
+		return err
+	}
+	var (
+		mcache *cache.NamespaceGetter
+		bcache *cache.NamespaceGetter
+	)
+	// Cache metadata in a separate cache instance if metadata cache is enabled.
+	// Otherwise, mix them with the user-data for backward compatibility.
+	if t.mcache != nil {
+		mcache = &cache.NamespaceGetter{Cache: t.mcache, NS: uint64(w.fd.Num)}
+	} else if t.bcache != nil {
+		mcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(w.fd.Num)}
+	}
+	if t.bcache != nil {
+		bcache = &cache.NamespaceGetter{Cache: t.bcache, NS: uint64(w.fd.Num)}
+	}
+	reader, err := w.tw.ToReader(r, w.fd, mcache, bcache, t.bpool, t.s.o.Options)
+	if err != nil {
+		return err
+	}
+	t.cache.Get(0, uint64(w.fd.Num), func() (size int, value cache.Value) {
+		return 1, reader
+	})
+	return nil
 }
 
 // Closes the table ops instance. It will close all tables,
@@ -505,17 +566,28 @@ func (t *tOps) close() {
 	if t.bcache != nil {
 		t.bcache.CloseWeak()
 	}
+	if t.mcache != nil {
+		t.mcache.CloseWeak()
+	}
 }
 
 // Creates new initialized table ops instance.
 func newTableOps(s *session) *tOps {
 	var (
 		cacher cache.Cacher
+		mcache *cache.Cache
 		bcache *cache.Cache
 		bpool  *util.BufferPool
 	)
 	if s.o.GetOpenFilesCacheCapacity() > 0 {
-		cacher = cache.NewLRU(s.o.GetOpenFilesCacheCapacity())
+		cacher = s.o.GetOpenFilesCacher().New(s.o.GetOpenFilesCacheCapacity())
+	}
+	if s.o.GetEnableMetadataCache() {
+		var mcacher cache.Cacher
+		if s.o.GetMetadataCacheCapacity() > 0 {
+			mcacher = s.o.GetMetadataCacher().New(s.o.GetMetadataCacheCapacity())
+		}
+		mcache = cache.NewCache(mcacher)
 	}
 	if !s.o.GetDisableBlockCache() {
 		var bcacher cache.Cacher
@@ -528,17 +600,21 @@ func newTableOps(s *session) *tOps {
 		bpool = util.NewBufferPool(s.o.GetBlockSize() + 5)
 	}
 	return &tOps{
-		s:            s,
-		noSync:       s.o.GetNoSync(),
-		evictRemoved: s.o.GetBlockCacheEvictRemoved(),
-		cache:        cache.NewCache(cacher),
-		bcache:       bcache,
-		bpool:        bpool,
+		s:                 s,
+		noSync:            s.o.GetNoSync(),
+		evictBlockRemoved: s.o.GetBlockCacheEvictRemoved(),
+		addCreated:        s.o.GetCacheAddCreated(),
+		evictRemoved:      s.o.GetCacheEvictRemoved(),
+		cache:             cache.NewCache(cacher),
+		mcache:            mcache,
+		bcache:            bcache,
+		bpool:             bpool,
 	}
 }
 
 // tWriter wraps the table writer. It keep track of file descriptor
-// and added key range.
+// and added key range. Also it's also responsible for caching newly
+// created file if required.
 type tWriter struct {
 	t *tOps
 
@@ -584,7 +660,8 @@ func (w *tWriter) finish() (f *tFile, err error) {
 			return
 		}
 	}
-	f = newTableFile(w.fd, int64(w.tw.BytesLen()), internalKey(w.first), internalKey(w.last))
+	f = newTableFile(w.fd, int64(w.tw.BytesLen()), w.first, w.last)
+	w.t.cacheCommittedWriter(w) // Cache the newly created file
 	return
 }
 
