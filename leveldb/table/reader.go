@@ -35,10 +35,10 @@ var (
 	MetaCacheHit uint64 // The cumulative number of data hits in metadata cache
 	MetaDiskHit  uint64 // The cumulative number of data hits in disk
 
-	LevelDataCacheHit []uint64 // The cumulative number of data hits in block cache
-	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk
-	LevelMetaCacheHit []uint64 // The cumulative number of data hits in metadata cache
-	LevelMetaDiskHit  []uint64 // The cumulative number of data hits in disk
+	LevelDataCacheHit = make([]uint64, 8) // The cumulative number of data hits in block cache
+	LevelDataDiskHit  = make([]uint64, 8) // The cumulative number of data hits in disk
+	LevelMetaCacheHit = make([]uint64, 8) // The cumulative number of data hits in metadata cache
+	LevelMetaDiskHit  = make([]uint64, 8) // The cumulative number of data hits in disk
 
 	// Bloom filter false positive stats.
 	BloomFilterMiss uint64 // The cumulative number of file hits in file cache
@@ -674,13 +674,13 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 			if load {
 				if metadata {
 					atomic.AddUint64(&MetaDiskHit, 1)
-					for len(LevelMetaDiskHit) < r.level + 1 {
+					for len(LevelMetaDiskHit) < r.level+1 {
 						LevelMetaDiskHit = append(LevelMetaDiskHit, 0)
 					}
 					atomic.AddUint64(&LevelMetaDiskHit[r.level], 1)
 				} else {
 					atomic.AddUint64(&DataDiskHit, 1)
-					for len(LevelDataDiskHit) < r.level + 1 {
+					for len(LevelDataDiskHit) < r.level+1 {
 						LevelDataDiskHit = append(LevelDataDiskHit, 0)
 					}
 					atomic.AddUint64(&LevelDataDiskHit[r.level], 1)
@@ -688,13 +688,13 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 			} else {
 				if metadata {
 					atomic.AddUint64(&MetaCacheHit, 1)
-					for len(LevelMetaCacheHit) < r.level + 1 {
+					for len(LevelMetaCacheHit) < r.level+1 {
 						LevelMetaCacheHit = append(LevelMetaCacheHit, 0)
 					}
 					atomic.AddUint64(&LevelMetaCacheHit[r.level], 1)
 				} else {
 					atomic.AddUint64(&DataCacheHit, 1)
-					for len(LevelDataCacheHit) < r.level + 1 {
+					for len(LevelDataCacheHit) < r.level+1 {
 						LevelDataCacheHit = append(LevelDataCacheHit, 0)
 					}
 					atomic.AddUint64(&LevelDataCacheHit[r.level], 1)
@@ -709,13 +709,13 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool,
 	if err == nil {
 		if metadata {
 			atomic.AddUint64(&MetaDiskHit, 1)
-			for len(LevelMetaDiskHit) < r.level + 1 {
+			for len(LevelMetaDiskHit) < r.level+1 {
 				LevelMetaDiskHit = append(LevelMetaDiskHit, 0)
 			}
 			atomic.AddUint64(&LevelMetaDiskHit[r.level], 1)
 		} else {
 			atomic.AddUint64(&DataDiskHit, 1)
-			for len(LevelDataDiskHit) < r.level + 1 {
+			for len(LevelDataDiskHit) < r.level+1 {
 				LevelDataDiskHit = append(LevelDataDiskHit, 0)
 			}
 			atomic.AddUint64(&LevelDataDiskHit[r.level], 1)
@@ -776,13 +776,13 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 			}
 			if load {
 				atomic.AddUint64(&MetaDiskHit, 1)
-				for len(LevelMetaDiskHit) < r.level + 1 {
+				for len(LevelMetaDiskHit) < r.level+1 {
 					LevelMetaDiskHit = append(LevelMetaDiskHit, 0)
 				}
 				atomic.AddUint64(&LevelMetaDiskHit[r.level], 1)
 			} else {
 				atomic.AddUint64(&MetaCacheHit, 1)
-				for len(LevelMetaCacheHit) < r.level + 1 {
+				for len(LevelMetaCacheHit) < r.level+1 {
 					LevelMetaCacheHit = append(LevelMetaCacheHit, 0)
 				}
 				atomic.AddUint64(&LevelMetaCacheHit[r.level], 1)
@@ -795,7 +795,7 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 	b, err := r.readFilterBlock(bh)
 	if err == nil {
 		atomic.AddUint64(&MetaDiskHit, 1)
-		for len(LevelMetaDiskHit) < r.level + 1 {
+		for len(LevelMetaDiskHit) < r.level+1 {
 			LevelMetaDiskHit = append(LevelMetaDiskHit, 0)
 		}
 		atomic.AddUint64(&LevelMetaDiskHit[r.level], 1)

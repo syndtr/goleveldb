@@ -101,7 +101,9 @@ func openDB(s *session) (*DB, error) {
 	s.log("db@open opening")
 	start := time.Now()
 	db := &DB{
-		s: s,
+		hitLevels: make([]uint64, 8),
+		touches:   make([]uint64, 8),
+		s:         s,
 		// Initial sequence
 		seq: s.stSeqNum,
 		// MemDB
@@ -1091,8 +1093,8 @@ type DBStats struct {
 	TotalMemHits  uint64
 	TotalFTouched uint64
 
-	LevelHits     []uint64
-	LevelTouches  []uint64
+	LevelHits    []uint64
+	LevelTouches []uint64
 
 	LevelDataCacheHit []uint64 // The cumulative number of data hits in block cache
 	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk

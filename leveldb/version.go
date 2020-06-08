@@ -137,7 +137,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 	}
 }
 
-func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f func(level int, t *tFile) ([]byte, error), lf func(level int) bool) ([]byte, error){
+func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f func(level int, t *tFile) ([]byte, error), lf func(level int) bool) ([]byte, error) {
 	ukey := ikey.ukey()
 
 	// Aux level.
@@ -186,8 +186,8 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
-							val:  val,
-							err:  err,
+							val: val,
+							err: err,
 						}
 						select {
 						case signal <- task:
@@ -209,8 +209,8 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
-							val:  val,
-							err:  err,
+							val: val,
+							err: err,
 						}
 						select {
 						case signal <- task:
@@ -228,8 +228,8 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 	var (
 		next int
 
-		val  []byte
-		err  error
+		val []byte
+		err error
 	)
 
 waiting:
