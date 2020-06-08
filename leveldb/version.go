@@ -160,7 +160,6 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 	type searchResult struct {
 		val     []byte
 		err     error
-		running bool
 	}
 	var (
 		task   int
@@ -169,6 +168,15 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 		done   = make(chan struct{})
 		result []*searchResult
 	)
+	for level, tables := range v.levels {
+		if level == 0 {
+			for i := 0; i < len(tables); i++ {
+				result = append(result, nil)
+			}
+		} else {
+			result = append(result, nil)
+		}
+	}
 	// Walk tables level-by-level.
 	for level, tables := range v.levels {
 		if len(tables) == 0 {
@@ -181,7 +189,6 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 			for _, t := range tables {
 				if t.overlaps(v.s.icmp, ukey, ukey) {
 					wg.Add(1)
-					result = append(result, &searchResult{running: true})
 					go func(task int) {
 						defer wg.Done()
 						val, err := f(level, t)
@@ -204,7 +211,6 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 				t := tables[i]
 				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
 					wg.Add(1)
-					result = append(result, &searchResult{running: true})
 					go func(task int) {
 						defer wg.Done()
 						val, err := f(level, t)
@@ -232,19 +238,24 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 		err error
 	)
 
+	// fmt.Println("WAITING...............", task)
 waiting:
 	for {
 		select {
 		case taskDone := <-signal:
+			// fmt.Println("done", taskDone)
 			if taskDone != next {
 				continue
 			}
+			// fmt.Println("start processing", taskDone)
 			for {
 				if next == len(result) {
+					// fmt.Println("....... all done")
 					close(done)
 					break waiting
 				}
-				if result[next].running {
+				if result[next] == nil {
+					// fmt.Println(next, "....... running")
 					break
 				}
 				if result[next].err == ErrNotFound {
@@ -258,6 +269,7 @@ waiting:
 		}
 	}
 	wg.Wait()
+	// fmt.Println("WAITING DONE...............")
 
 	return val, err
 }

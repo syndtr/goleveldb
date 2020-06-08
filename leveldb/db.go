@@ -839,7 +839,7 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 	}
 
 	v := db.s.version()
-	_, cSched, err := v.concurrentGet(auxt, ikey, ro, true, &db.ftouched, &db.hitLevels, &db.touches)
+	_, cSched, err := v.get(auxt, ikey, ro, true, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
