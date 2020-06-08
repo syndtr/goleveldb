@@ -189,7 +189,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 			for _, t := range tables {
 				if t.overlaps(v.s.icmp, ukey, ukey) {
 					wg.Add(1)
-					go func(task int) {
+					go func(t *tFile, task, level int) {
 						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
@@ -200,7 +200,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 						case signal <- task:
 						case <-done:
 						}
-					}(task)
+					}(t, task, level)
 					task += 1
 				}
 			}
@@ -211,7 +211,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 				t := tables[i]
 				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
 					wg.Add(1)
-					go func(task int) {
+					go func(t *tFile, task, level int) {
 						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
@@ -222,7 +222,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 						case signal <- task:
 						case <-done:
 						}
-					}(task)
+					}(t, task, level)
 					task += 1
 				}
 			}
@@ -249,7 +249,7 @@ waiting:
 			}
 			// fmt.Println("start processing", taskDone)
 			for {
-				if next == len(result) {
+				if next == task {
 					// fmt.Println("....... all done")
 					close(done)
 					break waiting
