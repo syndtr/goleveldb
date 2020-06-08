@@ -262,7 +262,7 @@ func (h *dbHarness) getValr(db Reader, key, value string) {
 	}
 	rval := string(r)
 	if rval != value {
-		t.Errorf("Get: invalid value, got '%s', want '%s'", rval, value)
+		t.Fatalf("Get: invalid value, got '%s', want '%s'", rval, value)
 	}
 }
 
