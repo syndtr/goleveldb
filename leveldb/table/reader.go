@@ -35,10 +35,10 @@ var (
 	MetaCacheHit uint64 // The cumulative number of data hits in metadata cache
 	MetaDiskHit  uint64 // The cumulative number of data hits in disk
 
-	LevelDataCacheHit []uint64 // The cumulative number of data hits in block cache
-	LevelDataDiskHit  []uint64 // The cumulative number of data hits in disk
-	LevelMetaCacheHit []uint64 // The cumulative number of data hits in metadata cache
-	LevelMetaDiskHit  []uint64 // The cumulative number of data hits in disk
+	LevelDataCacheHit = make([]uint64, 8) // The cumulative number of data hits in block cache
+	LevelDataDiskHit  = make([]uint64, 8) // The cumulative number of data hits in disk
+	LevelMetaCacheHit = make([]uint64, 8) // The cumulative number of data hits in metadata cache
+	LevelMetaDiskHit  = make([]uint64, 8) // The cumulative number of data hits in disk
 
 	// Bloom filter false positive stats.
 	BloomFilterMiss uint64 // The cumulative number of file hits in file cache

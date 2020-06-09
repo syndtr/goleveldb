@@ -92,6 +92,8 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 
 	// Aux level.
 	if aux != nil {
+		// Files in auxiliary space may overlap with each other
+		// and may not sorted. So iterate all files.
 		for _, t := range aux {
 			if t.overlaps(v.s.icmp, ukey, ukey) {
 				if !f(-1, t) {
@@ -99,21 +101,19 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 				}
 			}
 		}
-
 		if lf != nil && !lf(-1) {
 			return
 		}
 	}
-
 	// Walk tables level-by-level.
 	for level, tables := range v.levels {
 		if len(tables) == 0 {
 			continue
 		}
-
 		if level == 0 {
-			// Level-0 files may overlap each other. Find all files that
-			// overlap ukey.
+			// Level-0 files may overlap each other. But all files iterated
+			// here are sorted by number(from latest to oldest). So if we
+			// find the entry in the newer file, abort iteration.
 			for _, t := range tables {
 				if t.overlaps(v.s.icmp, ukey, ukey) {
 					if !f(level, t) {
@@ -122,6 +122,8 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 				}
 			}
 		} else {
+			// Non-Level-0 files won't overlap each other. So if we
+			// find the entry in the lower level, abort iteration.
 			if i := tables.searchMax(v.s.icmp, ikey); i < len(tables) {
 				t := tables[i]
 				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
@@ -131,11 +133,138 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 				}
 			}
 		}
+	}
+}
 
-		if lf != nil && !lf(level) {
-			return
+func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f func(level int, t *tFile) ([]byte, error), lf func(level int) bool) ([]byte, error) {
+	ukey := ikey.ukey()
+
+	// Aux level.
+	if aux != nil {
+		// Files in auxiliary space may overlap with each other
+		// and may not sorted. So iterate all files.
+		for _, t := range aux {
+			if t.overlaps(v.s.icmp, ukey, ukey) {
+				_, err := f(-1, t)
+				if err != ErrNotFound {
+					return nil, err
+				}
+			}
+		}
+		if lf != nil && !lf(-1) {
+			return nil, nil
 		}
 	}
+	// searchResult
+	type searchResult struct {
+		val     []byte
+		err     error
+	}
+	var (
+		task   int
+		signal = make(chan int)
+		done   = make(chan struct{})
+		result []*searchResult
+	)
+	for level, tables := range v.levels {
+		if level == 0 {
+			for i := 0; i < len(tables); i++ {
+				result = append(result, nil)
+			}
+		} else {
+			result = append(result, nil)
+		}
+	}
+	// Walk tables level-by-level.
+	for level, tables := range v.levels {
+		if len(tables) == 0 {
+			continue
+		}
+		if level == 0 {
+			// Level-0 files may overlap each other. But all files iterated
+			// here are sorted by number(from latest to oldest). So if we
+			// find the entry in the newer file, abort iteration.
+			for _, t := range tables {
+				if t.overlaps(v.s.icmp, ukey, ukey) {
+					go func(t *tFile, task, level int) {
+						val, err := f(level, t)
+						result[task] = &searchResult{
+							val: val,
+							err: err,
+						}
+						select {
+						case signal <- task:
+						case <-done:
+						}
+					}(t, task, level)
+					task += 1
+				}
+			}
+		} else {
+			// Non-Level-0 files won't overlap each other. So if we
+			// find the entry in the lower level, abort iteration.
+			if i := tables.searchMax(v.s.icmp, ikey); i < len(tables) {
+				t := tables[i]
+				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
+					go func(t *tFile, task, level int) {
+						val, err := f(level, t)
+						result[task] = &searchResult{
+							val: val,
+							err: err,
+						}
+						select {
+						case signal <- task:
+						case <-done:
+						}
+					}(t, task, level)
+					task += 1
+				}
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil, ErrNotFound
+	}
+	var (
+		next int
+
+		val []byte
+		err error
+	)
+
+	// fmt.Println("WAITING...............", task)
+waiting:
+	for {
+		select {
+		case taskDone := <-signal:
+			// fmt.Println("done", taskDone)
+			if taskDone != next {
+				continue
+			}
+			// fmt.Println("start processing", taskDone)
+			for {
+				if next == task {
+					// fmt.Println("....... all done")
+					close(done)
+					break waiting
+				}
+				if result[next] == nil {
+					// fmt.Println(next, "....... running")
+					break
+				}
+				if result[next].err == ErrNotFound {
+					next += 1
+					continue
+				}
+				val, err = result[next].val, result[next].err
+				close(done)
+				break waiting
+			}
+		}
+	}
+	// fmt.Println("WAITING DONE...............")
+
+	return val, err
 }
 
 func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64, dist *[]uint64, touch *[]uint64) (value []byte, tcomp bool, err error) {
@@ -150,7 +279,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 		tset  *tSet
 		tseek bool
 
-		// Level-0.
+		// Level -1
 		zfound bool
 		zseq   uint64
 		zkt    keyType
@@ -198,8 +327,11 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 
 		if fukey, fseq, fkt, fkerr := parseInternalKey(fikey); fkerr == nil {
 			if v.s.icmp.uCompare(ukey, fukey) == 0 {
-				// Level <= 0 may overlaps each-other.
-				if level <= 0 {
+				// - Level < 0 may overlap each-other.
+				// - Level == 0 may overlap each-other but we always read from
+				//   the latest file
+				// - Level > 0 won't overlap each-other
+				if level < 0 {
 					if fseq >= zseq {
 						zfound = true
 						zseq = fseq
@@ -226,8 +358,94 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			err = fkerr
 			return false
 		}
-
 		return true
+	}, func(level int) bool {
+		if zfound {
+			switch zkt {
+			case keyTypeVal:
+				value = zval
+				err = nil
+			case keyTypeDel:
+			default:
+				panic("leveldb: invalid internalKey type")
+			}
+			return false
+		}
+		return true
+	})
+
+	if tseek && tset.table.consumeSeek() <= 0 {
+		tcomp = atomic.CompareAndSwapPointer(&v.cSeek, nil, unsafe.Pointer(tset))
+	}
+
+	return
+}
+
+func (v *version) concurrentGet(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool, counter *uint64, dist *[]uint64, touch *[]uint64) (value []byte, tcomp bool, err error) {
+	if v.closing {
+		return nil, false, ErrClosed
+	}
+	ukey := ikey.ukey()
+
+	var (
+		tset  *tSet
+		tseek bool
+
+		// Level -1
+		zfound bool
+		zseq   uint64
+		zkt    keyType
+		zval   []byte
+	)
+	// Since entries never hop across level, finding key/value
+	// in smaller level make later levels irrelevant.
+	value, err = v.walkOverlappingConcurrently(nil, ikey, func(level int, t *tFile) ([]byte, error) {
+		// Mark the file is touched
+		atomic.AddUint64(counter, 1)
+		for len(*touch) < level+1 {
+			*touch = append(*touch, 0)
+		}
+		atomic.AddUint64(&((*touch)[level]), 1)
+		var (
+			fikey, fval []byte
+			ferr        error
+		)
+		if noValue {
+			fikey, ferr = v.s.tops.findKey(level, t, ikey, ro)
+		} else {
+			fikey, fval, ferr = v.s.tops.find(level, t, ikey, ro)
+		}
+		if ferr != nil {
+			return nil, ferr // ErrNotFound, etc
+		}
+		fukey, fseq, fkt, fkerr := parseInternalKey(fikey)
+		if fkerr != nil {
+			return nil, fkerr
+		}
+		if v.s.icmp.uCompare(ukey, fukey) == 0 {
+			if level < 0 {
+				if fseq >= zseq {
+					zfound = true
+					zseq = fseq
+					zkt = fkt
+					zval = fval
+				}
+			} else {
+				for len(*dist) < level+1 {
+					*dist = append(*dist, 0)
+				}
+				atomic.AddUint64(&((*dist)[level]), 1)
+				switch fkt {
+				case keyTypeVal:
+					return fval, nil
+				case keyTypeDel:
+					return nil, nil
+				default:
+					panic("leveldb: invalid internalKey type")
+				}
+			}
+		}
+		return nil, ErrNotFound
 	}, func(level int) bool {
 		if zfound {
 			switch zkt {

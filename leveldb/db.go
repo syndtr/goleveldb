@@ -101,7 +101,9 @@ func openDB(s *session) (*DB, error) {
 	s.log("db@open opening")
 	start := time.Now()
 	db := &DB{
-		s: s,
+		hitLevels: make([]uint64, 8),
+		touches:   make([]uint64, 8),
+		s:         s,
 		// Initial sequence
 		seq: s.stSeqNum,
 		// MemDB
@@ -794,7 +796,7 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 	}
 
 	v := db.s.version()
-	value, cSched, err := v.get(auxt, ikey, ro, false, &db.ftouched, &db.hitLevels, &db.touches)
+	value, cSched, err := v.concurrentGet(auxt, ikey, ro, false, &db.ftouched, &db.hitLevels, &db.touches)
 	v.release()
 	if cSched {
 		// Trigger table compaction.
