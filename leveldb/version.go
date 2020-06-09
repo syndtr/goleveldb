@@ -8,7 +8,6 @@ package leveldb
 
 import (
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -163,7 +162,6 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 	}
 	var (
 		task   int
-		wg     sync.WaitGroup
 		signal = make(chan int)
 		done   = make(chan struct{})
 		result []*searchResult
@@ -188,9 +186,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 			// find the entry in the newer file, abort iteration.
 			for _, t := range tables {
 				if t.overlaps(v.s.icmp, ukey, ukey) {
-					wg.Add(1)
 					go func(t *tFile, task, level int) {
-						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
 							val: val,
@@ -210,9 +206,7 @@ func (v *version) walkOverlappingConcurrently(aux tFiles, ikey internalKey, f fu
 			if i := tables.searchMax(v.s.icmp, ikey); i < len(tables) {
 				t := tables[i]
 				if v.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
-					wg.Add(1)
 					go func(t *tFile, task, level int) {
-						defer wg.Done()
 						val, err := f(level, t)
 						result[task] = &searchResult{
 							val: val,
@@ -268,7 +262,6 @@ waiting:
 			}
 		}
 	}
-	wg.Wait()
 	// fmt.Println("WAITING DONE...............")
 
 	return val, err
