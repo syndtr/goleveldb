@@ -63,21 +63,12 @@ func (s *session) pickCompaction() *compaction {
 		sourceLevel = v.cLevel
 		cptr := s.getCompPtr(sourceLevel)
 		tables := v.levels[sourceLevel]
-		if cptr != nil {
-			if sourceLevel == 0 {
-				for _, t := range tables {
-					if s.icmp.Compare(t.imax, cptr) > 0 {
-						t0 = append(t0, t)
-						break
-					}
-				}
-			} else {
-				n := len(tables)
-				if i := sort.Search(n, func(i int) bool {
-					return s.icmp.Compare(tables[i].imax, cptr) > 0
-				}); i < n {
-					t0 = append(t0, tables[i])
-				}
+		if cptr != nil && sourceLevel > 0 {
+			n := len(tables)
+			if i := sort.Search(n, func(i int) bool {
+				return s.icmp.Compare(tables[i].imax, cptr) > 0
+			}); i < n {
+				t0 = append(t0, tables[i])
 			}
 		}
 		if len(t0) == 0 {
