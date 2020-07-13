@@ -85,6 +85,7 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 		case tLen >= slowdownTrigger && !delayed:
 			delayed = true
 			time.Sleep(time.Millisecond)
+			return false
 		case mdbFree >= n:
 			return false
 		case tLen >= pauseTrigger:
