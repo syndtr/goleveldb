@@ -12,9 +12,10 @@ import (
 )
 
 type lruNode struct {
-	n   *Node
-	h   *Handle
-	ban bool
+	n     *Node
+	h     *Handle
+	ban   bool
+	lruNS byte
 
 	next, prev *lruNode
 }
@@ -38,26 +39,26 @@ func (n *lruNode) remove() {
 	}
 }
 
-type lru struct {
+type SharedLRU struct {
 	mu       sync.Mutex
 	capacity int
 	used     int
 	recent   lruNode
 }
 
-func (r *lru) reset() {
+func (r *SharedLRU) reset() {
 	r.recent.next = &r.recent
 	r.recent.prev = &r.recent
 	r.used = 0
 }
 
-func (r *lru) Capacity() int {
+func (r *SharedLRU) _capacity() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.capacity
 }
 
-func (r *lru) SetCapacity(capacity int) {
+func (r *SharedLRU) setCapacity(capacity int) {
 	var evicted []*lruNode
 
 	r.mu.Lock()
@@ -79,13 +80,13 @@ func (r *lru) SetCapacity(capacity int) {
 	}
 }
 
-func (r *lru) Promote(n *Node) {
+func (r *SharedLRU) promote(n *Node, lruNS byte) {
 	var evicted []*lruNode
 
 	r.mu.Lock()
 	if n.CacheData == nil {
 		if n.Size() <= r.capacity {
-			rn := &lruNode{n: n, h: n.GetHandle()}
+			rn := &lruNode{n: n, h: n.GetHandle(), lruNS: lruNS}
 			rn.insert(&r.recent)
 			n.CacheData = unsafe.Pointer(rn)
 			r.used += n.Size()
@@ -115,7 +116,7 @@ func (r *lru) Promote(n *Node) {
 	}
 }
 
-func (r *lru) Ban(n *Node) {
+func (r *SharedLRU) ban(n *Node) {
 	r.mu.Lock()
 	if n.CacheData == nil {
 		n.CacheData = unsafe.Pointer(&lruNode{n: n, ban: true})
@@ -135,7 +136,7 @@ func (r *lru) Ban(n *Node) {
 	r.mu.Unlock()
 }
 
-func (r *lru) Evict(n *Node) {
+func (r *SharedLRU) evict(n *Node) {
 	r.mu.Lock()
 	rn := (*lruNode)(n.CacheData)
 	if rn == nil || rn.ban {
@@ -148,19 +149,21 @@ func (r *lru) Evict(n *Node) {
 	rn.h.Release()
 }
 
-func (r *lru) EvictNS(ns uint64) {
+//nodeNS optional.
+func (r *SharedLRU) evictMulti(lruNS byte, nodeNS *uint64) {
 	var evicted []*lruNode
 
 	r.mu.Lock()
 	for e := r.recent.prev; e != &r.recent; {
 		rn := e
 		e = e.prev
-		if rn.n.NS() == ns {
-			rn.remove()
-			rn.n.CacheData = nil
-			r.used -= rn.n.Size()
-			evicted = append(evicted, rn)
+		if rn.lruNS != lruNS || (nodeNS != nil && rn.n.NS() != *nodeNS) {
+			continue
 		}
+		rn.remove()
+		rn.n.CacheData = nil
+		r.used -= rn.n.Size()
+		evicted = append(evicted, rn)
 	}
 	r.mu.Unlock()
 
@@ -169,27 +172,57 @@ func (r *lru) EvictNS(ns uint64) {
 	}
 }
 
-func (r *lru) EvictAll() {
-	r.mu.Lock()
-	back := r.recent.prev
-	for rn := back; rn != &r.recent; rn = rn.prev {
-		rn.n.CacheData = nil
-	}
-	r.reset()
-	r.mu.Unlock()
+type lru struct {
+	lruNS byte
+	s     *SharedLRU
+}
 
-	for rn := back; rn != &r.recent; rn = rn.prev {
-		rn.h.Release()
-	}
+func (r *lru) Capacity() int {
+	return r.s._capacity()
+}
+
+func (r *lru) SetCapacity(capacity int) {
+	r.s.setCapacity(capacity)
+}
+
+func (r *lru) Promote(n *Node) {
+	r.s.promote(n, r.lruNS)
+}
+
+func (r *lru) Ban(n *Node) {
+	r.s.ban(n)
+}
+
+func (r *lru) Evict(n *Node) {
+	r.s.evict(n)
+}
+
+func (r *lru) EvictNS(ns uint64) {
+	r.s.evictMulti(r.lruNS, &ns)
+}
+
+func (r *lru) EvictAll() {
+	r.s.evictMulti(r.lruNS, nil)
 }
 
 func (r *lru) Close() error {
 	return nil
 }
 
-// NewLRU create a new LRU-cache.
-func NewLRU(capacity int) Cacher {
-	r := &lru{capacity: capacity}
+// NewSharedLRU creates a new shared lru.
+func NewSharedLRU(capacity int) *SharedLRU {
+	r := &SharedLRU{capacity: capacity}
 	r.reset()
 	return r
+}
+
+// NewLRU create a new namespaced LRU-cache.
+func NewNamespaceLRU(ns byte, s *SharedLRU) Cacher {
+	return &lru{ns, s}
+}
+
+// NewLRU create a new LRU-cache.
+func NewLRU(capacity int) Cacher {
+	s := NewSharedLRU(capacity)
+	return NewNamespaceLRU(0, s)
 }
