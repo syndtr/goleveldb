@@ -9,6 +9,7 @@ package opt
 
 import (
 	"math"
+	"runtime"
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
@@ -240,6 +241,12 @@ type Options struct {
 	//
 	// The default value is nil.
 	CompactionTotalSizeMultiplierPerLevel []float64
+
+	// CompactionConcurrency defines the maximum compaction concurrency allowed
+	// in the system.
+	//
+	// The default value is CPU core number.
+	CompactionConcurrency int
 
 	// Comparer defines a total ordering over the space of []byte keys: a 'less
 	// than' relationship. The same comparison algorithm must be used for reads
@@ -493,6 +500,13 @@ func (o *Options) GetCompactionTotalSize(level int) int64 {
 		mult = math.Pow(DefaultCompactionTotalSizeMultiplier, float64(level))
 	}
 	return int64(float64(base) * mult)
+}
+
+func (o *Options) GetCompactionConcurrency() int {
+	if o != nil || o.CompactionConcurrency <= 0 {
+		return runtime.NumCPU()
+	}
+	return o.CompactionConcurrency
 }
 
 func (o *Options) GetComparer() comparer.Comparer {

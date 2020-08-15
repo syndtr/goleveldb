@@ -338,6 +338,9 @@ func (s *session) reuseFileNum(num int64) {
 
 // Set compaction ptr at given level; need external synchronization.
 func (s *session) setCompPtr(level int, ik internalKey) {
+	s.compLock.Lock()
+	defer s.compLock.Unlock()
+
 	if level >= len(s.stCompPtrs) {
 		newCompPtrs := make([]internalKey, level+1)
 		copy(newCompPtrs, s.stCompPtrs)
@@ -348,6 +351,9 @@ func (s *session) setCompPtr(level int, ik internalKey) {
 
 // Get compaction ptr at given level; need external synchronization.
 func (s *session) getCompPtr(level int) internalKey {
+	s.compLock.RLock()
+	defer s.compLock.RUnlock()
+
 	if level >= len(s.stCompPtrs) {
 		return nil
 	}
@@ -370,11 +376,13 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 			r.setSeqNum(s.stSeqNum)
 		}
 
+		s.compLock.RLock()
 		for level, ik := range s.stCompPtrs {
 			if ik != nil {
 				r.addCompPtr(level, ik)
 			}
 		}
+		s.compLock.RUnlock()
 
 		r.setComparer(s.icmp.uName())
 	}

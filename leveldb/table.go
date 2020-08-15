@@ -276,7 +276,13 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 }
 
 // Returns tables key range.
-func (tf tFiles) getRange(icmp *iComparer) (imin, imax internalKey) {
+func (tf tFiles) getRange(icmp *iComparer, overlapped bool) (imin, imax internalKey) {
+	if !overlapped {
+		if len(tf) == 0 {
+			return
+		}
+		return tf[0].imin, tf[len(tf)-1].imax
+	}
 	for i, t := range tf {
 		if i == 0 {
 			imin, imax = t.imin, t.imax
@@ -289,8 +295,21 @@ func (tf tFiles) getRange(icmp *iComparer) (imin, imax internalKey) {
 			imax = t.imax
 		}
 	}
-
 	return
+}
+
+func (tf tFiles) hasFiles(fs tFiles) bool {
+	if len(tf) == 0 {
+		return false
+	}
+	for _, f := range fs {
+		for _, t := range tf {
+			if f == t {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Creates iterator index from tables.

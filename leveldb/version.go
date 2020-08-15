@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"fmt"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -26,15 +25,9 @@ type version struct {
 	id int64 // unique monotonous increasing version id
 	s  *session
 
-	levels []tFiles
-
-	// Level that should be compacted next and its compaction score.
-	// Score < 1 means compaction is not strictly needed. These fields
-	// are initialized by computeCompaction()
-	cLevel int
-	cScore float64
-
-	cSeek unsafe.Pointer
+	levels    []tFiles
+	levelsize []int64
+	cSeek     unsafe.Pointer
 
 	closing  bool
 	ref      int
@@ -59,7 +52,7 @@ func (v *version) incref() {
 		case v.s.refCh <- &vTask{vid: v.id, files: v.levels, created: time.Now()}:
 			// We can use v.levels directly here since it is immutable.
 		case <-v.s.closeC:
-			v.s.log("reference loop already exist")
+			v.s.log("reference loop already exits")
 		}
 	}
 }
@@ -75,7 +68,7 @@ func (v *version) releaseNB() {
 	case v.s.relCh <- &vTask{vid: v.id, files: v.levels, created: time.Now()}:
 		// We can use v.levels directly here since it is immutable.
 	case <-v.s.closeC:
-		v.s.log("reference loop already exist")
+		v.s.log("reference loop already exits")
 	}
 
 	v.released = true
@@ -352,55 +345,100 @@ func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 	return
 }
 
-func (v *version) computeCompaction() {
+// computeCompaction calculates whether system needs table compaction.
+// All currently ongoing compactions will also be considered to pick
+// compaction.
+//
+// - If there is one level0 compaction running, then no more level0
+//   compaction should be recommended.
+// - If there are some compactions running in with source level N,
+//   then we hold the assumption these compactions will success eventually
+//   and all files involved in level N will be considered **removing**.
+// - If there are some compactions running in with source level N-1,
+//   then we hold the assumption these compactions will success eventually
+//   and all files involved in level N will be considered **unavailable**.
+//
+// After considering all ongoing compactions, if there still exists some
+// tables can be compacted without any overlap with existing compactions,
+// then return the relevant level.
+func (v *version) computeCompaction(ctx *compactionContext) int {
 	// Precomputed best level for next compaction
 	bestLevel := int(-1)
 	bestScore := float64(-1)
 
-	statFiles := make([]int, len(v.levels))
-	statSizes := make([]string, len(v.levels))
-	statScore := make([]string, len(v.levels))
-	statTotSize := int64(0)
-
 	for level, tables := range v.levels {
-		var score float64
-		size := tables.size()
+		var (
+			score float64
+			size  = v.levelsize[level]
+			num   = len(tables)
+		)
 		if level == 0 {
-			// We treat level-0 specially by bounding the number of files
-			// instead of number of bytes for two reasons:
-			//
-			// (1) With larger write-buffer sizes, it is nice not to do too
-			// many level-0 compaction.
-			//
-			// (2) The files in level-0 are merged on every read and
-			// therefore we wish to avoid too many files when the individual
-			// file size is small (perhaps because of a small write-buffer
-			// setting, or very high compression ratios, or lots of
-			// overwrites/deletions).
-			score = float64(len(tables)) / float64(v.s.o.GetCompactionL0Trigger())
+			if cs := ctx.get(0); len(cs) > 0 {
+				// If there is one level0 compaction running, don't pick anymore
+				// level0 compaction.
+				score = float64(-2)
+				num -= cs[0].levels[0].Len()
+				size -= cs[0].levels[0].size()
+			} else {
+				// We treat level-0 specially by bounding the number of files
+				// instead of number of bytes for two reasons:
+				//
+				// (1) With larger write-buffer sizes, it is nice not to do too
+				// many level-0 compaction.
+				//
+				// (2) The files in level-0 are merged on every read and
+				// therefore we wish to avoid too many files when the individual
+				// file size is small (perhaps because of a small write-buffer
+				// setting, or very high compression ratios, or lots of
+				// overwrites/deletions).
+				score = float64(num) / float64(v.s.o.GetCompactionL0Trigger())
+			}
 		} else {
+			// If there are ongoing compactions involve the tables in this level,
+			// ignore these tables now. Seems these tables can't be picked for
+			// compaction before these compactions finish.
+			cs := ctx.get(level)
+			for _, comp := range cs {
+				size -= comp.levels[0].size()
+			}
+			cs = ctx.get(level - 1)
+			for _, comp := range cs {
+				size -= comp.levels[1].size()
+			}
 			score = float64(size) / float64(v.s.o.GetCompactionTotalSize(level))
 		}
-
+		if _, exist := ctx.denylist[level]; exist {
+			score = float64(-2)
+		}
 		if score > bestScore {
 			bestLevel = level
 			bestScore = score
 		}
-
-		statFiles[level] = len(tables)
-		statSizes[level] = shortenb(int(size))
-		statScore[level] = fmt.Sprintf("%.2f", score)
-		statTotSize += size
 	}
-
-	v.cLevel = bestLevel
-	v.cScore = bestScore
-
-	v.s.logf("version@stat F·%v S·%s%v Sc·%v", statFiles, shortenb(int(statTotSize)), statSizes, statScore)
+	if bestScore >= 1 {
+		return bestLevel
+	}
+	return -1
 }
 
-func (v *version) needCompaction() bool {
-	return v.cScore >= 1 || atomic.LoadPointer(&v.cSeek) != nil
+func (v *version) needCompaction(ctx *compactionContext) (needCompact bool, level int, table *tFile) {
+	if level := v.computeCompaction(ctx); level >= 0 {
+		return true, level, nil
+	}
+	if p := atomic.LoadPointer(&v.cSeek); p != nil && !ctx.noseek {
+		ts := (*tSet)(p)
+
+		// Ensure the source table is not picked as the input of level
+		// N compactions or level N-1 compactions.
+		if ctx.removing(ts.level).hasFiles(tFiles{ts.table}) {
+			return false, -1, nil
+		}
+		if ts.level > 0 && ctx.recreating(ts.level).hasFiles(tFiles{ts.table}) {
+			return false, -1, nil
+		}
+		return true, ts.level, ts.table
+	}
+	return false, -1, nil
 }
 
 type tablesScratch struct {
@@ -517,7 +555,7 @@ func (p *versionStaging) finish(trivial bool) *version {
 					nt = append(nt[:index], append(added, nt[index:]...)...)
 				} else {
 					added.sortByKey(p.base.s.icmp)
-					_, amax := added.getRange(p.base.s.icmp)
+					_, amax := added.getRange(p.base.s.icmp, false)
 					index := nt.searchMin(p.base.s.icmp, amax)
 					nt = append(nt[:index], append(added, nt[index:]...)...)
 				}
@@ -551,9 +589,10 @@ func (p *versionStaging) finish(trivial bool) *version {
 	}
 	nv.levels = nv.levels[:n]
 
-	// Compute compaction score for new version.
-	nv.computeCompaction()
-
+	// Calculate total size, todo can be optimized by operated on delta
+	for i := 0; i < len(nv.levels); i++ {
+		nv.levelsize = append(nv.levelsize, nv.levels[i].size())
+	}
 	return nv
 }
 

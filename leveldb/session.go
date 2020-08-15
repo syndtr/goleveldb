@@ -52,9 +52,11 @@ type session struct {
 	manifestWriter storage.Writer
 	manifestFd     storage.FileDesc
 
-	stCompPtrs  []internalKey // compaction pointers; need external synchronization
-	stVersion   *version      // current version
-	ntVersionId int64         // next version id to assign
+	compLock   sync.RWMutex  //  Lock used to protect stCompPtrs
+	stCompPtrs []internalKey // compaction pointers
+
+	stVersion   *version // current version
+	ntVersionId int64    // next version id to assign
 	refCh       chan *vTask
 	relCh       chan *vTask
 	deltaCh     chan *vDelta
