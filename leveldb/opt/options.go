@@ -53,13 +53,11 @@ type CacherFunc struct {
 }
 
 func (f *CacherFunc) New(capacity int) cache.Cacher {
-	if f.NewFunc != nil {
+	if f != nil && f.NewFunc != nil {
 		return f.NewFunc(capacity)
 	}
 	return nil
 }
-
-func noCacher(int) cache.Cacher { return nil }
 
 var (
 	// LRUCacher is the LRU-cache algorithm.
@@ -390,8 +388,6 @@ func (o *Options) GetAltFilters() []filter.Filter {
 func (o *Options) GetBlockCacher() Cacher {
 	if o == nil || o.BlockCacher == nil {
 		return DefaultBlockCacher
-	} else if o.BlockCacher == NoCacher {
-		return nil
 	}
 	return o.BlockCacher
 }
@@ -595,9 +591,6 @@ func (o *Options) GetNoWriteMerge() bool {
 func (o *Options) GetOpenFilesCacher() Cacher {
 	if o == nil || o.OpenFilesCacher == nil {
 		return DefaultOpenFilesCacher
-	}
-	if o.OpenFilesCacher == NoCacher {
-		return nil
 	}
 	return o.OpenFilesCacher
 }
