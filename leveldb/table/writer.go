@@ -89,7 +89,7 @@ type filterWriter struct {
 	buf       util.Buffer
 	nKeys     int
 	offsets   []uint32
-	baseLg    int
+	baseLg    uint
 }
 
 func (w *filterWriter) add(key []byte) {
@@ -370,7 +370,7 @@ func NewWriter(f io.Writer, o *opt.Options) *Writer {
 	// filter block
 	if w.filter != nil {
 		w.filterBlock.generator = w.filter.NewGenerator()
-		w.filterBlock.baseLg = o.GetFilterBaseLg()
+		w.filterBlock.baseLg = uint(o.GetFilterBaseLg())
 		w.filterBlock.flush(0)
 	}
 	return w

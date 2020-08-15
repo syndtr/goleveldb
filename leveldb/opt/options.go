@@ -640,7 +640,7 @@ func (o *Options) GetWriteL0SlowdownTrigger() int {
 }
 
 func (o *Options) GetFilterBaseLg() int {
-	if o == nil || o.FilterBaseLg == 0 {
+	if o == nil || o.FilterBaseLg <= 0 {
 		return DefaultFilterBaseLg
 	}
 	return o.FilterBaseLg
