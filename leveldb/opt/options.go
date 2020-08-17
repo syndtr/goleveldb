@@ -8,11 +8,13 @@
 package opt
 
 import (
+	"bytes"
 	"math"
 
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const (
@@ -376,6 +378,14 @@ type Options struct {
 	//
 	// The default value is 11(as well as 2KB)
 	FilterBaseLg int
+
+	// VibrantKeys defines ranges of vibrant keys, which might be frequently modified.
+	//
+	// The purpose of this option is to optimize the compaction process for cases that have
+	// frequent key updates and deletions.
+	//
+	// The default value is nil.
+	VibrantKeys []*util.Range
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -644,6 +654,16 @@ func (o *Options) GetFilterBaseLg() int {
 		return DefaultFilterBaseLg
 	}
 	return o.FilterBaseLg
+}
+
+func (o *Options) VibrantKeysOverlap(umin, umax []byte) bool {
+	for _, r := range o.VibrantKeys {
+		noOverlap := bytes.Compare(umin, r.Limit) >= 0 || bytes.Compare(r.Start, umax) >= 0
+		if !noOverlap {
+			return true
+		}
+	}
+	return false
 }
 
 // ReadOptions holds the optional parameters for 'read operation'. The

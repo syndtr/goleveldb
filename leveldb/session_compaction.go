@@ -65,11 +65,28 @@ func (s *session) pickCompaction() *compaction {
 		tables := v.levels[sourceLevel]
 		if cptr != nil && sourceLevel > 0 {
 			n := len(tables)
-			if i := sort.Search(n, func(i int) bool {
+			p := sort.Search(n, func(i int) bool {
 				return s.icmp.Compare(tables[i].imax, cptr) > 0
-			}); i < n {
-				t0 = append(t0, tables[i])
+			})
+			if p == n {
+				p = 0
 			}
+
+			t := func() *tFile {
+				if sourceLevel >= s.maxVibrantTableLevel {
+					// traverse all tables from position p, take special care of vibrant tables.
+					// a vibrant table is expected to stay in lower level unless there was one or
+					// more vibrant tables pushed into higher level.
+					for i := 0; i < n; i++ {
+						t := tables[(p+i)%n]
+						if !s.o.VibrantKeysOverlap(t.imin.ukey(), t.imax.ukey()) {
+							return t
+						}
+					}
+				}
+				return tables[p]
+			}()
+			t0 = append(t0, t)
 		}
 		if len(t0) == 0 {
 			t0 = append(t0, tables[0])
@@ -78,6 +95,11 @@ func (s *session) pickCompaction() *compaction {
 			typ = level0Compaction
 		} else {
 			typ = nonLevel0Compaction
+			if targetLevel := sourceLevel + 1; targetLevel > s.maxVibrantTableLevel {
+				if s.o.VibrantKeysOverlap(t0[0].imin.ukey(), t0[0].imax.ukey()) {
+					s.maxVibrantTableLevel = targetLevel
+				}
+			}
 		}
 	} else {
 		if p := atomic.LoadPointer(&v.cSeek); p != nil {

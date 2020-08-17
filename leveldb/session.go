@@ -63,6 +63,8 @@ type session struct {
 	closeW      sync.WaitGroup
 	vmu         sync.Mutex
 
+	maxVibrantTableLevel int // known max level of table that contains vibrant keys
+
 	// Testing fields
 	fileRefCh chan chan map[int64]int // channel used to pass current reference stat
 }
