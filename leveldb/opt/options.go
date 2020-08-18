@@ -13,6 +13,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/filter"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const (
@@ -376,6 +377,14 @@ type Options struct {
 	//
 	// The default value is 11(as well as 2KB)
 	FilterBaseLg int
+
+	// VibrantKeys defines ranges of vibrant keys, which might be frequently modified.
+	//
+	// The purpose of this option is to optimize the compaction process for cases that have
+	// frequent key updates and deletions.
+	//
+	// The default value is nil.
+	VibrantKeys []*util.Range
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
