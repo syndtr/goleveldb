@@ -7,7 +7,7 @@
 package iterator
 
 import (
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/go-leveldb/goleveldb/leveldb/util"
 )
 
 // BasicArray is the interface that wraps basic Len and Search method.

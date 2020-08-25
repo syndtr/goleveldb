@@ -9,10 +9,10 @@ package leveldb
 import (
 	. "github.com/onsi/gomega"
 
-	"github.com/syndtr/goleveldb/leveldb/iterator"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/testutil"
-	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/go-leveldb/goleveldb/leveldb/iterator"
+	"github.com/go-leveldb/goleveldb/leveldb/opt"
+	"github.com/go-leveldb/goleveldb/leveldb/testutil"
+	"github.com/go-leveldb/goleveldb/leveldb/util"
 )
 
 type testingDB struct {
