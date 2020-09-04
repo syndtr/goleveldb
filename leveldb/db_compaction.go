@@ -7,13 +7,16 @@
 package leveldb
 
 import (
+	"encoding/binary"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var (
@@ -349,6 +352,113 @@ func (db *DB) memCompaction() {
 	db.compTrigger(db.tcompCmdC)
 }
 
+// bufferedIterator wraps the iterator. It has a background goroutine to perform raw iteration.
+type bufferedIterator struct {
+	iter     iterator.Iterator
+	bpool    *util.BufferPool
+	commitC  chan []byte
+	releaseC chan struct{}
+
+	buf    []byte
+	offset int
+	k, v   []byte
+}
+
+func newBufferedIterator(iter iterator.Iterator, bufSize, bufCount int, bpool *util.BufferPool) *bufferedIterator {
+	commitC := make(chan []byte, bufCount)
+	releaseC := make(chan struct{})
+
+	// start the goroutine to iterate on raw iterator and produce bufs.
+	go func() {
+		defer close(commitC)
+
+		var (
+			buf     []byte
+			scratch [8]byte
+		)
+
+		for iter.Next() {
+			if bpool != nil && len(buf) == 0 {
+				buf = bpool.Get(bufSize)[:0]
+			}
+			k, v := iter.Key(), iter.Value()
+			// encode key value as | klen | vlen | key | value |
+			binary.LittleEndian.PutUint32(scratch[:], uint32(len(k)))
+			binary.LittleEndian.PutUint32(scratch[4:], uint32(len(v)))
+			buf = append(buf, scratch[:]...)
+			buf = append(buf, k...)
+			buf = append(buf, v...)
+
+			if len(buf) >= bufSize {
+				// commit the buf if over size
+				commitC <- buf
+				buf = nil
+
+				select {
+				case <-releaseC:
+					return
+				default:
+				}
+			}
+		}
+		// commit the remained
+		if len(buf) > 0 {
+			commitC <- buf
+			buf = nil
+		}
+	}()
+
+	return &bufferedIterator{
+		iter:     iter,
+		bpool:    bpool,
+		commitC:  commitC,
+		releaseC: releaseC,
+	}
+}
+
+func (i *bufferedIterator) Next() bool {
+	i.k, i.v = nil, nil
+
+	if len(i.buf) == i.offset {
+		// the buf is fully consumed
+
+		// return the buf to pool
+		if len(i.buf) > 0 && i.bpool != nil {
+			i.bpool.Put(i.buf)
+		}
+		// read a new buf
+		if i.buf = <-i.commitC; i.buf == nil {
+			// end
+			return false
+		}
+		i.offset = 0
+	}
+
+	klen := int(binary.LittleEndian.Uint32(i.buf[i.offset:]))
+	vlen := int(binary.LittleEndian.Uint32(i.buf[i.offset+4:]))
+	i.offset += 8
+	i.k = i.buf[i.offset : i.offset+klen]
+	i.offset += klen
+	i.v = i.buf[i.offset : i.offset+vlen]
+	i.offset += vlen
+	return true
+}
+
+func (i *bufferedIterator) Key() []byte   { return i.k }
+func (i *bufferedIterator) Value() []byte { return i.v }
+func (i *bufferedIterator) Error() error  { return i.iter.Error() }
+
+func (i *bufferedIterator) Release() {
+	close(i.releaseC)
+	// drain committed bufs
+	for buf := range i.commitC {
+		if i.bpool != nil {
+			i.bpool.Put(buf)
+		}
+	}
+	i.iter.Release()
+}
+
 type tableCompactionBuilder struct {
 	db           *DB
 	s            *session
@@ -437,7 +547,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	b.stat1.startTimer()
 	defer b.stat1.stopTimer()
 
-	iter := b.c.newIterator()
+	iter := newBufferedIterator(b.c.newIterator(), b.s.o.GetBlockSize(), 8, b.s.tops.bpool)
 	defer iter.Release()
 	for i := 0; iter.Next(); i++ {
 		// Incr transact counter.
