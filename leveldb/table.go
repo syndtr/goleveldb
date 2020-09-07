@@ -363,6 +363,7 @@ type tOps struct {
 	cache        *cache.Cache
 	bcache       *cache.Cache
 	bpool        *util.BufferPool
+	sbpool       *simpleBufferPool
 }
 
 // Creates an empty table and returns table writer.
@@ -372,6 +373,7 @@ func (t *tOps) create() (*tWriter, error) {
 	if err != nil {
 		return nil, err
 	}
+	fw = newAsyncWriter(fw, t.s.o.GetBlockSize(), 16, t.sbpool)
 	return &tWriter{
 		t:  t,
 		fd: fd,
@@ -514,6 +516,7 @@ func newTableOps(s *session) *tOps {
 		cacher cache.Cacher
 		bcache *cache.Cache
 		bpool  *util.BufferPool
+		sbpool *simpleBufferPool
 	)
 	if s.o.GetOpenFilesCacheCapacity() > 0 {
 		cacher = s.o.GetOpenFilesCacher().New(s.o.GetOpenFilesCacheCapacity())
@@ -527,6 +530,7 @@ func newTableOps(s *session) *tOps {
 	}
 	if !s.o.GetDisableBufferPool() {
 		bpool = util.NewBufferPool(s.o.GetBlockSize() + 5)
+		sbpool = &simpleBufferPool{}
 	}
 	return &tOps{
 		s:            s,
@@ -535,6 +539,7 @@ func newTableOps(s *session) *tOps {
 		cache:        cache.NewCache(cacher),
 		bcache:       bcache,
 		bpool:        bpool,
+		sbpool:       sbpool,
 	}
 }
 

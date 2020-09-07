@@ -437,7 +437,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	b.stat1.startTimer()
 	defer b.stat1.stopTimer()
 
-	iter := b.c.newIterator()
+	iter := newAsyncIterator(b.c.newIterator(), b.s.o.GetBlockSize(), 16, b.s.tops.sbpool)
 	defer iter.Release()
 	for i := 0; iter.Next(); i++ {
 		// Incr transact counter.
