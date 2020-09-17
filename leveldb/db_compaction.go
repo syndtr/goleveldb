@@ -371,6 +371,9 @@ type tableCompactionBuilder struct {
 	tableSize int
 
 	tw *tWriter
+
+	// to complete the last flush
+	complete func() error
 }
 
 func (b *tableCompactionBuilder) appendKV(key, value []byte) error {
@@ -403,15 +406,45 @@ func (b *tableCompactionBuilder) needFlush() bool {
 	return b.tw.tw.BytesLen() >= b.tableSize
 }
 
-func (b *tableCompactionBuilder) flush() error {
-	t, err := b.tw.finish()
-	if err != nil {
-		return err
+func (b *tableCompactionBuilder) flush(stash stash) error {
+	// complete the last flush
+	if f := b.complete; f != nil {
+		b.complete = nil
+		if err := f(); err != nil {
+			return err
+		}
 	}
-	b.rec.addTableFile(b.c.sourceLevel+1, t)
-	b.stat1.write += t.size
-	b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.sourceLevel+1, t.fd.Num, b.tw.tw.EntriesLen(), shortenb(int(t.size)), t.imin, t.imax)
+
+	tw := b.tw
 	b.tw = nil
+
+	c := make(chan interface{}, 1)
+	// asynchronously finish the tWriter (pending write/fsync)
+	go func() {
+		defer close(c)
+		if t, err := tw.finish(); err != nil {
+			// drop on error
+			tw.drop()
+			c <- err
+		} else {
+			c <- t
+		}
+	}()
+
+	b.complete = func() error {
+		switch r := (<-c).(type) {
+		case error:
+			return r
+		case *tFile:
+			b.rec.addTableFile(b.c.sourceLevel+1, r)
+			b.stat1.write += r.size
+			b.s.logf("table@build created L%d@%d N·%d S·%s %q:%q", b.c.sourceLevel+1, r.fd.Num, tw.tw.EntriesLen(), shortenb(int(r.size)), r.imin, r.imax)
+			stash()
+			return nil
+		default:
+			panic("unexpected")
+		}
+	}
 	return nil
 }
 
@@ -422,7 +455,26 @@ func (b *tableCompactionBuilder) cleanup() {
 	}
 }
 
-func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
+func (b *tableCompactionBuilder) stash(hasLastUkey bool, lastUkey []byte, lastSeq uint64, iter int) stash {
+	cstash := b.c.stash()
+	lastUkey = append([]byte(nil), lastUkey...)
+	kerrCnt := b.kerrCnt
+	dropCnt := b.dropCnt
+
+	return func() {
+		// save compaction state
+		cstash.save()
+		// and builder's state
+		b.snapHasLastUkey = hasLastUkey
+		b.snapLastUkey = lastUkey
+		b.snapLastSeq = lastSeq
+		b.snapIter = iter
+		b.snapKerrCnt = kerrCnt
+		b.snapDropCnt = dropCnt
+	}
+}
+
+func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error) {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
 	lastUkey := append([]byte{}, b.snapLastUkey...)
@@ -433,6 +485,15 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	b.c.restore()
 
 	defer b.cleanup()
+
+	defer func() {
+		if f := b.complete; f != nil {
+			b.complete = nil
+			if e := f(); e != nil && err == nil {
+				err = e
+			}
+		}
+	}()
 
 	b.stat1.startTimer()
 	defer b.stat1.stopTimer()
@@ -465,18 +526,10 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 
 				// Only rotate tables if ukey doesn't hop across.
 				if b.tw != nil && (shouldStop || b.needFlush()) {
-					if err := b.flush(); err != nil {
+					if err := b.flush(b.stash(hasLastUkey, lastUkey, lastSeq, i)); err != nil {
 						return err
 					}
 
-					// Creates snapshot of the state.
-					b.c.save()
-					b.snapHasLastUkey = hasLastUkey
-					b.snapLastUkey = append(b.snapLastUkey[:0], lastUkey...)
-					b.snapLastSeq = lastSeq
-					b.snapIter = i
-					b.snapKerrCnt = b.kerrCnt
-					b.snapDropCnt = b.dropCnt
 				}
 
 				hasLastUkey = true
@@ -525,7 +578,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 
 	// Finish last table.
 	if b.tw != nil && !b.tw.empty() {
-		return b.flush()
+		return b.flush(func() {})
 	}
 	return nil
 }
