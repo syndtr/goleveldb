@@ -88,6 +88,15 @@ func init() {
 	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
 }
 
+// Testing data format:
+//
+//   +--------+--------+--------+---------+-------------+
+//   |   NS   | Prefix |  Blob  |  Index  | crc(4bytes) |
+//   +--------+--------+--------+---------+-------------+
+//   |   NS   | Prefix |  Blob  |  Index  | crc(4bytes) |
+//   +--------+--------+--------+---------+-------------+
+//                                        | CRC(4bytes) |
+//                                        +-------------+
 func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
 	if dataLen < (2+4+4)*2+4 {
 		panic("dataLen is too small")
@@ -103,7 +112,6 @@ func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
 	}
 	dst[0] = ns
 	dst[1] = prefix
-	binary.LittleEndian.PutUint32(dst[half-8:], i)
 	binary.LittleEndian.PutUint32(dst[half-8:], i)
 	binary.LittleEndian.PutUint32(dst[half-4:], util.NewCRC(dst[:half-4]).Value())
 	full := half * 2
@@ -442,9 +450,10 @@ func main() {
 
 			keys := make([][]byte, numKey)
 			for i := range keys {
-				keys[i] = randomData(nil, byte(ns), 1, uint32(i), keyLen)
+				keys[i] = randomData(nil, byte(ns), 1, uint32(i), keyLen) // Key, NS=ns, PREFIX=1
 			}
 
+			// Write and overwrite non-stop.
 			wg.Add(1)
 			go func() {
 				var wi uint32
@@ -463,10 +472,10 @@ func main() {
 
 					b.Reset()
 					for _, k1 := range keys {
-						k2 = randomData(k2, byte(ns), 2, wi, keyLen)
-						v2 = randomData(v2, byte(ns), 3, wi, valueLen)
-						b.Put(k2, v2)
-						b.Put(k1, k2)
+						k2 = randomData(k2, byte(ns), 2, wi, keyLen)   // Key2, NS=ns, PREFIX=2, INDEX=wi
+						v2 = randomData(v2, byte(ns), 3, wi, valueLen) // Value, NS=ns, PREFIX=3, INDEX=wi
+						b.Put(k2, v2)                                  // K2 => V2
+						b.Put(k1, k2)                                  // K1 => K2
 					}
 					writeReq <- b
 					if err := <-writeAck; err != nil {
@@ -508,8 +517,8 @@ func main() {
 							iter := snap.NewIterator(dataPrefixSlice(byte(ns), 1), nil)
 							iterStat.start()
 							for iter.Next() {
-								k1 := iter.Key()
-								k2 := iter.Value()
+								k1 := iter.Key()   // Read k1
+								k2 := iter.Value() // Read k2
 								iterStat.record(1)
 
 								if dataNS(k2) != byte(ns) {
@@ -552,6 +561,7 @@ func main() {
 				}
 			}()
 
+			// Delete the written data non-stop
 			delB := new(leveldb.Batch)
 			wg.Add(1)
 			go func() {
@@ -572,8 +582,8 @@ func main() {
 					iter := db.NewIterator(dataNsSlice(byte(ns)), nil)
 					iterStat.start()
 					for iter.Next() && atomic.LoadUint32(&done) == 0 {
-						k := iter.Key()
-						v := iter.Value()
+						k := iter.Key()   // Read K1
+						v := iter.Value() // Read K2
 						iterStat.record(1)
 
 						for ci, x := range [...][]byte{k, v} {

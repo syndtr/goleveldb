@@ -342,7 +342,7 @@ func (h *dbHarness) getKeyVal(want string) {
 func (h *dbHarness) waitCompaction() {
 	t := h.t
 	db := h.db
-	if err := db.compTriggerWait(db.tcompCmdC); err != nil {
+	if err := db.waitAllTableComp(); err != nil {
 		t.Error("compaction error: ", err)
 	}
 }
@@ -2565,7 +2565,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build grandparent.
 	v := s.version()
-	c := newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction)
+	c := newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction, nil)
 	rec := &sessionRecord{}
 	b := &tableCompactionBuilder{
 		s:         s,
@@ -2589,7 +2589,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Build level-1.
 	v = s.version()
-	c = newCompaction(s, v, 0, append(tFiles{}, v.levels[0]...), undefinedCompaction)
+	c = newCompaction(s, v, 0, append(tFiles{}, v.levels[0]...), undefinedCompaction, nil)
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,
@@ -2633,7 +2633,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 
 	// Compaction with transient error.
 	v = s.version()
-	c = newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction)
+	c = newCompaction(s, v, 1, append(tFiles{}, v.levels[1]...), undefinedCompaction, nil)
 	rec = &sessionRecord{}
 	b = &tableCompactionBuilder{
 		s:         s,

@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -163,15 +164,20 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 	const (
 		backoffMin = 1 * time.Second
 		backoffMax = 8 * time.Second
-		backoffMul = 2 * time.Second
+		backoffMul = 2
 	)
 	var (
 		backoff  = backoffMin
-		backoffT = time.NewTimer(backoff)
+		backoffT *time.Timer
 		lastCnt  = compactionTransactCounter(0)
 
 		disableBackoff = db.s.o.GetDisableCompactionBackoff()
 	)
+	defer func() {
+		if backoffT != nil {
+			backoffT.Stop()
+		}
+	}()
 	for n := 0; ; n++ {
 		// Check whether the DB is closed.
 		if db.isClosed() {
@@ -216,7 +222,11 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 			}
 
 			// Backoff.
-			backoffT.Reset(backoff)
+			if backoffT == nil {
+				backoffT = time.NewTimer(backoff)
+			} else {
+				backoffT.Reset(backoff)
+			}
 			if backoff < backoffMax {
 				backoff *= backoffMul
 				if backoff > backoffMax {
@@ -265,6 +275,33 @@ func (db *DB) compactionCommit(name string, rec *sessionRecord) {
 	}, nil)
 }
 
+func (db *DB) pauseTableCompaction() {
+	var resumeCh <-chan struct{}
+noPause:
+	for {
+		select {
+		case resumeCh = <-db.tcompPauseSetC:
+			goto hasPause
+		case <-db.closeC:
+			return
+		}
+	}
+hasPause:
+	for {
+		select {
+		case ch := <-db.tcompPauseSetC:
+			if ch != nil {
+				panic("invalid resume channel")
+			}
+			resumeCh = nil
+			goto noPause
+		case db.tcompPauseC <- resumeCh:
+		case <-db.closeC:
+			return
+		}
+	}
+}
+
 func (db *DB) memCompaction() {
 	mdb := db.getFrozenMem()
 	if mdb == nil {
@@ -285,10 +322,7 @@ func (db *DB) memCompaction() {
 	// Pause table compaction.
 	resumeC := make(chan struct{})
 	select {
-	case db.tcompPauseC <- (chan<- struct{})(resumeC):
-	case <-db.compPerErrC:
-		close(resumeC)
-		resumeC = nil
+	case db.tcompPauseSetC <- (<-chan struct{})(resumeC):
 	case <-db.closeC:
 		db.compactionExitTransact()
 	}
@@ -336,14 +370,13 @@ func (db *DB) memCompaction() {
 	db.dropFrozenMem()
 
 	// Resume table compaction.
-	if resumeC != nil {
-		select {
-		case <-resumeC:
-			close(resumeC)
-		case <-db.closeC:
-			db.compactionExitTransact()
-		}
+	select {
+	case db.tcompPauseSetC <- nil:
+	case <-db.closeC:
+		db.compactionExitTransact()
 	}
+	close(resumeC)
+	resumeC = nil
 
 	// Trigger table compaction.
 	db.compTrigger(db.tcompCmdC)
@@ -377,15 +410,15 @@ func (b *tableCompactionBuilder) appendKV(key, value []byte) error {
 	// Create new table if not already.
 	if b.tw == nil {
 		// Check for pause event.
-		if b.db != nil {
-			select {
-			case ch := <-b.db.tcompPauseC:
-				b.db.pauseCompaction(ch)
-			case <-b.db.closeC:
-				b.db.compactionExitTransact()
-			default:
-			}
-		}
+		//if b.db != nil {
+		//	select {
+		//	case ch := <-b.db.tcompPauseC:
+		//		b.db.pauseCompaction(ch)
+		//	case <-b.db.closeC:
+		//		b.db.compactionExitTransact()
+		//	default:
+		//	}
+		//}
 
 		// Create new table.
 		var err error
@@ -540,8 +573,13 @@ func (b *tableCompactionBuilder) revert() error {
 	return nil
 }
 
-func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
+func (db *DB) tableCompaction(c *compaction, noTrivial bool, done func(*compaction)) {
 	defer c.release()
+	defer func() {
+		if done != nil {
+			done(c)
+		}
+	}()
 
 	rec := &sessionRecord{}
 	rec.addCompPtr(c.sourceLevel, c.imax)
@@ -605,7 +643,7 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
 		if c := db.s.getCompactionRange(level, umin, umax, true); c != nil {
-			db.tableCompaction(c, true)
+			db.tableCompaction(c, true, nil)
 		}
 	} else {
 		// Retry until nothing to compact.
@@ -625,7 +663,7 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 
 			for level := 0; level < m; level++ {
 				if c := db.s.getCompactionRange(level, umin, umax, false); c != nil {
-					db.tableCompaction(c, true)
+					db.tableCompaction(c, true, nil)
 					compacted = true
 				}
 			}
@@ -639,16 +677,14 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 	return nil
 }
 
-func (db *DB) tableAutoCompaction() {
-	if c := db.s.pickCompaction(); c != nil {
-		db.tableCompaction(c, false)
-	}
-}
-
-func (db *DB) tableNeedCompaction() bool {
+// tableNeedCompaction returns the indicator whether system needs compaction.
+// If so, then the relevant level or target table(is nil if the normal table
+// compaction is required) will be returned.
+func (db *DB) tableNeedCompaction(ctx *compactionContext) (needCompact bool, level int, table *tFile) {
 	v := db.s.version()
 	defer v.release()
-	return v.needCompaction()
+
+	return v.needCompaction(ctx)
 }
 
 // resumeWrite returns an indicator whether we should resume write operation if enough level0 files are compacted.
@@ -661,9 +697,9 @@ func (db *DB) resumeWrite() bool {
 	return false
 }
 
-func (db *DB) pauseCompaction(ch chan<- struct{}) {
+func (db *DB) pauseCompaction(ch <-chan struct{}) {
 	select {
-	case ch <- struct{}{}:
+	case <-ch:
 	case <-db.closeC:
 		db.compactionExitTransact()
 	}
@@ -674,8 +710,13 @@ type cCmd interface {
 }
 
 type cAuto struct {
-	// Note for table compaction, an non-empty ackC represents it's a compaction waiting command.
+	// Note for table compaction, an non-empty ackC
+	// represents it's a compaction waiting command.
 	ackC chan<- error
+
+	// Flag whether the ack should only be sent when
+	// all compactions finished. Used for testing only.
+	full bool
 }
 
 func (r cAuto) ack(err error) {
@@ -710,13 +751,36 @@ func (db *DB) compTrigger(compC chan<- cCmd) {
 	}
 }
 
+// This will trigger auto compaction and wait for all compaction to be done.
+// Note it's only used in testing.
+func (db *DB) waitAllTableComp() (err error) {
+	ch := make(chan error)
+	defer close(ch)
+	// Send cmd.
+	select {
+	case db.tcompCmdC <- cAuto{ackC: ch, full: true}:
+	case err = <-db.compErrC:
+		return
+	case <-db.closeC:
+		return ErrClosed
+	}
+	// Wait cmd.
+	select {
+	case err = <-ch:
+	case err = <-db.compErrC:
+	case <-db.closeC:
+		return ErrClosed
+	}
+	return err
+}
+
 // This will trigger auto compaction and/or wait for all compaction to be done.
 func (db *DB) compTriggerWait(compC chan<- cCmd) (err error) {
 	ch := make(chan error)
 	defer close(ch)
 	// Send cmd.
 	select {
-	case compC <- cAuto{ch}:
+	case compC <- cAuto{ackC: ch}:
 	case err = <-db.compErrC:
 		return
 	case <-db.closeC:
@@ -786,80 +850,324 @@ func (db *DB) mCompaction() {
 	}
 }
 
+type compactions []*compaction
+
+// Returns true if i smallest key is less than j.
+// This used for sort by key in ascending order.
+func (cs compactions) lessByKey(icmp *iComparer, i, j int) bool {
+	a, b := cs[i], cs[j]
+	return icmp.Compare(a.imin, b.imin) < 0
+}
+func (cs compactions) Len() int      { return len(cs) }
+func (cs compactions) Swap(i, j int) { cs[i], cs[j] = cs[j], cs[i] }
+
+// Helper type for sortByKey.
+type compactionsSortByKey struct {
+	compactions
+	icmp *iComparer
+}
+
+func (x *compactionsSortByKey) Less(i, j int) bool {
+	return x.lessByKey(x.icmp, i, j)
+}
+
+type compactionContext struct {
+	sorted   map[int][]*compaction
+	fifo     map[int][]*compaction
+	icmp     *iComparer
+	noseek   bool
+	denylist map[int]struct{}
+}
+
+func (ctx *compactionContext) add(c *compaction) {
+	ctx.sorted[c.sourceLevel] = append(ctx.sorted[c.sourceLevel], c)
+	sort.Sort(&compactionsSortByKey{
+		compactions: ctx.sorted[c.sourceLevel],
+		icmp:        ctx.icmp,
+	})
+	ctx.fifo[c.sourceLevel] = append(ctx.fifo[c.sourceLevel], c)
+}
+
+func (ctx *compactionContext) delete(c *compaction) {
+	for index, comp := range ctx.sorted[c.sourceLevel] {
+		if comp == c {
+			ctx.sorted[c.sourceLevel] = append(ctx.sorted[c.sourceLevel][:index], ctx.sorted[c.sourceLevel][index+1:]...)
+			break
+		}
+	}
+	for index, comp := range ctx.fifo[c.sourceLevel] {
+		if comp == c {
+			ctx.fifo[c.sourceLevel] = append(ctx.fifo[c.sourceLevel][:index], ctx.fifo[c.sourceLevel][index+1:]...)
+			break
+		}
+	}
+	ctx.reset(c.sourceLevel)
+	return
+}
+
+// reset resets the denylist and seek flag. If one level-n compaction finishes,
+// then it will re-activate the adjacent levels if they are marked unavailable
+// before. Besides we always re-activate seek compaction.
+func (ctx *compactionContext) reset(level int) {
+	if _, exist := ctx.denylist[level]; exist {
+		delete(ctx.denylist, level)
+	}
+	if _, exist := ctx.denylist[level+1]; exist {
+		delete(ctx.denylist, level+1)
+	}
+	if level > 0 {
+		if _, exist := ctx.denylist[level-1]; exist {
+			delete(ctx.denylist, level-1)
+		}
+	}
+	ctx.noseek = false
+}
+
+func (ctx *compactionContext) count() int {
+	var total int
+	for _, comps := range ctx.sorted {
+		total += len(comps)
+	}
+	return total
+}
+
+func (ctx *compactionContext) get(level int) []*compaction {
+	return ctx.fifo[level]
+}
+
+func (ctx *compactionContext) getSorted(level int) []*compaction {
+	return ctx.sorted[level]
+}
+
+// removing returns the tables which are acting as the source level input
+// in the ongoing compactions. All returned tables are sorted by keys.
+func (ctx *compactionContext) removing(level int) tFiles {
+	comps := ctx.getSorted(level)
+	var v0 tFiles
+	for _, comp := range comps {
+		v0 = append(v0, comp.levels[0]...)
+	}
+	return v0
+}
+
+// removing returns the tables which are acting as the dest level input
+// in the ongoing compactions. All returned tables are sorted by keys.
+func (ctx *compactionContext) recreating(level int) tFiles {
+	if level == 0 {
+		return nil
+	}
+	comps := ctx.getSorted(level - 1)
+	var v1 tFiles
+	for _, comp := range comps {
+		v1 = append(v1, comp.levels[1]...)
+	}
+	return v1
+}
+
+// tCompaction is the scheduler of table compaction. Here concurrent compactions
+// are allowed and scheduled for best performance. Compaction performance is the
+// bottleneck of the entire system. Slow compaction will eventually lead to write
+// suspension. So this loop will try to maximize the compaction performance by
+// selecting isolated files to compact concurrently.
+//
+// For level0 compaction, concurrency is not allowed. Since we can't guarantee two
+// level0 compactions are non-overlapped. But we do see that level0 compaction in
+// some sense become the bottleneck, it can slow down/suspend write operations if
+// it's not fast enough. Also if level0 compaction can't generate tables fast
+// enough, the non-level0 compactors may become idle.
+//
+// For non-level0 compaction, concurrency is allowed if two compactions are totally
+// isolated.
+//
+// For compaction level selection, it's a little different with single-thread version.
+// Now two factors will be considered to select source level: current version and ongoing
+// compactions. For level0 if there is already one compaction running, then no more level0
+// compaction should be picked. For non-level0, if the total size except the "removing"
+// tables and "recreating" tables still exceeds the threshold, it may be picked.
+// The "removing" tables refers to the tables which are picked as the source level input
+// of ongoing compactions. "recreating" tables refers to the tables which are picked
+// as the dest level input of ongoing compactions.
+//
+// For compaction file selection, it's the core of the entire mechanism. For source level
+// we only pick the file which is idle. Idle means it's not the input of other compactions
+// (either level n compactions or level n-1 compactions). It's same when picking files in
+// parent level. In this way we can ensure all compacting files are isolated with each other.
+//
+// But in the parent level, there is one difference. Actually for the file in parent level
+// which is removing(the input of child level compactions), we can just kick them out and mark
+// these compactions as the dependencies. But it will make the code much more complicated.
+// Also consider the concurrency is limited, so we just don't accept this kind of compaction.
 func (db *DB) tCompaction() {
 	var (
-		x     cCmd
-		waitQ []cCmd
-	)
+		// The maximum number of compactions are allowed to run concurrently.
+		// The default value is the CPU core number.
+		compLimit = db.s.o.GetCompactionConcurrency()
 
+		// Compaction context includes all ongoing compactions.
+		ctx = &compactionContext{
+			sorted:   make(map[int][]*compaction),
+			fifo:     make(map[int][]*compaction),
+			icmp:     db.s.icmp,
+			denylist: make(map[int]struct{}),
+		}
+		done  = make(chan *compaction)
+		subWg sync.WaitGroup
+
+		// Various waiting list
+		x        cCmd
+		waitQ    []cCmd // Waiting list will be activated if the level0 tables less then threshold
+		waitAll  []cCmd // Waiting list will be activated iff all compactions have finished.
+		rangeCmd cCmd   // Single range compaction waiting channel
+	)
 	defer func() {
+		// Panic catcher for potential range compaction.
+		// For all other compactions the panic will be
+		// caught in their own routine.
 		if x := recover(); x != nil {
 			if x != errCompactionTransactExiting {
 				panic(x)
 			}
 		}
+		subWg.Wait()
 		for i := range waitQ {
 			waitQ[i].ack(ErrClosed)
 			waitQ[i] = nil
 		}
+		for i := range waitAll {
+			waitAll[i].ack(ErrClosed)
+			waitAll[i] = nil
+		}
 		if x != nil {
 			x.ack(ErrClosed)
+		}
+		if rangeCmd != nil {
+			rangeCmd.ack(ErrClosed)
 		}
 		db.closeW.Done()
 	}()
 
 	for {
-		if db.tableNeedCompaction() {
-			select {
-			case x = <-db.tcompCmdC:
-			case ch := <-db.tcompPauseC:
-				db.pauseCompaction(ch)
-				continue
-			case <-db.closeC:
-				return
-			default:
-			}
-			// Resume write operation as soon as possible.
-			if len(waitQ) > 0 && db.resumeWrite() {
-				for i := range waitQ {
-					waitQ[i].ack(nil)
-					waitQ[i] = nil
-				}
-				waitQ = waitQ[:0]
-			}
-		} else {
+		// Send ack signal to all waiting channels for resuming
+		// db operation(e.g. writes).
+		if len(waitQ) > 0 && db.resumeWrite() {
 			for i := range waitQ {
 				waitQ[i].ack(nil)
 				waitQ[i] = nil
 			}
 			waitQ = waitQ[:0]
+		}
+		var (
+			needCompact bool
+			level       int
+			table       *tFile
+		)
+		if ctx.count() < compLimit && rangeCmd == nil {
+			needCompact, level, table = db.tableNeedCompaction(ctx)
+		}
+		if needCompact {
 			select {
-			case x = <-db.tcompCmdC:
-			case ch := <-db.tcompPauseC:
-				db.pauseCompaction(ch)
-				continue
 			case <-db.closeC:
 				return
+			case x = <-db.tcompCmdC:
+			//case ch := <-db.tcompPauseC:
+			//	db.pauseCompaction(ch)
+			//	continue
+			case c := <-done:
+				ctx.delete(c)
+				continue
+			default:
+			}
+		} else {
+			// If there is a pending range compaction, do it right now
+			if rangeCmd != nil && ctx.count() == 0 {
+				cmd := rangeCmd.(cRange)
+				cmd.ack(db.tableRangeCompaction(cmd.level, cmd.min, cmd.max))
+				rangeCmd = nil
+				continue // Re-loop is necessary, try to spin up more compactions
+			}
+			// If the waitAll list is not empty, send the ack if all compactions have finished.
+			if len(waitAll) != 0 && ctx.count() == 0 {
+				for _, wait := range waitAll {
+					wait.ack(nil)
+					wait = nil
+				}
+				waitAll = waitAll[:0]
+			}
+			select {
+			case <-db.closeC:
+				return
+			case x = <-db.tcompCmdC:
+			//case ch := <-db.tcompPauseC:
+			//	db.pauseCompaction(ch)
+			//	continue
+			case c := <-done:
+				ctx.delete(c)
+				continue
 			}
 		}
 		if x != nil {
 			switch cmd := x.(type) {
 			case cAuto:
-				if cmd.ackC != nil {
-					// Check the write pause state before caching it.
-					if db.resumeWrite() {
-						x.ack(nil)
-					} else {
-						waitQ = append(waitQ, x)
-					}
+				if cmd.full {
+					waitAll = append(waitAll, cmd)
+				} else if cmd.ackC != nil {
+					waitQ = append(waitQ, x)
 				}
 			case cRange:
-				x.ack(db.tableRangeCompaction(cmd.level, cmd.min, cmd.max))
+				if ctx.count() > 0 {
+					rangeCmd = x
+				} else {
+					x.ack(db.tableRangeCompaction(cmd.level, cmd.min, cmd.max))
+				}
 			default:
 				panic("leveldb: unknown command")
 			}
 			x = nil
+			continue
 		}
-		db.tableAutoCompaction()
+		db.runCompaction(ctx, level, table, &subWg, done)
 	}
+}
+
+func (db *DB) runCompaction(ctx *compactionContext, level int, table *tFile, wg *sync.WaitGroup, done chan *compaction) {
+	var c *compaction
+	if table == nil {
+		c = db.s.pickCompactionByLevel(level, ctx)
+		if c == nil {
+			// We can't pick one more isolated compaction in level n.
+			// Mark the entire level as unavailable. In theory it shouldn't
+			// happen a lot.
+			ctx.denylist[level] = struct{}{}
+			return
+		}
+	} else {
+		c = db.s.pickCompactionByTable(level, table, ctx)
+		if c == nil {
+			// The involved tables are not available now. Mark the seek
+			// compaction as unavailable.
+			ctx.noseek = true
+			return
+		}
+	}
+	ctx.add(c)
+	wg.Add(1)
+
+	go func() {
+		// Catch the panic in its own goroutine.
+		defer func() {
+			if x := recover(); x != nil {
+				if x != errCompactionTransactExiting {
+					panic(x)
+				}
+			}
+		}()
+		defer wg.Done()
+
+		db.tableCompaction(c, false, func(c *compaction) {
+			select {
+			case done <- c:
+			case <-db.closeC:
+			}
+		})
+	}()
 }

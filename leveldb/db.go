@@ -74,7 +74,8 @@ type DB struct {
 	// Compaction.
 	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
-	tcompPauseC      chan chan<- struct{}
+	tcompPauseC      chan (<-chan struct{})
+	tcompPauseSetC   chan (<-chan struct{})
 	mcompCmdC        chan cCmd
 	compErrC         chan error
 	compPerErrC      chan error
@@ -108,12 +109,13 @@ func openDB(s *session) (*DB, error) {
 		writeLockC:   make(chan struct{}, 1),
 		writeAckC:    make(chan error),
 		// Compaction
-		tcompCmdC:   make(chan cCmd),
-		tcompPauseC: make(chan chan<- struct{}),
-		mcompCmdC:   make(chan cCmd),
-		compErrC:    make(chan error),
-		compPerErrC: make(chan error),
-		compErrSetC: make(chan error),
+		tcompCmdC:      make(chan cCmd),
+		tcompPauseC:    make(chan (<-chan struct{})),
+		tcompPauseSetC: make(chan (<-chan struct{})),
+		mcompCmdC:      make(chan cCmd),
+		compErrC:       make(chan error),
+		compPerErrC:    make(chan error),
+		compErrSetC:    make(chan error),
 		// Close
 		closeC: make(chan struct{}),
 	}
@@ -146,6 +148,7 @@ func openDB(s *session) (*DB, error) {
 
 	// Doesn't need to be included in the wait group.
 	go db.compactionError()
+	go db.pauseTableCompaction()
 	go db.mpoolDrain()
 
 	if readOnly {
