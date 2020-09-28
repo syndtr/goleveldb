@@ -9,7 +9,7 @@ package leveldb
 import (
 	"testing"
 
-	"github.com/syndtr/goleveldb/leveldb/comparer"
+	"github.com/go-leveldb/goleveldb/leveldb/comparer"
 )
 
 func increseKey(key []byte) []byte {
