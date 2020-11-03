@@ -12,7 +12,7 @@ matrix:
    allow_failures:
     - go: 1.9.x
     - go: 1.10.x
-    
+    - go: tip
 
 
 script:
