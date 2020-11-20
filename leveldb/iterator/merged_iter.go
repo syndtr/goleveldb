@@ -7,6 +7,7 @@
 package iterator
 
 import (
+	"fmt"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -66,7 +67,10 @@ func (i *mergedIterator) First() bool {
 		i.err = ErrIterReleased
 		return false
 	}
-
+	if true {
+		fmt.Printf("leveldb: mergedIterator consists of %d indexed iterators\n", len(i.iters))
+		return false
+	}
 	for x, iter := range i.iters {
 		switch {
 		case iter.First():
