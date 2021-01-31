@@ -117,6 +117,7 @@ func (h *dbHarness) closeDB() {
 		if err := h.closeDB0(); err != nil {
 			h.t.Error("Close: got error: ", err)
 		}
+		h.db = nil
 	}
 	h.stor.CloseCheck()
 	runtime.GC()
@@ -132,7 +133,7 @@ func (h *dbHarness) reopenDB() {
 func (h *dbHarness) close() {
 	if h.db != nil {
 		if err := h.closeDB0(); err != nil {
-			h.t.Fatal(err)
+			h.t.Error("Close: got error: ", err)
 		}
 		h.db = nil
 	}
@@ -1369,8 +1370,8 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 			h.getVal(fmt.Sprintf("k%d,%d", i, j), fmt.Sprintf("v%d,%d", i, j))
 		}
 	}
-	if err := eg.Wait(); err != nil {
-		t.Fatal(err)
+	if err := eg.Wait(); err != nil && err != ErrClosed {
+		t.Error("group wait error: ", err)
 	}
 }
 

@@ -141,7 +141,6 @@ func openDB(s *session) (*DB, error) {
 			}
 			return nil, err
 		}
-
 	}
 
 	// Doesn't need to be included in the wait group.
@@ -540,9 +539,8 @@ func (db *DB) recoverJournal() error {
 			if jr == nil {
 				jr = journal.NewReader(fr, dropper{db.s, fd}, strict, checksum)
 			} else {
-				if err := jr.Reset(fr, dropper{db.s, fd}, strict, checksum); err != nil {
-					return err
-				}
+				// Ignore the error here
+				_ = jr.Reset(fr, dropper{db.s, fd}, strict, checksum)
 			}
 
 			// Flush memdb and remove obsolete journal file.
