@@ -149,7 +149,9 @@ func openDB(s *session) (*DB, error) {
 	go db.mpoolDrain()
 
 	if readOnly {
-		db.SetReadOnly()
+		if err := db.SetReadOnly(); err != nil {
+			return nil, err
+		}
 	} else {
 		db.closeW.Add(2)
 		go db.tCompaction()
@@ -311,9 +313,17 @@ func recoverTable(s *session, o *opt.Options) error {
 			return
 		}
 		defer func() {
-			writer.Close()
+			if cerr := writer.Close(); cerr != nil {
+				if err == nil {
+					err = cerr
+				} else {
+					err = fmt.Errorf("error recovering table (%v); error closing (%v)", err, cerr)
+				}
+			}
 			if err != nil {
-				s.stor.Remove(tmpFd)
+				if rerr := s.stor.Remove(tmpFd); rerr != nil {
+					err = fmt.Errorf("error recovering table (%v); error removing (%v)", err, rerr)
+				}
 				tmpFd = storage.FileDesc{}
 			}
 		}()
@@ -530,7 +540,9 @@ func (db *DB) recoverJournal() error {
 			if jr == nil {
 				jr = journal.NewReader(fr, dropper{db.s, fd}, strict, checksum)
 			} else {
-				jr.Reset(fr, dropper{db.s, fd}, strict, checksum)
+				if err := jr.Reset(fr, dropper{db.s, fd}, strict, checksum); err != nil {
+					return err
+				}
 			}
 
 			// Flush memdb and remove obsolete journal file.
@@ -550,7 +562,10 @@ func (db *DB) recoverJournal() error {
 				}
 				rec.resetAddedTables()
 
-				db.s.stor.Remove(ofd)
+				if err := db.s.stor.Remove(ofd); err != nil {
+					fr.Close()
+					return err
+				}
 				ofd = storage.FileDesc{}
 			}
 
@@ -634,7 +649,9 @@ func (db *DB) recoverJournal() error {
 
 	// Remove the last obsolete journal file.
 	if !ofd.Zero() {
-		db.s.stor.Remove(ofd)
+		if err := db.s.stor.Remove(ofd); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -688,7 +705,9 @@ func (db *DB) recoverJournalRO() error {
 			if jr == nil {
 				jr = journal.NewReader(fr, dropper{db.s, fd}, strict, checksum)
 			} else {
-				jr.Reset(fr, dropper{db.s, fd}, strict, checksum)
+				if err := jr.Reset(fr, dropper{db.s, fd}, strict, checksum); err != nil {
+					return err
+				}
 			}
 
 			// Replay journal to memdb.

@@ -396,7 +396,7 @@ func (s *session) recordCommited(rec *sessionRecord) {
 	}
 
 	for _, r := range rec.compPtrs {
-		s.setCompPtr(r.level, internalKey(r.ikey))
+		s.setCompPtr(r.level, r.ikey)
 	}
 }
 
@@ -429,14 +429,14 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 				s.manifestWriter.Close()
 			}
 			if !s.manifestFd.Zero() {
-				s.stor.Remove(s.manifestFd)
+				err = s.stor.Remove(s.manifestFd)
 			}
 			s.manifestFd = fd
 			s.manifestWriter = writer
 			s.manifest = jw
 		} else {
 			writer.Close()
-			s.stor.Remove(fd)
+			err = s.stor.Remove(fd)
 			s.reuseFileNum(fd.Num)
 		}
 	}()

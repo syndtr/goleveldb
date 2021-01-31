@@ -110,25 +110,32 @@ func TestBasicOperations(t *testing.T) {
 		}
 		check(t, "TestBasicOperations (4)", &buf, "a")
 
-		buf.WriteByte(data[1])
+		if err := buf.WriteByte(data[1]); err != nil {
+			t.Fatal(err)
+		}
 		check(t, "TestBasicOperations (5)", &buf, "ab")
 
 		n, err = buf.Write([]byte(data[2:26]))
+		if err != nil {
+			t.Fatal(err)
+		}
 		if n != 24 {
 			t.Errorf("wrote 25 bytes, but n == %d", n)
 		}
-		check(t, "TestBasicOperations (6)", &buf, string(data[0:26]))
+		check(t, "TestBasicOperations (6)", &buf, data[0:26])
 
 		buf.Truncate(26)
-		check(t, "TestBasicOperations (7)", &buf, string(data[0:26]))
+		check(t, "TestBasicOperations (7)", &buf, data[0:26])
 
 		buf.Truncate(20)
-		check(t, "TestBasicOperations (8)", &buf, string(data[0:20]))
+		check(t, "TestBasicOperations (8)", &buf, data[0:20])
 
-		empty(t, "TestBasicOperations (9)", &buf, string(data[0:20]), make([]byte, 5))
+		empty(t, "TestBasicOperations (9)", &buf, data[0:20], make([]byte, 5))
 		empty(t, "TestBasicOperations (10)", &buf, "", make([]byte, 100))
 
-		buf.WriteByte(data[1])
+		if err := buf.WriteByte(data[1]); err != nil {
+			t.Fatal(err)
+		}
 		c, err := buf.ReadByte()
 		if err != nil {
 			t.Error("ReadByte unexpected eof")
@@ -136,7 +143,7 @@ func TestBasicOperations(t *testing.T) {
 		if c != data[1] {
 			t.Errorf("ReadByte wrong value c=%v", c)
 		}
-		c, err = buf.ReadByte()
+		_, err = buf.ReadByte()
 		if err == nil {
 			t.Error("ReadByte unexpected not eof")
 		}
@@ -191,7 +198,9 @@ func TestReadFrom(t *testing.T) {
 	for i := 3; i < 30; i += 3 {
 		s := fillBytes(t, "TestReadFrom (1)", &buf, "", 5, testBytes[0:len(testBytes)/i])
 		var b Buffer
-		b.ReadFrom(&buf)
+		if _, err := b.ReadFrom(&buf); err != nil {
+			t.Fatal(err)
+		}
 		empty(t, "TestReadFrom (2)", &b, s, make([]byte, len(data)))
 	}
 }
@@ -201,7 +210,9 @@ func TestWriteTo(t *testing.T) {
 	for i := 3; i < 30; i += 3 {
 		s := fillBytes(t, "TestWriteTo (1)", &buf, "", 5, testBytes[0:len(testBytes)/i])
 		var b Buffer
-		buf.WriteTo(&b)
+		if _, err := buf.WriteTo(&b); err != nil {
+			t.Fatal(err)
+		}
 		empty(t, "TestWriteTo (2)", &b, s, make([]byte, len(data)))
 	}
 }
@@ -289,7 +300,9 @@ func TestGrow(t *testing.T) {
 			// Check no allocation occurs in write, as long as we're single-threaded.
 			var m1, m2 runtime.MemStats
 			runtime.ReadMemStats(&m1)
-			buf.Write(yBytes)
+			if _, err := buf.Write(yBytes); err != nil {
+				t.Fatal(err)
+			}
 			runtime.ReadMemStats(&m2)
 			if runtime.GOMAXPROCS(-1) == 1 && m1.Mallocs != m2.Mallocs {
 				t.Errorf("allocation occurred during write")
@@ -322,11 +335,17 @@ func TestReadEmptyAtEOF(t *testing.T) {
 func TestBufferGrowth(t *testing.T) {
 	var b Buffer
 	buf := make([]byte, 1024)
-	b.Write(buf[0:1])
+	if _, err := b.Write(buf[0:1]); err != nil {
+		t.Fatal(err)
+	}
 	var cap0 int
 	for i := 0; i < 5<<10; i++ {
-		b.Write(buf)
-		b.Read(buf)
+		if _, err := b.Write(buf); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.Read(buf); err != nil {
+			t.Fatal(err)
+		}
 		if i == 0 {
 			cap0 = cap(b.buf)
 		}
@@ -346,7 +365,9 @@ func BenchmarkWriteByte(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
 		for i := 0; i < n; i++ {
-			buf.WriteByte('x')
+			if err := buf.WriteByte('x'); err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -367,11 +388,17 @@ func BenchmarkAlloc(b *testing.B) {
 func BenchmarkBufferNotEmptyWriteRead(b *testing.B) {
 	buf := make([]byte, 1024)
 	for i := 0; i < b.N; i++ {
-		var b Buffer
-		b.Write(buf[0:1])
+		var buf2 Buffer
+		if _, err := buf2.Write(buf[0:1]); err != nil {
+			b.Fatal(err)
+		}
 		for i := 0; i < 5<<10; i++ {
-			b.Write(buf)
-			b.Read(buf)
+			if _, err := buf2.Write(buf); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := buf2.Read(buf); err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
@@ -380,14 +407,22 @@ func BenchmarkBufferNotEmptyWriteRead(b *testing.B) {
 func BenchmarkBufferFullSmallReads(b *testing.B) {
 	buf := make([]byte, 1024)
 	for i := 0; i < b.N; i++ {
-		var b Buffer
-		b.Write(buf)
-		for b.Len()+20 < cap(b.buf) {
-			b.Write(buf[:10])
+		var buf2 Buffer
+		if _, err := buf2.Write(buf); err != nil {
+			b.Fatal(err)
+		}
+		for buf2.Len()+20 < cap(buf2.buf) {
+			if _, err := buf2.Write(buf[:10]); err != nil {
+				b.Fatal(err)
+			}
 		}
 		for i := 0; i < 5<<10; i++ {
-			b.Read(buf[:1])
-			b.Write(buf[:1])
+			if _, err := buf2.Read(buf[:1]); err != nil {
+				b.Fatal(err)
+			}
+			if _, err := buf2.Write(buf[:1]); err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }

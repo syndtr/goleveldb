@@ -37,9 +37,9 @@ var _ = testutil.Defer(func() {
 				scratch:         make([]byte, 30),
 			}
 			kv.Iterate(func(i int, key, value []byte) {
-				bw.append(key, value)
+				Expect(bw.append(key, value)).ShouldNot(HaveOccurred())
 			})
-			bw.finish()
+			Expect(bw.finish()).ShouldNot(HaveOccurred())
 
 			// Opening the block.
 			data := bw.buf.Bytes()

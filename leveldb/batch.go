@@ -33,7 +33,6 @@ func newErrBatchCorrupted(reason string) error {
 const (
 	batchHeaderLen = 8 + 4
 	batchGrowRec   = 3000
-	batchBufioSize = 16
 )
 
 // BatchReplay wraps basic batch operations.
@@ -57,10 +56,6 @@ func (index batchIndex) v(data []byte) []byte {
 		return data[index.valuePos : index.valuePos+index.valueLen]
 	}
 	return nil
-}
-
-func (index batchIndex) kv(data []byte) (key, value []byte) {
-	return index.k(data), index.v(data)
 }
 
 // Batch is a write batch.
@@ -217,17 +212,6 @@ func (b *Batch) putMem(seq uint64, mdb *memdb.DB) error {
 	for i, index := range b.index {
 		ik = makeInternalKey(ik, index.k(b.data), seq+uint64(i), index.keyType)
 		if err := mdb.Put(ik, index.v(b.data)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (b *Batch) revertMem(seq uint64, mdb *memdb.DB) error {
-	var ik []byte
-	for i, index := range b.index {
-		ik = makeInternalKey(ik, index.k(b.data), seq+uint64(i), index.keyType)
-		if err := mdb.Delete(ik); err != nil {
 			return err
 		}
 	}

@@ -246,7 +246,9 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 
 	// Rotate memdb if it's reach the threshold.
 	if batch.internalLen >= mdbFree {
-		db.rotateMem(0, false)
+		if _, err := db.rotateMem(0, false); err != nil {
+			return err
+		}
 	}
 
 	db.unlockWrite(overflow, merged, nil)

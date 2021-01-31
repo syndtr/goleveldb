@@ -7,6 +7,7 @@
 package cache
 
 import (
+	"fmt"
 	"math/rand"
 	"runtime"
 	"sync"
@@ -14,6 +15,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type int32o int32
@@ -82,34 +85,36 @@ func TestCacheMap(t *testing.T) {
 
 	c := NewCache(nil)
 
-	wg := new(sync.WaitGroup)
+	var eg errgroup.Group
 	var done int32
 
 	for ns, x := range params {
 		for i := 0; i < x.concurrent; i++ {
-			wg.Add(1)
-			go func(ns, i, repeat int, objects []int32o, handles []unsafe.Pointer) {
-				defer wg.Done()
+			ns_ := ns
+			repeat_ := x.repeat
+			objects_ := objects[ns]
+			handles_ := handles[ns]
+			eg.Go(func() error {
 				r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-				for j := len(objects) * repeat; j >= 0; j-- {
-					key := uint64(r.Intn(len(objects)))
-					h := c.Get(uint64(ns), key, func() (int, Value) {
-						o := &objects[key]
+				for j := len(objects_) * repeat_; j >= 0; j-- {
+					key := uint64(r.Intn(len(objects_)))
+					h := c.Get(uint64(ns_), key, func() (int, Value) {
+						o := &objects_[key]
 						o.acquire()
 						return 1, o
 					})
-					if v := h.Value().(*int32o); v != &objects[key] {
-						t.Fatalf("#%d invalid value: want=%p got=%p", ns, &objects[key], v)
+					if v := h.Value().(*int32o); v != &objects_[key] {
+						return fmt.Errorf("#%d invalid value: want=%p got=%p", ns_, &objects_[key], v)
 					}
-					if objects[key] != 1 {
-						t.Fatalf("#%d invalid object %d: %d", ns, key, objects[key])
+					if objects_[key] != 1 {
+						return fmt.Errorf("#%d invalid object %d: %d", ns_, key, objects_[key])
 					}
-					if !atomic.CompareAndSwapPointer(&handles[r.Intn(len(handles))], nil, unsafe.Pointer(h)) {
+					if !atomic.CompareAndSwapPointer(&handles_[r.Intn(len(handles_))], nil, unsafe.Pointer(h)) {
 						h.Release()
 					}
 				}
-			}(ns, i, x.repeat, objects[ns], handles[ns])
+				return nil
+			})
 		}
 
 		go func(handles []unsafe.Pointer) {
@@ -140,7 +145,9 @@ func TestCacheMap(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 
 	atomic.StoreInt32(&done, 1)
 
@@ -271,7 +278,7 @@ func TestLRUCache_GetLatency(t *testing.T) {
 				mark := time.Now()
 				if mark.Before(until) {
 					h := c.Get(0, uint64(r.Intn(maxkey)), nil)
-					latency := int64(time.Now().Sub(mark))
+					latency := int64(time.Since(mark))
 					m := atomic.LoadInt64(&getMaxLatency)
 					if latency > m {
 						atomic.CompareAndSwapInt64(&getMaxLatency, m, latency)

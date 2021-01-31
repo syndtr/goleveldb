@@ -24,6 +24,7 @@ import (
 	"unsafe"
 
 	"github.com/onsi/gomega"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -130,7 +131,9 @@ func (h *dbHarness) reopenDB() {
 
 func (h *dbHarness) close() {
 	if h.db != nil {
-		h.closeDB0()
+		if err := h.closeDB0(); err != nil {
+			h.t.Fatal(err)
+		}
 		h.db = nil
 	}
 	h.stor.Close()
@@ -538,8 +541,7 @@ func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 			}
 			h := newDbHarnessWopt(t, o)
 			defer h.close()
-			switch i {
-			case 3:
+			if i == 3 {
 				h.reopenDB()
 			}
 			f(h)
@@ -558,9 +560,9 @@ func testAligned(t *testing.T, name string, offset uintptr) {
 }
 
 func Test_FieldsAligned(t *testing.T) {
-	p1 := new(DB)
+	p1 := new(DB) //nolint:staticcheck
 	testAligned(t, "DB.seq", unsafe.Offsetof(p1.seq))
-	p2 := new(session)
+	p2 := new(session) //nolint:staticcheck
 	testAligned(t, "session.stNextFileNum", unsafe.Offsetof(p2.stNextFileNum))
 	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))
 	testAligned(t, "session.stPrevJournalNum", unsafe.Offsetof(p2.stPrevJournalNum))
@@ -1351,11 +1353,14 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 	}
 
 	h.stor.EmulateError(testutil.ModeOpen, storage.TypeTable, errors.New("open error during table compaction"))
-	go h.db.CompactRange(util.Range{})
+	var eg errgroup.Group
+	eg.Go(func() error { return h.db.CompactRange(util.Range{}) })
 	if err := h.db.compTriggerWait(h.db.tcompCmdC); err != nil {
 		t.Log("compaction error: ", err)
 	}
-	h.closeDB0()
+	if err := h.closeDB0(); err != nil {
+		t.Fatal(err)
+	}
 	h.openDB()
 	h.stor.EmulateError(testutil.ModeOpen, storage.TypeTable, nil)
 
@@ -1363,6 +1368,9 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 		for j := 0; j < jm; j++ {
 			h.getVal(fmt.Sprintf("k%d,%d", i, j), fmt.Sprintf("v%d,%d", i, j))
 		}
+	}
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -2063,15 +2071,13 @@ func TestDB_GoleveldbIssue74(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	until := time.Now().Add(dur)
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
+	var eg errgroup.Group
 	var done uint32
-	go func() {
+	eg.Go(func() error {
 		var i int
 		defer func() {
 			t.Logf("WRITER DONE #%d", i)
 			atomic.StoreUint32(&done, 1)
-			wg.Done()
 		}()
 
 		b := new(Batch)
@@ -2093,12 +2099,12 @@ func TestDB_GoleveldbIssue74(t *testing.T) {
 				key := iter.Value()
 
 				if _, err := snap.Get(ptrKey, nil); err != nil {
-					t.Fatalf("WRITER #%d snapshot.Get %q: %v", i, ptrKey, err)
+					return fmt.Errorf("WRITER #%d snapshot.Get %q: %v", i, ptrKey, err)
 				}
 				if value, err := snap.Get(key, nil); err != nil {
-					t.Fatalf("WRITER #%d snapshot.Get %q: %v", i, key, err)
+					return fmt.Errorf("WRITER #%d snapshot.Get %q: %v", i, key, err)
 				} else if string(value) != string(key)+iv {
-					t.Fatalf("WRITER #%d snapshot.Get %q got invalid value, want %q got %q", i, key, string(key)+iv, value)
+					return fmt.Errorf("WRITER #%d snapshot.Get %q got invalid value, want %q got %q", i, key, string(key)+iv, value)
 				}
 
 				b.Delete(key)
@@ -2108,16 +2114,16 @@ func TestDB_GoleveldbIssue74(t *testing.T) {
 			iter.Release()
 			snap.Release()
 			if k != n {
-				t.Fatalf("#%d %d != %d", i, k, n)
+				return fmt.Errorf("#%d %d != %d", i, k, n)
 			}
 		}
-	}()
-	go func() {
+		return nil
+	})
+	eg.Go(func() error {
 		var i int
 		defer func() {
 			t.Logf("READER DONE #%d", i)
 			atomic.StoreUint32(&done, 1)
-			wg.Done()
 		}()
 		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
 			snap := h.getSnapshot()
@@ -2129,13 +2135,13 @@ func TestDB_GoleveldbIssue74(t *testing.T) {
 				key := iter.Value()
 
 				if _, err := snap.Get(ptrKey, nil); err != nil {
-					t.Fatalf("READER #%d snapshot.Get %q: %v", i, ptrKey, err)
+					return fmt.Errorf("READER #%d snapshot.Get %q: %v", i, ptrKey, err)
 				}
 
 				if value, err := snap.Get(key, nil); err != nil {
-					t.Fatalf("READER #%d snapshot.Get %q: %v", i, key, err)
+					return fmt.Errorf("READER #%d snapshot.Get %q: %v", i, key, err)
 				} else if prevValue != "" && string(value) != string(key)+prevValue {
-					t.Fatalf("READER #%d snapshot.Get %q got invalid value, want %q got %q", i, key, string(key)+prevValue, value)
+					return fmt.Errorf("READER #%d snapshot.Get %q got invalid value, want %q got %q", i, key, string(key)+prevValue, value)
 				} else {
 					prevValue = string(value[len(key):])
 				}
@@ -2143,11 +2149,14 @@ func TestDB_GoleveldbIssue74(t *testing.T) {
 			iter.Release()
 			snap.Release()
 			if k > 0 && k != n {
-				t.Fatalf("#%d %d != %d", i, k, n)
+				return fmt.Errorf("#%d %d != %d", i, k, n)
 			}
 		}
-	}()
-	wg.Wait()
+		return nil
+	})
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDB_GetProperties(t *testing.T) {
@@ -2200,14 +2209,12 @@ func TestDB_GoleveldbIssue72and83(t *testing.T) {
 	}
 
 	until := time.Now().Add(dur)
-	wg := new(sync.WaitGroup)
-	wg.Add(3)
+	var eg errgroup.Group
 	var done uint32
-	go func() {
+	eg.Go(func() error {
 		i := 0
 		defer func() {
 			t.Logf("WRITER DONE #%d", i)
-			wg.Done()
 		}()
 
 		b := new(Batch)
@@ -2220,16 +2227,16 @@ func TestDB_GoleveldbIssue72and83(t *testing.T) {
 			}
 			if err := h.db.Write(b, h.wo); err != nil {
 				atomic.StoreUint32(&done, 1)
-				t.Fatalf("WRITER #%d db.Write: %v", i, err)
+				return fmt.Errorf("WRITER #%d db.Write: %v", i, err)
 			}
 		}
-	}()
-	go func() {
+		return nil
+	})
+	eg.Go(func() error {
 		var i int
 		defer func() {
 			t.Logf("READER0 DONE #%d", i)
 			atomic.StoreUint32(&done, 1)
-			wg.Done()
 		}()
 		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
 			snap := h.getSnapshot()
@@ -2247,37 +2254,37 @@ func TestDB_GoleveldbIssue72and83(t *testing.T) {
 				k1checksum0 := binary.LittleEndian.Uint32(k1[len(k1)-4:])
 				k1checksum1 := util.NewCRC(k1[:len(k1)-4]).Value()
 				if k1checksum0 != k1checksum1 {
-					t.Fatalf("READER0 #%d.%d W#%d invalid K1 checksum: %#x != %#x", i, k, writei, k1checksum0, k1checksum0)
+					return fmt.Errorf("READER0 #%d.%d W#%d invalid K1 checksum: %#x != %#x", i, k, writei, k1checksum0, k1checksum0)
 				}
 				k2checksum0 := binary.LittleEndian.Uint32(k2[len(k2)-4:])
 				k2checksum1 := util.NewCRC(k2[:len(k2)-4]).Value()
 				if k2checksum0 != k2checksum1 {
-					t.Fatalf("READER0 #%d.%d W#%d invalid K2 checksum: %#x != %#x", i, k, writei, k2checksum0, k2checksum1)
+					return fmt.Errorf("READER0 #%d.%d W#%d invalid K2 checksum: %#x != %#x", i, k, writei, k2checksum0, k2checksum1)
 				}
 				kwritei := int(binary.LittleEndian.Uint32(k2[len(k2)-8:]))
 				if writei != kwritei {
-					t.Fatalf("READER0 #%d.%d W#%d invalid write iteration num: %d", i, k, writei, kwritei)
+					return fmt.Errorf("READER0 #%d.%d W#%d invalid write iteration num: %d", i, k, writei, kwritei)
 				}
 				if _, err := snap.Get(k2, nil); err != nil {
-					t.Fatalf("READER0 #%d.%d W#%d snap.Get: %v\nk1: %x\n -> k2: %x", i, k, writei, err, k1, k2)
+					return fmt.Errorf("READER0 #%d.%d W#%d snap.Get: %v\nk1: %x\n -> k2: %x", i, k, writei, err, k1, k2)
 				}
 			}
 			if err := iter.Error(); err != nil {
-				t.Fatalf("READER0 #%d.%d W#%d snap.Iterator: %v", i, k, writei, err)
+				return fmt.Errorf("READER0 #%d.%d W#%d snap.Iterator: %v", i, k, writei, err)
 			}
 			iter.Release()
 			snap.Release()
 			if k > 0 && k != n {
-				t.Fatalf("READER0 #%d W#%d short read, got=%d want=%d", i, writei, k, n)
+				return fmt.Errorf("READER0 #%d W#%d short read, got=%d want=%d", i, writei, k, n)
 			}
 		}
-	}()
-	go func() {
+		return nil
+	})
+	eg.Go(func() error {
 		var i int
 		defer func() {
 			t.Logf("READER1 DONE #%d", i)
 			atomic.StoreUint32(&done, 1)
-			wg.Done()
 		}()
 		for ; time.Now().Before(until) && atomic.LoadUint32(&done) == 0; i++ {
 			iter := h.db.NewIterator(nil, nil)
@@ -2292,16 +2299,19 @@ func TestDB_GoleveldbIssue72and83(t *testing.T) {
 				k++
 			}
 			if err := iter.Error(); err != nil {
-				t.Fatalf("READER1 #%d.%d W#%d db.Iterator: %v", i, k, writei, err)
+				return fmt.Errorf("READER1 #%d.%d W#%d db.Iterator: %v", i, k, writei, err)
 			}
 			iter.Release()
 			if m := (writei+1)*n + n; k != m {
-				t.Fatalf("READER1 #%d W#%d short read, got=%d want=%d", i, writei, k, m)
+				return fmt.Errorf("READER1 #%d W#%d short read, got=%d want=%d", i, writei, k, m)
 			}
 		}
-	}()
+		return nil
+	})
 
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDB_TransientError(t *testing.T) {
@@ -2366,56 +2376,58 @@ func TestDB_TransientError(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	rnd := rand.New(rand.NewSource(0xecafdaed))
-	wg := &sync.WaitGroup{}
-	for i, snap := range snaps {
-		wg.Add(2)
-
-		go func(i int, snap *Snapshot, sk []int) {
-			defer wg.Done()
-
+	var eg errgroup.Group
+	for i_, snap := range snaps {
+		i := i_
+		snap1 := snap
+		snap2 := snap
+		sk := rnd.Perm(nKey)
+		eg.Go(func() error {
 			vtail := fmt.Sprintf("VAL%030d", i)
 			for _, k := range sk {
 				key := fmt.Sprintf("KEY%8d", k)
-				xvalue, err := snap.Get([]byte(key), nil)
+				xvalue, err := snap1.Get([]byte(key), nil)
 				if err != nil {
-					t.Fatalf("READER_GET #%d SEQ=%d K%d error: %v", i, snap.elem.seq, k, err)
+					return fmt.Errorf("READER_GET #%d SEQ=%d K%d error: %v", i, snap1.elem.seq, k, err)
 				}
 				value := key + vtail
 				if !bytes.Equal([]byte(value), xvalue) {
-					t.Fatalf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap.elem.seq, k, value, xvalue)
+					return fmt.Errorf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap1.elem.seq, k, value, xvalue)
 				}
 			}
-		}(i, snap, rnd.Perm(nKey))
+			return nil
+		})
 
-		go func(i int, snap *Snapshot) {
-			defer wg.Done()
-
+		eg.Go(func() error {
 			vtail := fmt.Sprintf("VAL%030d", i)
-			iter := snap.NewIterator(nil, nil)
+			iter := snap2.NewIterator(nil, nil)
 			defer iter.Release()
 			for k := 0; k < nKey; k++ {
 				if !iter.Next() {
 					if err := iter.Error(); err != nil {
-						t.Fatalf("READER_ITER #%d K%d error: %v", i, k, err)
+						return fmt.Errorf("READER_ITER #%d K%d error: %v", i, k, err)
 					} else {
-						t.Fatalf("READER_ITER #%d K%d eoi", i, k)
+						return fmt.Errorf("READER_ITER #%d K%d eoi", i, k)
 					}
 				}
 				key := fmt.Sprintf("KEY%8d", k)
 				xkey := iter.Key()
 				if !bytes.Equal([]byte(key), xkey) {
-					t.Fatalf("READER_ITER #%d K%d invalid key: want %q, got %q", i, k, key, xkey)
+					return fmt.Errorf("READER_ITER #%d K%d invalid key: want %q, got %q", i, k, key, xkey)
 				}
 				value := key + vtail
 				xvalue := iter.Value()
 				if !bytes.Equal([]byte(value), xvalue) {
-					t.Fatalf("READER_ITER #%d K%d invalid value: want %q, got %q", i, k, value, xvalue)
+					return fmt.Errorf("READER_ITER #%d K%d invalid value: want %q, got %q", i, k, value, xvalue)
 				}
 			}
-		}(i, snap)
+			return nil
+		})
 	}
 
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDB_UkeyShouldntHopAcrossTable(t *testing.T) {
@@ -2483,29 +2495,30 @@ func TestDB_UkeyShouldntHopAcrossTable(t *testing.T) {
 	}
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	wg := &sync.WaitGroup{}
-	for i, snap := range snaps {
-		wg.Add(1)
-
-		go func(i int, snap *Snapshot) {
-			defer wg.Done()
-
+	var eg errgroup.Group
+	for i_, snap_ := range snaps {
+		i := i_
+		snap := snap_
+		eg.Go(func() error {
 			vtail := fmt.Sprintf("VAL%030d", i)
 			for k := 0; k < nKey; k++ {
 				key := fmt.Sprintf("KEY%08d", k)
 				xvalue, err := snap.Get([]byte(key), nil)
 				if err != nil {
-					t.Fatalf("READER_GET #%d SEQ=%d K%d error: %v", i, snap.elem.seq, k, err)
+					return fmt.Errorf("READER_GET #%d SEQ=%d K%d error: %v", i, snap.elem.seq, k, err)
 				}
 				value := key + vtail
 				if !bytes.Equal([]byte(value), xvalue) {
-					t.Fatalf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap.elem.seq, k, value, xvalue)
+					return fmt.Errorf("READER_GET #%d SEQ=%d K%d invalid value: want %q, got %q", i, snap.elem.seq, k, value, xvalue)
 				}
 			}
-		}(i, snap)
+			return nil
+		})
 	}
 
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDB_TableCompactionBuilder(t *testing.T) {
@@ -2832,11 +2845,15 @@ func TestDB_BulkInsertDelete(t *testing.T) {
 		offset := N * i
 		for j := 0; j < N; j++ {
 			binary.BigEndian.PutUint32(key, uint32(offset+j))
-			h.db.Put(key, value, nil)
+			if err := h.db.Put(key, value, nil); err != nil {
+				t.Fatal(err)
+			}
 		}
 		for j := 0; j < N; j++ {
 			binary.BigEndian.PutUint32(key, uint32(offset+j))
-			h.db.Delete(key, nil)
+			if err := h.db.Delete(key, nil); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 

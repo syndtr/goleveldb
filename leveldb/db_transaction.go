@@ -244,7 +244,7 @@ func (tr *Transaction) Commit() error {
 
 		// Additionally, wait compaction when certain threshold reached.
 		// Ignore error, returns error only if transaction can't be committed.
-		tr.db.waitCompaction()
+		_ = tr.db.waitCompaction()
 	}
 	// Only mark as done if transaction committed successfully.
 	tr.setDone()
