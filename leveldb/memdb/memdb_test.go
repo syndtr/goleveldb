@@ -45,13 +45,11 @@ func (p *DB) TestFindLast() (rkey, value []byte, err error) {
 }
 
 func (p *DB) TestPut(key []byte, value []byte) error {
-	p.Put(key, value)
-	return nil
+	return p.Put(key, value)
 }
 
 func (p *DB) TestDelete(key []byte) error {
-	p.Delete(key)
-	return nil
+	return p.Delete(key)
 }
 
 func (p *DB) TestFind(key []byte) (rkey, rvalue []byte, err error) {
@@ -94,7 +92,7 @@ var _ = testutil.Defer(func() {
 				// Building the DB.
 				db := New(comparer.DefaultComparer, 0)
 				kv.IterateShuffled(nil, func(i int, key, value []byte) {
-					db.Put(key, value)
+					Expect(db.Put(key, value)).ShouldNot(HaveOccurred())
 				})
 
 				if kv.Len() > 1 {

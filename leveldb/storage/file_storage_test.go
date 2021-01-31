@@ -87,7 +87,9 @@ func TestFileStorage_MetaSetGet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create(%d): got error: %v", i, err)
 		}
-		w.Write([]byte("TEST"))
+		if _, err := w.Write([]byte("TEST")); err != nil {
+			t.Fatalf("Write(%d): got error: %v", i, err)
+		}
 		w.Close()
 		if err := fs.SetMeta(fd); err != nil {
 			t.Fatalf("SetMeta(%d): got error: %v", i, err)

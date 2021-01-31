@@ -171,7 +171,7 @@ func (s *session) recover() (err error) {
 		if err == nil {
 			// save compact pointers
 			for _, r := range rec.compPtrs {
-				s.setCompPtr(r.level, internalKey(r.ikey))
+				s.setCompPtr(r.level, r.ikey)
 			}
 			// commit record to version staging
 			staging.commit(rec)

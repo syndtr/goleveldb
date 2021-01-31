@@ -13,11 +13,6 @@ import (
 	"time"
 )
 
-type buffer struct {
-	b    []byte
-	miss int
-}
-
 // BufferPool is a 'buffer pool'.
 type BufferPool struct {
 	pool      [6]chan []byte

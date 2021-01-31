@@ -474,7 +474,7 @@ func (w *Writer) Next() (io.Writer, error) {
 		w.fillHeader(true)
 	}
 	w.i = w.j
-	w.j = w.j + headerSize
+	w.j += headerSize
 	// Check if there is room in the block for the header.
 	if w.j > blockSize {
 		// Fill in the rest of the block with zeroes.
