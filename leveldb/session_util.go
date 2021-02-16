@@ -453,6 +453,12 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	if err != nil {
 		return
 	}
+	if !s.o.GetNoSync() {
+		err = writer.Sync()
+		if err != nil {
+			return
+		}
+	}
 	err = s.stor.SetMeta(fd)
 	return
 }
