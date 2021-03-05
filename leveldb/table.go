@@ -305,7 +305,12 @@ func (tf tFiles) newIndexIterator(tops *tOps, icmp *iComparer, slice *util.Range
 		} else {
 			limit = tf.Len()
 		}
-		tf = tf[start:limit]
+
+		if start > limit {
+			tf = tf[limit:limit]
+		} else {
+			tf = tf[start:limit]
+		}
 	}
 	return iterator.NewArrayIndexer(&tFilesArrayIndexer{
 		tFiles: tf,
