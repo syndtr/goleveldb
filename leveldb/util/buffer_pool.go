@@ -8,28 +8,19 @@ package util
 
 import (
 	"fmt"
-	"sync"
+	"runtime"
 	"sync/atomic"
 	"time"
 )
 
-type buffer struct {
-	b    []byte
-	miss int
-}
-
 // BufferPool is a 'buffer pool'.
 type BufferPool struct {
-	pool      [6]chan []byte
+	pool      []chan []byte
 	size      [5]uint32
 	sizeMiss  [5]uint32
 	sizeHalf  [5]uint32
 	baseline  [4]int
 	baseline0 int
-
-	mu     sync.RWMutex
-	closed bool
-	closeC chan struct{}
 
 	get     uint32
 	put     uint32
@@ -55,13 +46,6 @@ func (p *BufferPool) poolNum(n int) int {
 // Get returns buffer with length of n.
 func (p *BufferPool) Get(n int) []byte {
 	if p == nil {
-		return make([]byte, n)
-	}
-
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	if p.closed {
 		return make([]byte, n)
 	}
 
@@ -160,13 +144,6 @@ func (p *BufferPool) Put(b []byte) {
 		return
 	}
 
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	if p.closed {
-		return
-	}
-
 	atomic.AddUint32(&p.put, 1)
 
 	pool := p.pool[p.poolNum(cap(b))]
@@ -175,19 +152,6 @@ func (p *BufferPool) Put(b []byte) {
 	default:
 	}
 
-}
-
-func (p *BufferPool) Close() {
-	if p == nil {
-		return
-	}
-
-	p.mu.Lock()
-	if !p.closed {
-		p.closed = true
-		p.closeC <- struct{}{}
-	}
-	p.mu.Unlock()
 }
 
 func (p *BufferPool) String() string {
@@ -202,21 +166,20 @@ func (p *BufferPool) String() string {
 		p.baseline0, p.size, p.sizeMiss, p.sizeHalf, p.get, p.put, p.half, p.less, p.equal, p.greater, p.miss)
 }
 
-func (p *BufferPool) drain() {
+func drain(pool []chan []byte, closeC <-chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			for _, ch := range p.pool {
+			for _, ch := range pool {
 				select {
 				case <-ch:
 				default:
 				}
 			}
-		case <-p.closeC:
-			close(p.closeC)
-			for _, ch := range p.pool {
+		case <-closeC:
+			for _, ch := range pool {
 				close(ch)
 			}
 			return
@@ -230,13 +193,15 @@ func NewBufferPool(baseline int) *BufferPool {
 		panic("baseline can't be <= 0")
 	}
 	p := &BufferPool{
+		pool:      make([]chan []byte, 6),
 		baseline0: baseline,
 		baseline:  [...]int{baseline / 4, baseline / 2, baseline * 2, baseline * 4},
-		closeC:    make(chan struct{}, 1),
 	}
+	closeC := make(chan struct{}, 1)
 	for i, cap := range []int{2, 2, 4, 4, 2, 1} {
 		p.pool[i] = make(chan []byte, cap)
 	}
-	go p.drain()
+	runtime.SetFinalizer(p, func(*BufferPool) { close(closeC) })
+	go drain(p.pool, closeC)
 	return p
 }
