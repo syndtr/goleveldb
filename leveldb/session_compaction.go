@@ -52,6 +52,15 @@ func (s *session) flushMemdb(rec *sessionRecord, mdb *memdb.DB, maxLevel int) (i
 	return flushLevel, nil
 }
 
+func (s *session) isTableVibrant(t *tFile) bool {
+	for _, r := range s.o.VibrantKeys {
+		if t.overlaps(s.icmp, r.Start, r.Limit) {
+			return true
+		}
+	}
+	return false
+}
+
 // Pick a compaction based on current state; need external synchronization.
 func (s *session) pickCompaction() *compaction {
 	v := s.version()
@@ -65,10 +74,30 @@ func (s *session) pickCompaction() *compaction {
 		tables := v.levels[sourceLevel]
 		if cptr != nil && sourceLevel > 0 {
 			n := len(tables)
-			if i := sort.Search(n, func(i int) bool {
+			p := sort.Search(n, func(i int) bool {
 				return s.icmp.Compare(tables[i].imax, cptr) > 0
-			}); i < n {
-				t0 = append(t0, tables[i])
+			})
+			if p == n {
+				p = 0
+			}
+
+			if sourceLevel < s.highestVibrantTableLevel {
+				t0 = append(t0, tables[p])
+			} else {
+				// traverse all tables from position p, take special care of vibrant tables.
+				// a vibrant table is expected to stay in lower level unless there was one or
+				// more vibrant tables pushed into higher level.
+				for i := 0; i < n; i++ {
+					t := tables[(p+i)%n]
+					if !s.isTableVibrant(t) {
+						t0 = append(t0, t)
+						break
+					}
+				}
+				if len(t0) == 0 {
+					s.highestVibrantTableLevel = sourceLevel + 1
+					t0 = append(t0, tables[p])
+				}
 			}
 		}
 		if len(t0) == 0 {
