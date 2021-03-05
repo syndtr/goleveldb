@@ -1,9 +1,18 @@
 language: go
+arch:
+    - amd64
+    - ppc64le
 
 go:
   - 1.14.x
   - 1.15.x
   - tip
+matrix: 
+   allow_failures:
+    - go: 1.9.x
+    - go: 1.10.x
+    - go: tip
+
 
 script:
   - |
