@@ -22,6 +22,10 @@ const (
 	seekCompaction
 )
 
+type stash func()
+
+func (s stash) save() { s() }
+
 func (s *session) pickMemdbLevel(umin, umax []byte, maxLevel int) int {
 	v := s.version()
 	defer v.release()
@@ -177,6 +181,21 @@ func (c *compaction) save() {
 	c.snapSeenKey = c.seenKey
 	c.snapGPOverlappedBytes = c.gpOverlappedBytes
 	c.snapTPtrs = append(c.snapTPtrs[:0], c.tPtrs...)
+}
+
+// stash takes and holds current state for later saving
+func (c *compaction) stash() stash {
+	gpi := c.gpi
+	seenKey := c.seenKey
+	gpOverlappedBytes := c.gpOverlappedBytes
+	tPtrs := append([]int(nil), c.tPtrs...)
+
+	return func() {
+		c.snapGPI = gpi
+		c.snapSeenKey = seenKey
+		c.snapGPOverlappedBytes = gpOverlappedBytes
+		c.snapTPtrs = append(c.snapTPtrs[:0], tPtrs...)
+	}
 }
 
 func (c *compaction) restore() {
