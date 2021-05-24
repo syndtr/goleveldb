@@ -166,7 +166,10 @@ func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh b
 	if compression == opt.SnappyCompression {
 		// Allocate scratch enough for compression and block trailer.
 		if n := snappy.MaxEncodedLen(buf.Len()) + blockTrailerLen; len(w.compressionScratch) < n {
-			w.compressionScratch = make([]byte, n)
+			if cap(w.compressionScratch) < n {
+				w.compressionScratch = make([]byte, n)
+			}
+			w.compressionScratch = w.compressionScratch[:n]
 		}
 		compressed := snappy.Encode(w.compressionScratch, buf.Bytes())
 		n := len(compressed)
