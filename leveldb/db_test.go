@@ -2539,7 +2539,7 @@ func TestDB_TableCompactionBuilder(t *testing.T) {
 		value      = bytes.Repeat([]byte{'0'}, 100)
 	)
 	for i := 0; i < 2; i++ {
-		tw, err := s.tops.create()
+		tw, err := s.tops.create(0)
 		if err != nil {
 			t.Fatal(err)
 		}

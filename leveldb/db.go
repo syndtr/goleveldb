@@ -319,7 +319,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		}()
 
 		// Copy entries.
-		tw := table.NewWriter(writer, o)
+		tw := table.NewWriter(writer, o, nil, 0)
 		for iter.Next() {
 			key := iter.Key()
 			if validInternalKey(key) {
