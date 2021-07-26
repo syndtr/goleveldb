@@ -10,6 +10,7 @@ package errors
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -75,4 +76,16 @@ func SetFd(err error, fd storage.FileDesc) error {
 		return x
 	}
 	return err
+}
+
+// IsUnrecoverableError Determine whether there is no need to restart the error that can be repaired
+// for example, the disk is full. This error is a fixable error
+func IsUnrecoverableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.Contains(err.Error(), "no space left on device") {
+		return false
+	}
+	return true
 }
