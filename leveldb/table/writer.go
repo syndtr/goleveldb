@@ -15,6 +15,7 @@ import (
 	"github.com/golang/snappy"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
+	lerrors "github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -236,7 +237,7 @@ func (w *Writer) finishBlock() error {
 //
 // It is safe to modify the contents of the arguments after Append returns.
 func (w *Writer) Append(key, value []byte) error {
-	if w.err != nil {
+	if lerrors.IsUnrecoverableError(w.err) {
 		return w.err
 	}
 	if w.nEntries > 0 && w.cmp.Compare(w.dataBlock.prevKey, key) >= 0 {
@@ -285,7 +286,7 @@ func (w *Writer) BytesLen() int {
 // after Close, but calling BlocksLen, EntriesLen and BytesLen
 // is still possible.
 func (w *Writer) Close() error {
-	if w.err != nil {
+	if lerrors.IsUnrecoverableError(w.err) {
 		return w.err
 	}
 
