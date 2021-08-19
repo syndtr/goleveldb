@@ -47,7 +47,7 @@ var _ = testutil.Defer(func() {
 			)
 
 			// Building the table.
-			tw := NewWriter(buf, o)
+			tw := NewWriter(buf, o, nil, 0)
 			tw.Append([]byte("k01"), []byte("hello"))
 			tw.Append([]byte("k02"), []byte("hello2"))
 			tw.Append([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
@@ -90,7 +90,7 @@ var _ = testutil.Defer(func() {
 				buf := &bytes.Buffer{}
 
 				// Building the table.
-				tw := NewWriter(buf, o)
+				tw := NewWriter(buf, o, nil, 0)
 				kv.Iterate(func(i int, key, value []byte) {
 					tw.Append(key, value)
 				})
