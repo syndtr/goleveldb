@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"container/list"
 	"fmt"
 	"runtime"
 	"sync"
@@ -18,12 +17,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-type snapshotElement struct {
-	seq uint64
-	ref int
-	e   *list.Element
-}
-
 // Acquires a snapshot, based on latest sequence.
 func (db *DB) acquireSnapshot() *snapshotElement {
 	db.snapsMu.Lock()
@@ -31,8 +24,7 @@ func (db *DB) acquireSnapshot() *snapshotElement {
 
 	seq := db.getSeq()
 
-	if e := db.snapsList.Back(); e != nil {
-		se := e.Value.(*snapshotElement)
+	if se := db.snapsList.Back(); se != nil {
 		if se.seq == seq {
 			se.ref++
 			return se
@@ -41,7 +33,7 @@ func (db *DB) acquireSnapshot() *snapshotElement {
 		}
 	}
 	se := &snapshotElement{seq: seq, ref: 1}
-	se.e = db.snapsList.PushBack(se)
+	db.snapsList.PushBack(se)
 	return se
 }
 
@@ -52,8 +44,7 @@ func (db *DB) releaseSnapshot(se *snapshotElement) {
 
 	se.ref--
 	if se.ref == 0 {
-		db.snapsList.Remove(se.e)
-		se.e = nil
+		db.snapsList.Remove(se)
 	} else if se.ref < 0 {
 		panic("leveldb: Snapshot: negative element reference")
 	}
@@ -65,7 +56,7 @@ func (db *DB) minSeq() uint64 {
 	defer db.snapsMu.Unlock()
 
 	if e := db.snapsList.Front(); e != nil {
-		return e.Value.(*snapshotElement).seq
+		return e.seq
 	}
 
 	return db.getSeq()
