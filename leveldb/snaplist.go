@@ -9,6 +9,7 @@ package leveldb
 type snapshotElement struct {
 	seq uint64
 	ref int
+
 	next, prev *snapshotElement
 }
 
@@ -16,7 +17,7 @@ type snapshotElement struct {
 // The zero value for List is an empty list ready to use.
 type snapshotList struct {
 	root snapshotElement // sentinel list element, only &root, root.prev, and root.next are used
-	len  int     // current list length excluding (this) sentinel element
+	len  int             // current list length excluding (this) sentinel element
 }
 
 // Init initializes or clears list l.
@@ -82,60 +83,18 @@ func (l *snapshotList) remove(e *snapshotElement) {
 	return
 }
 
-// move moves e to next to at and returns e.
-func (l *snapshotList) move(e, at *snapshotElement) *snapshotElement {
-	if e == at {
-		return e
-	}
-	e.prev.next = e.next
-	e.next.prev = e.prev
-
-	e.prev = at
-	e.next = at.next
-	e.prev.next = e
-	e.next.prev = e
-
-	return e
-}
-
 // Remove removes e from l if e is an element of list l.
 // It returns the element value e.Value.
 // The element must not be nil.
 func (l *snapshotList) Remove(e *snapshotElement) {
+	// if e.list == l, l must have been initialized when e was inserted
+	// in l or l == nil (e is a zero Element) and l.remove will crash
 	l.remove(e)
 	return
-}
-
-// PushFront inserts a new element e with value v at the front of list l and returns e.
-func (l *snapshotList) PushFront(v *snapshotElement) {
-	l.lazyInit()
-	l.insertValue(v, &l.root)
 }
 
 // PushBack inserts a new element e with value v at the back of list l and returns e.
 func (l *snapshotList) PushBack(v *snapshotElement) {
 	l.lazyInit()
 	l.insertValue(v, l.root.prev)
-}
-
-// MoveToFront moves element e to the front of list l.
-// If e is not an element of l, the list is not modified.
-// The element must not be nil.
-func (l *snapshotList) MoveToFront(e *snapshotElement) {
-	if l.root.next == e {
-		return
-	}
-	// see comment in List.Remove about initialization of l
-	l.move(e, &l.root)
-}
-
-// MoveToBack moves element e to the back of list l.
-// If e is not an element of l, the list is not modified.
-// The element must not be nil.
-func (l *snapshotList) MoveToBack(e *snapshotElement) {
-	if l.root.prev == e {
-		return
-	}
-	// see comment in List.Remove about initialization of l
-	l.move(e, l.root.prev)
 }
