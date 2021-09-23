@@ -817,7 +817,7 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 	return iterator.NewIndexedIterator(index, opt.GetStrict(r.o, ro, opt.StrictReader))
 }
 
-func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bool) (rkey, value []byte, err error) {
+func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bool, dst []byte) (rkey, value []byte, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -901,7 +901,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		} else {
 			// Value does use block buffer, and since the buffer will be
 			// recycled, it need to be copied.
-			value = append([]byte{}, data.Value()...)
+			value = append(dst, data.Value()...)
 		}
 	}
 	data.Release()
@@ -918,8 +918,8 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 // The caller may modify the contents of the returned slice as it is its
 // own copy.
 // It is safe to modify the contents of the argument after Find returns.
-func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions) (rkey, value []byte, err error) {
-	return r.find(key, filtered, ro, false)
+func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions, dst []byte) (rkey, value []byte, err error) {
+	return r.find(key, filtered, ro, false, dst)
 }
 
 // FindKey finds key that is greater than or equal to the given key.
@@ -932,7 +932,7 @@ func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions) (rkey, val
 // own copy.
 // It is safe to modify the contents of the argument after Find returns.
 func (r *Reader) FindKey(key []byte, filtered bool, ro *opt.ReadOptions) (rkey []byte, err error) {
-	rkey, _, err = r.find(key, filtered, ro, true)
+	rkey, _, err = r.find(key, filtered, ro, true, nil)
 	return
 }
 
@@ -951,7 +951,7 @@ func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) 
 		return
 	}
 
-	rkey, value, err := r.find(key, false, ro, false)
+	rkey, value, err := r.find(key, false, ro, false, nil)
 	if err == nil && r.cmp.Compare(rkey, key) != 0 {
 		value = nil
 		err = ErrNotFound

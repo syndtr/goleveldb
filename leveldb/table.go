@@ -441,13 +441,13 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 
 // Finds key/value pair whose key is greater than or equal to the
 // given key.
-func (t *tOps) find(f *tFile, key []byte, ro *opt.ReadOptions) (rkey, rvalue []byte, err error) {
+func (t *tOps) find(f *tFile, key []byte, ro *opt.ReadOptions, dst []byte) (rkey, rvalue []byte, err error) {
 	ch, err := t.open(f)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer ch.Release()
-	return ch.Value().(*table.Reader).Find(key, true, ro)
+	return ch.Value().(*table.Reader).Find(key, true, ro, dst)
 }
 
 // Finds key that is greater than or equal to the given key.

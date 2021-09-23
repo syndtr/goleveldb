@@ -110,7 +110,7 @@ func (snap *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err er
 	if err != nil {
 		return
 	}
-	return snap.db.get(nil, nil, key, snap.elem.seq, ro)
+	return snap.db.get(nil, nil, key, snap.elem.seq, ro, nil)
 }
 
 // Has returns true if the DB does contains the given key.

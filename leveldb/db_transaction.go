@@ -43,7 +43,7 @@ func (tr *Transaction) Get(key []byte, ro *opt.ReadOptions) ([]byte, error) {
 	if tr.closed {
 		return nil, errTransactionDone
 	}
-	return tr.db.get(tr.mem.DB, tr.tables, key, tr.seq, ro)
+	return tr.db.get(tr.mem.DB, tr.tables, key, tr.seq, ro, nil)
 }
 
 // Has returns true if the DB does contains the given key.
