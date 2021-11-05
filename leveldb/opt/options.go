@@ -284,6 +284,12 @@ type Options struct {
 	// The default is false.
 	DisableSeeksCompaction bool
 
+	// SkipL0SeeksCompaction allows skipping L0 'seeks triggered compaction'.
+	// If enable, 'level seeks' can still be minimized without too many small compactions.
+	//
+	// The default value is false.
+	SkipL0SeeksCompaction bool
+
 	// ErrorIfExist defines whether an error should returned if the DB already
 	// exist.
 	//
@@ -542,6 +548,13 @@ func (o *Options) GetDisableSeeksCompaction() bool {
 		return false
 	}
 	return o.DisableSeeksCompaction
+}
+
+func (o *Options) GetMinSampleSeeksLevel() int {
+	if o == nil || !o.SkipL0SeeksCompaction {
+		return 0
+	}
+	return 1
 }
 
 func (o *Options) GetErrorIfExist() bool {

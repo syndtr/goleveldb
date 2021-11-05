@@ -162,7 +162,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	// Since entries never hop across level, finding key/value
 	// in smaller level make later levels irrelevant.
 	v.walkOverlapping(aux, ikey, func(level int, t *tFile) bool {
-		if sampleSeeks && level >= 0 && !tseek {
+		if sampleSeeks && level >= v.s.o.GetMinSampleSeeksLevel() && !tseek {
 			if tset == nil {
 				tset = &tSet{level, t}
 			} else {
@@ -245,7 +245,9 @@ func (v *version) sampleSeek(ikey internalKey) (tcomp bool) {
 
 	v.walkOverlapping(nil, ikey, func(level int, t *tFile) bool {
 		if tset == nil {
-			tset = &tSet{level, t}
+			if level >= v.s.o.GetMinSampleSeeksLevel() {
+				tset = &tSet{level, t}
+			}
 			return true
 		}
 		if tset.table.consumeSeek() <= 0 {
