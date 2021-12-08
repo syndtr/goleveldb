@@ -211,10 +211,11 @@ func (p *DB) randHeight() (h int) {
 func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 	node := 0
 	h := p.maxHeight - 1
+	visited := 0
 	for {
 		next := p.nodeData[node+nNext+h]
 		cmp := 1
-		if next != 0 {
+		if next != 0 && next != visited {
 			o := p.nodeData[next]
 			cmp = p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key)
 		}
@@ -222,6 +223,11 @@ func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 			// Keep searching in this list
 			node = next
 		} else {
+			if next != 0 {
+				// If we go down further, we can skip this element if we
+				// encounter it on a lower level.
+				visited = next
+			}
 			if prev {
 				p.prevNode[h] = node
 			} else if cmp == 0 {
