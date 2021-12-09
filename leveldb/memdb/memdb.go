@@ -223,7 +223,7 @@ func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 			// Keep searching in this list
 			node = next
 		} else {
-			if next != 0 {
+			if next != 0 && cmp != 0 {
 				// If we go down further, we can skip this element if we
 				// encounter it on a lower level.
 				visited = next
