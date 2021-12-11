@@ -8,8 +8,10 @@
 package memdb
 
 import (
+	"fmt"
 	"math/rand"
 	"sync"
+	"unsafe"
 
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -177,6 +179,9 @@ const (
 	nNext
 )
 
+// The backing representation for the nodeData slice
+type nodeInt int
+
 // node represents a node in the skiplist. It maps directly onto the nodeData
 // backing array, and is not meant to be used as a separate entity (aside for when
 // creating a new one).
@@ -188,63 +193,63 @@ const (
 // [2]         : Value length
 // [3]         : Height
 // [3..height] : Next nodes
-type node []int
+type node []nodeInt
 
 // kStart returns the start index for the key.
 func (n node) kStart() int {
-	return n[0]
+	return int(n[0])
 }
 
 // kEnd returns the start + length for the key.
 func (n node) kEnd() int {
-	return n[0] + n[1]
+	return int(n[0] + n[1])
 }
 
 // kLen return the key length.
 func (n node) kLen() int {
-	return n[1]
+	return int(n[1])
 }
 
 // vStart return the offset for the value.
 func (n node) vStart() int {
-	return n[0] + n[1]
+	return int(n[0] + n[1])
 }
 
 // vEnd return the offset + length for value.
 func (n node) vEnd() int {
-	return n[0] + n[1] + n[2]
+	return int(n[0] + n[1] + n[2])
 }
 
 // vLen returns the value length.
 func (n node) vLen() int {
-	return n[2]
+	return int(n[2])
 }
 
 // setKStart sets the key offset.
 func (n node) setKStart(keyOffset int) node {
-	n[0] = keyOffset
+	n[0] = nodeInt(keyOffset)
 	return n
 }
 
 // setVLen sets the value length.
 func (n node) setVLen(size int) node {
-	n[2] = size
+	n[2] = nodeInt(size)
 	return n
 }
 
 // height return the size of the next-tower.
 func (n node) height() int {
-	return n[3]
+	return int(n[3])
 }
 
 // nextAt return the item at the given height.
 func (n node) nextAt(height int) int {
-	return n[4+height]
+	return int(n[4+height])
 }
 
 // setNextAt sets the next item at the given height
 func (n node) setNextAt(height int, node int) {
-	n[4+height] = node
+	n[4+height] = nodeInt(node)
 }
 
 // DB is an in-memory key/value database.
@@ -254,7 +259,7 @@ type DB struct {
 
 	mu        sync.RWMutex
 	kvData    []byte
-	nodeData  []int
+	nodeData  []nodeInt
 	prevNode  [tMaxHeight]int
 	maxHeight int
 	n         int
@@ -280,11 +285,11 @@ func (p *DB) nodeAt(idx int) node {
 // This node later needs to be written to the backing slice, making the original
 // instance moot.
 func newNode(kvOffset, kLen, vLen, height int) node {
-	buf := make([]int, 4+height)
-	buf[0] = kvOffset
-	buf[1] = kLen
-	buf[2] = vLen
-	buf[3] = height
+	buf := make([]nodeInt, 4+height)
+	buf[0] = nodeInt(kvOffset)
+	buf[1] = nodeInt(kLen)
+	buf[2] = nodeInt(vLen)
+	buf[3] = nodeInt(height)
 	return node(buf)
 }
 
@@ -554,8 +559,26 @@ func New(cmp comparer.BasicComparer, capacity int) *DB {
 		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
 		maxHeight: 1,
 		kvData:    make([]byte, 0, capacity),
-		nodeData:  make([]int, 4+tMaxHeight),
 	}
-	p.nodeData[nHeight] = tMaxHeight
+	// Add empty first element
+	zero := newNode(0, 0, 0, tMaxHeight)
+	for n := 0; n < tMaxHeight; n++ {
+		zero.setNextAt(n, 0)
+	}
+	p.nodeData = append(p.nodeData, zero...)
 	return p
+}
+
+func (p *DB) Stats() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	dataSize := len(p.kvData)
+	metadataSize := len(p.nodeData) * int(unsafe.Sizeof(nodeInt(0)))
+	return fmt.Sprintf(`keyvalue size: %d
+metadata size: %d
+item count: %d
+data/metadata ratio: %.02f
+average kv item size: %.02f
+`, dataSize, metadataSize, p.n,
+		float64(dataSize)/float64(metadataSize+1), float64(dataSize/p.n))
 }
