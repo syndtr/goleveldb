@@ -171,14 +171,6 @@ func (i *dbIter) Release() {
 	}
 }
 
-const (
-	nKV = iota
-	nKey
-	nVal
-	nHeight
-	nNext
-)
-
 // The backing representation for the nodeData slice
 type nodeInt int
 
