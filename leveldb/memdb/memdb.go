@@ -37,9 +37,8 @@ type dbIter struct {
 
 func (i *dbIter) fill(checkStart, checkLimit bool) bool {
 	if i.node != 0 {
-		n := i.p.nodeData[i.node]
-		m := n + i.p.nodeData[i.node+nKey]
-		i.key = i.p.kvData[n:m]
+		node := i.p.nodeAt(i.node)
+		i.key = i.p.kvData[node.kStart():node.kEnd()]
 		if i.slice != nil {
 			switch {
 			case checkLimit && i.slice.Limit != nil && i.p.cmp.Compare(i.key, i.slice.Limit) >= 0:
@@ -49,7 +48,7 @@ func (i *dbIter) fill(checkStart, checkLimit bool) bool {
 				goto bail
 			}
 		}
-		i.value = i.p.kvData[m : m+i.p.nodeData[i.node+nVal]]
+		i.value = i.p.kvData[node.vStart():node.vEnd()]
 		return true
 	}
 bail:
@@ -74,7 +73,7 @@ func (i *dbIter) First() bool {
 	if i.slice != nil && i.slice.Start != nil {
 		i.node, _ = i.p.findGE(i.slice.Start, false)
 	} else {
-		i.node = i.p.nodeData[nNext]
+		i.node = i.p.nodeAt(0).nextAt(0)
 	}
 	return i.fill(false, true)
 }
@@ -127,7 +126,7 @@ func (i *dbIter) Next() bool {
 	i.forward = true
 	i.p.mu.RLock()
 	defer i.p.mu.RUnlock()
-	i.node = i.p.nodeData[i.node+nNext]
+	i.node = i.p.nodeAt(i.node).nextAt(0)
 	return i.fill(false, true)
 }
 
@@ -178,19 +177,83 @@ const (
 	nNext
 )
 
+// node represents a node in the skiplist. It maps directly onto the nodeData
+// backing array, and is not meant to be used as a separate entity (aside for when
+// creating a new one).
+// Thus, it's perfectly fine if the underlying array is overly large (since the exact size
+// is not known before reading the height).
+// Node data is laid out as follows:
+// [0]         : KV offset
+// [1]         : Key length
+// [2]         : Value length
+// [3]         : Height
+// [3..height] : Next nodes
+type node []int
+
+// kStart returns the start index for the key.
+func (n node) kStart() int {
+	return n[0]
+}
+
+// kEnd returns the start + length for the key.
+func (n node) kEnd() int {
+	return n[0] + n[1]
+}
+
+// kLen return the key length.
+func (n node) kLen() int {
+	return n[1]
+}
+
+// vStart return the offset for the value.
+func (n node) vStart() int {
+	return n[0] + n[1]
+}
+
+// vEnd return the offset + length for value.
+func (n node) vEnd() int {
+	return n[0] + n[1] + n[2]
+}
+
+// vLen returns the value length.
+func (n node) vLen() int {
+	return n[2]
+}
+
+// setKStart sets the key offset.
+func (n node) setKStart(keyOffset int) node {
+	n[0] = keyOffset
+	return n
+}
+
+// setVLen sets the value length.
+func (n node) setVLen(size int) node {
+	n[2] = size
+	return n
+}
+
+// height return the size of the next-tower.
+func (n node) height() int {
+	return n[3]
+}
+
+// nextAt return the item at the given height.
+func (n node) nextAt(height int) int {
+	return n[4+height]
+}
+
+// setNextAt sets the next item at the given height
+func (n node) setNextAt(height int, node int) {
+	n[4+height] = node
+}
+
 // DB is an in-memory key/value database.
 type DB struct {
 	cmp comparer.BasicComparer
 	rnd *rand.Rand
 
-	mu     sync.RWMutex
-	kvData []byte
-	// Node data:
-	// [0]         : KV offset
-	// [1]         : Key length
-	// [2]         : Value length
-	// [3]         : Height
-	// [3..height] : Next nodes
+	mu        sync.RWMutex
+	kvData    []byte
 	nodeData  []int
 	prevNode  [tMaxHeight]int
 	maxHeight int
@@ -207,16 +270,34 @@ func (p *DB) randHeight() (h int) {
 	return
 }
 
+// nodeAt returns the node at the given index.
+func (p *DB) nodeAt(idx int) node {
+	return node(p.nodeData[idx:])
+}
+
+// newNode constructs a new node. Be careful -- this allocates a new slice,
+// along with space to store the next, according to the height given.
+// This node later needs to be written to the backing slice, making the original
+// instance moot.
+func newNode(kvOffset, kLen, vLen, height int) node {
+	buf := make([]int, 4+height)
+	buf[0] = kvOffset
+	buf[1] = kLen
+	buf[2] = vLen
+	buf[3] = height
+	return node(buf)
+}
+
 // Must hold RW-lock if prev == true, as it use shared prevNode slice.
 func (p *DB) findGE(key []byte, prev bool) (int, bool) {
 	node := 0
 	h := p.maxHeight - 1
 	for {
-		next := p.nodeData[node+nNext+h]
+		next := p.nodeAt(node).nextAt(h)
 		cmp := 1
 		if next != 0 {
-			o := p.nodeData[next]
-			cmp = p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key)
+			o := p.nodeAt(next)
+			cmp = p.cmp.Compare(p.kvData[o.kStart():o.kEnd()], key)
 		}
 		if cmp < 0 {
 			// Keep searching in this list
@@ -239,9 +320,9 @@ func (p *DB) findLT(key []byte) int {
 	node := 0
 	h := p.maxHeight - 1
 	for {
-		next := p.nodeData[node+nNext+h]
-		o := p.nodeData[next]
-		if next == 0 || p.cmp.Compare(p.kvData[o:o+p.nodeData[next+nKey]], key) >= 0 {
+		next := p.nodeAt(node).nextAt(h)
+		o := p.nodeAt(next)
+		if next == 0 || p.cmp.Compare(p.kvData[o.kStart():o.kEnd()], key) >= 0 {
 			if h == 0 {
 				break
 			}
@@ -257,7 +338,7 @@ func (p *DB) findLast() int {
 	node := 0
 	h := p.maxHeight - 1
 	for {
-		next := p.nodeData[node+nNext+h]
+		next := p.nodeAt(node).nextAt(h)
 		if next == 0 {
 			if h == 0 {
 				break
@@ -282,9 +363,10 @@ func (p *DB) Put(key []byte, value []byte) error {
 		kvOffset := len(p.kvData)
 		p.kvData = append(p.kvData, key...)
 		p.kvData = append(p.kvData, value...)
-		p.nodeData[node] = kvOffset
-		m := p.nodeData[node+nVal]
-		p.nodeData[node+nVal] = len(value)
+		// since match is exact, there's no need to set the key size again
+		existing := p.nodeAt(node)
+		m := existing.vLen()
+		p.nodeAt(node).setKStart(kvOffset).setVLen(len(value))
 		p.kvSize += len(value) - m
 		return nil
 	}
@@ -302,12 +384,13 @@ func (p *DB) Put(key []byte, value []byte) error {
 	p.kvData = append(p.kvData, value...)
 	// Node
 	node := len(p.nodeData)
-	p.nodeData = append(p.nodeData, kvOffset, len(key), len(value), h)
+	newN := newNode(kvOffset, len(key), len(value), h)
 	for i, n := range p.prevNode[:h] {
-		m := n + nNext + i
-		p.nodeData = append(p.nodeData, p.nodeData[m])
-		p.nodeData[m] = node
+		prev := p.nodeAt(n)
+		newN.setNextAt(i, prev.nextAt(i))
+		prev.setNextAt(i, node)
 	}
+	p.nodeData = append(p.nodeData, newN...)
 
 	p.kvSize += len(key) + len(value)
 	p.n++
@@ -327,13 +410,13 @@ func (p *DB) Delete(key []byte) error {
 		return ErrNotFound
 	}
 
-	h := p.nodeData[node+nHeight]
+	todelete := p.nodeAt(node)
+	h := todelete.height()
 	for i, n := range p.prevNode[:h] {
-		m := n + nNext + i
-		p.nodeData[m] = p.nodeData[p.nodeData[m]+nNext+i]
+		prev := p.nodeAt(n)
+		prev.setNextAt(i, todelete.nextAt(i))
 	}
-
-	p.kvSize -= p.nodeData[node+nKey] + p.nodeData[node+nVal]
+	p.kvSize -= todelete.kLen() + todelete.vLen()
 	p.n--
 	return nil
 }
@@ -356,8 +439,8 @@ func (p *DB) Contains(key []byte) bool {
 func (p *DB) Get(key []byte) (value []byte, err error) {
 	p.mu.RLock()
 	if node, exact := p.findGE(key, false); exact {
-		o := p.nodeData[node] + p.nodeData[node+nKey]
-		value = p.kvData[o : o+p.nodeData[node+nVal]]
+		n := p.nodeAt(node)
+		value = p.kvData[n.vStart():n.vEnd()]
 	} else {
 		err = ErrNotFound
 	}
@@ -374,10 +457,9 @@ func (p *DB) Get(key []byte) (value []byte, err error) {
 func (p *DB) Find(key []byte) (rkey, value []byte, err error) {
 	p.mu.RLock()
 	if node, _ := p.findGE(key, false); node != 0 {
-		n := p.nodeData[node]
-		m := n + p.nodeData[node+nKey]
-		rkey = p.kvData[n:m]
-		value = p.kvData[m : m+p.nodeData[node+nVal]]
+		n := p.nodeAt(node)
+		rkey = p.kvData[n.kStart():n.kEnd()]
+		value = p.kvData[n.vStart():n.vEnd()]
 	} else {
 		err = ErrNotFound
 	}
@@ -446,15 +528,15 @@ func (p *DB) Reset() {
 	p.n = 0
 	p.kvSize = 0
 	p.kvData = p.kvData[:0]
-	p.nodeData = p.nodeData[:nNext+tMaxHeight]
-	p.nodeData[nKV] = 0
-	p.nodeData[nKey] = 0
-	p.nodeData[nVal] = 0
-	p.nodeData[nHeight] = tMaxHeight
+
+	p.nodeData = p.nodeData[:0]
+	// Add empty first element
+	zero := newNode(0, 0, 0, tMaxHeight)
 	for n := 0; n < tMaxHeight; n++ {
-		p.nodeData[nNext+n] = 0
+		zero.setNextAt(n, 0)
 		p.prevNode[n] = 0
 	}
+	p.nodeData = append(p.nodeData, zero...)
 	p.mu.Unlock()
 }
 
