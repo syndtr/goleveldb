@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"bytes"
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -176,8 +177,9 @@ func (i *dbIter) Release() {
 
 // DB is an in-memory key/value database.
 type DB struct {
-	cmp comparer.BasicComparer
-	rnd *rand.Rand
+	cmp      comparer.BasicComparer
+	rnd      *rand.Rand
+	quickCmp bool
 
 	mu        sync.RWMutex
 	kvData    []byte
@@ -198,14 +200,31 @@ func (p *DB) randHeight() (h int) {
 
 // Must hold RW-lock if prev == true, as it use shared prevNode slice.
 func (p *DB) findGE(key []byte, prev bool) (int, bool) {
-	node := 0
-	h := p.maxHeight - 1
+	var (
+		node = 0
+		h    = p.maxHeight - 1
+		qKey []byte
+	)
+	if p.quickCmp {
+		// If we're using quickCmp, the key we compare against needs to
+		// be padded to full 8 bytes.
+		qKey = padKey(key)
+	}
 	for {
 		next := p.nodeAt(node).nextAt(h)
 		cmp := 1
 		if next != 0 {
 			o := p.nodeAt(next)
-			cmp = p.cmp.Compare(p.kvData[o.kStart():o.kEnd()], key)
+			if p.quickCmp {
+				// If the default comparer is used, can use bytes.Compare
+				if cmp = o.quickCmp(qKey); cmp == 0 {
+					// Deep compare
+					cmp = bytes.Compare(p.kvData[o.kStart():o.kEnd()], key)
+				}
+			} else {
+				// Deep compare
+				cmp = p.cmp.Compare(p.kvData[o.kStart():o.kEnd()], key)
+			}
 		}
 		if cmp < 0 {
 			// Keep searching in this list
@@ -292,7 +311,7 @@ func (p *DB) Put(key []byte, value []byte) error {
 	p.kvData = append(p.kvData, value...)
 	// Node
 	node := len(p.nodeData)
-	newN := newNode(kvOffset, len(key), len(value), h)
+	newN := newNode(kvOffset, len(value), h, key)
 	for i, n := range p.prevNode[:h] {
 		prev := p.nodeAt(n)
 		newN.setNextAt(i, prev.nextAt(i))
@@ -439,7 +458,7 @@ func (p *DB) Reset() {
 
 	p.nodeData = p.nodeData[:0]
 	// Add empty first element
-	zero := newNode(0, 0, 0, tMaxHeight)
+	zero := newNode(0, 0, tMaxHeight, nil)
 	for n := 0; n < tMaxHeight; n++ {
 		zero.setNextAt(n, 0)
 		p.prevNode[n] = 0
@@ -459,12 +478,13 @@ func (p *DB) Reset() {
 func New(cmp comparer.BasicComparer, capacity int) *DB {
 	p := &DB{
 		cmp:       cmp,
+		quickCmp:  (cmp == comparer.DefaultComparer),
 		rnd:       rand.New(rand.NewSource(0xdeadbeef)),
 		maxHeight: 1,
 		kvData:    make([]byte, 0, capacity),
 	}
 	// Add empty first element
-	zero := newNode(0, 0, 0, tMaxHeight)
+	zero := newNode(0, 0, tMaxHeight, nil)
 	for n := 0; n < tMaxHeight; n++ {
 		zero.setNextAt(n, 0)
 	}
