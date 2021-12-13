@@ -7,16 +7,25 @@
 // Package memdb provides in-memory key/value database implementation.
 package memdb
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"unsafe"
+)
+
+const is64Bit = int(unsafe.Sizeof(nodeInt(0))) == 8
+
+// fixedKeyLength is 8 if the nodeInt is defined as 'int' on a 64-bit system,
+// but only 4 on a 32-bit system.
+const fixedKeyLength = int(unsafe.Sizeof(nodeInt(0)))
 
 // padKey pads, if necessary, the given key to be sufficiently long
 // to work with the quickCmp function.
 func padKey(key []byte) []byte {
-	if len(key) >= 8 {
+	if len(key) >= fixedKeyLength {
 		return key
 	}
 	// pad
-	k := make([]byte, 8)
+	k := make([]byte, fixedKeyLength)
 	copy(k, key)
 	return k
 }
@@ -46,7 +55,11 @@ func newNode(kvOffset, vLen, height int, key []byte) node {
 	buf[0] = nodeInt(kvOffset)
 	buf[1] = nodeInt(len(key))<<8 | nodeInt(height&0xff)
 	buf[2] = nodeInt(vLen)
-	buf[3] = nodeInt(binary.BigEndian.Uint64(padKey(key)))
+	if is64Bit {
+		buf[3] = nodeInt(binary.BigEndian.Uint64(padKey(key)))
+	} else {
+		buf[3] = nodeInt(binary.BigEndian.Uint32(padKey(key)))
+	}
 	return node(buf)
 }
 
@@ -116,10 +129,15 @@ func (p *DB) nodeAt(idx int) node {
 // of the given key. If the comparison returns 0, that means a deeper comparison is
 // needed.
 func (n node) quickCmp(key []byte) int {
-	other := binary.BigEndian.Uint64(key)
-	if uint64(n[3]) < other {
+	var other nodeInt
+	if is64Bit {
+		other = nodeInt(binary.BigEndian.Uint64(key))
+	} else {
+		other = nodeInt(binary.BigEndian.Uint32(key))
+	}
+	if uint(n[3]) < uint(other) {
 		return -1
-	} else if uint64(n[3]) > other {
+	} else if uint(n[3]) > uint(other) {
 		return 1
 	}
 	return 0
