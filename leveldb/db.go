@@ -760,6 +760,21 @@ func memGet(mdb *memdb.DB, ikey internalKey, icmp *iComparer) (ok bool, mv []byt
 	return
 }
 
+func memHas(mdb *memdb.DB, ikey internalKey) bool {
+	if !mdb.Contains(ikey) {
+		return false
+	}
+	_, _, kt, kerr := parseInternalKey(ikey)
+	if kerr != nil {
+		// Shouldn't have had happen.
+		panic(kerr)
+	}
+	if kt == keyTypeDel {
+		return false
+	}
+	return true
+}
+
 func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
@@ -802,8 +817,8 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
 	if auxm != nil {
-		if ok, _, me := memGet(auxm, ikey, db.s.icmp); ok {
-			return me == nil, nilIfNotFound(me)
+		if ok := memHas(auxm, ikey); ok {
+			return ok, nil
 		}
 	}
 
@@ -813,9 +828,8 @@ func (db *DB) has(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 			continue
 		}
 		defer m.decref()
-
-		if ok, _, me := memGet(m.DB, ikey, db.s.icmp); ok {
-			return me == nil, nilIfNotFound(me)
+		if ok := memHas(m.DB, ikey); ok {
+			return ok, nil
 		}
 	}
 
