@@ -43,7 +43,22 @@ func (tr *Transaction) Get(key []byte, ro *opt.ReadOptions) ([]byte, error) {
 	if tr.closed {
 		return nil, errTransactionDone
 	}
-	return tr.db.get(tr.mem.DB, tr.tables, key, tr.seq, ro)
+	return tr.db.get(tr.mem.DB, tr.tables, key, nil, tr.seq, ro)
+}
+
+// GetTo gets the value for the given key and appends the value to dst. It returns ErrNotFound if the
+// DB does not contains the key.
+//
+// The returned slice is its own copy, it is safe to modify the contents
+// of the returned slice.
+// It is safe to modify the contents of the argument after Get returns.
+func (tr *Transaction) GetTo(key, dst []byte, ro *opt.ReadOptions) ([]byte, error) {
+	tr.lk.RLock()
+	defer tr.lk.RUnlock()
+	if tr.closed {
+		return nil, errTransactionDone
+	}
+	return tr.db.get(tr.mem.DB, tr.tables, key, dst, tr.seq, ro)
 }
 
 // Has returns true if the DB does contains the given key.

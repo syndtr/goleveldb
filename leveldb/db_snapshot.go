@@ -110,7 +110,26 @@ func (snap *Snapshot) Get(key []byte, ro *opt.ReadOptions) (value []byte, err er
 	if err != nil {
 		return
 	}
-	return snap.db.get(nil, nil, key, snap.elem.seq, ro)
+	return snap.db.get(nil, nil, key, nil, snap.elem.seq, ro)
+}
+
+// GetTo gets the value for the given key and appends the value to dst. It returns ErrNotFound if
+// the DB does not contains the key.
+//
+// The caller should not modify the contents of the returned slice, but
+// it is safe to modify the contents of the argument after Get returns.
+func (snap *Snapshot) GetTo(key, dst []byte, ro *opt.ReadOptions) (value []byte, err error) {
+	snap.mu.RLock()
+	defer snap.mu.RUnlock()
+	if snap.released {
+		err = ErrSnapshotReleased
+		return
+	}
+	err = snap.db.ok()
+	if err != nil {
+		return
+	}
+	return snap.db.get(nil, nil, key, dst, snap.elem.seq, ro)
 }
 
 // Has returns true if the DB does contains the given key.

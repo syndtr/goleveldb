@@ -138,7 +138,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 	}
 }
 
-func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
+func (v *version) get(aux tFiles, ikey internalKey, dst []byte, ro *opt.ReadOptions, noValue bool) (value []byte, tcomp bool, err error) {
 	if v.closing {
 		return nil, false, ErrClosed
 	}
@@ -171,14 +171,50 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 		}
 
 		var (
-			fikey, fval []byte
-			ferr        error
+			ferr error
+			stop = false
 		)
-		if noValue {
-			fikey, ferr = v.s.tops.findKey(t, ikey, ro)
-		} else {
-			fikey, fval, ferr = v.s.tops.find(t, ikey, ro)
-		}
+
+		ferr = v.s.tops.find(t, ikey, ro, func(rkey, rvalue []byte, needCopyValue bool) error {
+			if fukey, fseq, fkt, fkerr := parseInternalKey(rkey); fkerr == nil {
+				if v.s.icmp.uCompare(ukey, fukey) == 0 {
+					// Level <= 0 may overlaps each-other.
+					if level <= 0 {
+						if fseq >= zseq {
+							zfound = true
+							zseq = fseq
+							zkt = fkt
+							if !noValue {
+								if dst != nil || needCopyValue {
+									zval = append(dst, rvalue...)
+								} else {
+									zval = rvalue
+								}
+							}
+						}
+					} else {
+						switch fkt {
+						case keyTypeVal:
+							if !noValue {
+								if dst != nil || needCopyValue {
+									value = append(dst, rvalue...)
+								} else {
+									value = rvalue
+								}
+							}
+							err = nil
+						case keyTypeDel:
+						default:
+							panic("leveldb: invalid internalKey type")
+						}
+						stop = true
+					}
+				}
+			} else {
+				return fkerr
+			}
+			return nil
+		})
 
 		switch ferr {
 		case nil:
@@ -188,35 +224,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 			err = ferr
 			return false
 		}
-
-		if fukey, fseq, fkt, fkerr := parseInternalKey(fikey); fkerr == nil {
-			if v.s.icmp.uCompare(ukey, fukey) == 0 {
-				// Level <= 0 may overlaps each-other.
-				if level <= 0 {
-					if fseq >= zseq {
-						zfound = true
-						zseq = fseq
-						zkt = fkt
-						zval = fval
-					}
-				} else {
-					switch fkt {
-					case keyTypeVal:
-						value = fval
-						err = nil
-					case keyTypeDel:
-					default:
-						panic("leveldb: invalid internalKey type")
-					}
-					return false
-				}
-			}
-		} else {
-			err = fkerr
-			return false
-		}
-
-		return true
+		return !stop
 	}, func(level int) bool {
 		if zfound {
 			switch zkt {

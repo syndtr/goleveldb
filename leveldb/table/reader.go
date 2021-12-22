@@ -817,7 +817,7 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 	return iterator.NewIndexedIterator(index, opt.GetStrict(r.o, ro, opt.StrictReader))
 }
 
-func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bool) (rkey, value []byte, err error) {
+func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, f func(rkey, rvalue []byte, needCopyValue bool) error) (err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -845,7 +845,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	dataBH, n := decodeBlockHandle(index.Value())
 	if n == 0 {
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
-		return nil, nil, r.err
+		return r.err
 	}
 
 	// The filter should only used for exact match.
@@ -854,11 +854,11 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		if ferr == nil {
 			if !filterBlock.contains(r.filter, dataBH.offset, key) {
 				frel.Release()
-				return nil, nil, ErrNotFound
+				return ErrNotFound
 			}
 			frel.Release()
 		} else if !errors.IsCorrupted(ferr) {
-			return nil, nil, ferr
+			return ferr
 		}
 	}
 
@@ -880,7 +880,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		dataBH, n = decodeBlockHandle(index.Value())
 		if n == 0 {
 			r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
-			return nil, nil, r.err
+			return r.err
 		}
 
 		data = r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
@@ -894,16 +894,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	}
 
 	// Key doesn't use block buffer, no need to copy the buffer.
-	rkey = data.Key()
-	if !noValue {
-		if r.bpool == nil {
-			value = data.Value()
-		} else {
-			// Value does use block buffer, and since the buffer will be
-			// recycled, it need to be copied.
-			value = append([]byte{}, data.Value()...)
-		}
-	}
+	err = f(data.Key(), data.Value(), r.bpool != nil)
 	data.Release()
 	return
 }
@@ -914,26 +905,13 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 // If filtered is true then the nearest 'block' will be checked against
 // 'filter data' (if present) and will immediately return ErrNotFound if
 // 'filter data' indicates that such pair doesn't exist.
+// f is to handle the found key and value. The error returned by f is propagated.
 //
 // The caller may modify the contents of the returned slice as it is its
 // own copy.
 // It is safe to modify the contents of the argument after Find returns.
-func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions) (rkey, value []byte, err error) {
-	return r.find(key, filtered, ro, false)
-}
-
-// FindKey finds key that is greater than or equal to the given key.
-// It returns ErrNotFound if the table doesn't contain such key.
-// If filtered is true then the nearest 'block' will be checked against
-// 'filter data' (if present) and will immediately return ErrNotFound if
-// 'filter data' indicates that such key doesn't exist.
-//
-// The caller may modify the contents of the returned slice as it is its
-// own copy.
-// It is safe to modify the contents of the argument after Find returns.
-func (r *Reader) FindKey(key []byte, filtered bool, ro *opt.ReadOptions) (rkey []byte, err error) {
-	rkey, _, err = r.find(key, filtered, ro, true)
-	return
+func (r *Reader) Find(key []byte, filtered bool, ro *opt.ReadOptions, f func(rkey, rvalue []byte, needCopyValue bool) error) (err error) {
+	return r.find(key, filtered, ro, f)
 }
 
 // Get gets the value for the given key. It returns errors.ErrNotFound
@@ -951,11 +929,16 @@ func (r *Reader) Get(key []byte, ro *opt.ReadOptions) (value []byte, err error) 
 		return
 	}
 
-	rkey, value, err := r.find(key, false, ro, false)
-	if err == nil && r.cmp.Compare(rkey, key) != 0 {
-		value = nil
-		err = ErrNotFound
-	}
+	err = r.find(key, false, ro, func(rkey, rvalue []byte, needCopyValue bool) error {
+		if r.cmp.Compare(rkey, key) != 0 {
+			return ErrNotFound
+		}
+		value = rvalue
+		if needCopyValue {
+			value = append([]byte(nil), value...)
+		}
+		return nil
+	})
 	return
 }
 

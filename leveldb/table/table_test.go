@@ -24,7 +24,15 @@ type tableWrapper struct {
 }
 
 func (t tableWrapper) TestFind(key []byte) (rkey, rvalue []byte, err error) {
-	return t.Reader.Find(key, false, nil)
+	err = t.Reader.Find(key, false, nil, func(_rkey, _rvalue []byte, needCopyValue bool) error {
+		rkey = _rkey
+		rvalue = _rvalue
+		if needCopyValue {
+			rvalue = append([]byte(nil), rvalue...)
+		}
+		return nil
+	})
+	return
 }
 
 func (t tableWrapper) TestGet(key []byte) (value []byte, err error) {
