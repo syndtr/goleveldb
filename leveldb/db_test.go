@@ -2736,7 +2736,7 @@ func testDB_IterTriggeredCompaction(t *testing.T, limitDiv int) {
 		initialSize1 = h.sizeOf(limitKey, maxKey)
 	)
 
-	t.Logf("initial size %s [rest %s]", shortenb(int(initialSize0)), shortenb(int(initialSize1)))
+	t.Logf("initial size %s [rest %s]", shortenb(initialSize0), shortenb(initialSize1))
 
 	for r := 0; true; r++ {
 		if r >= mIter {
@@ -2758,7 +2758,7 @@ func testDB_IterTriggeredCompaction(t *testing.T, limitDiv int) {
 		// Check size.
 		size0 := h.sizeOf(startKey, limitKey)
 		size1 := h.sizeOf(limitKey, maxKey)
-		t.Logf("#%03d size %s [rest %s]", r, shortenb(int(size0)), shortenb(int(size1)))
+		t.Logf("#%03d size %s [rest %s]", r, shortenb(size0), shortenb(size1))
 		if size0 < initialSize0/10 {
 			break
 		}

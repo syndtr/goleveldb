@@ -388,7 +388,7 @@ func (v *version) computeCompaction() {
 		}
 
 		statFiles[level] = len(tables)
-		statSizes[level] = shortenb(int(size))
+		statSizes[level] = shortenb(size)
 		statScore[level] = fmt.Sprintf("%.2f", score)
 		statTotSize += size
 	}
@@ -396,7 +396,7 @@ func (v *version) computeCompaction() {
 	v.cLevel = bestLevel
 	v.cScore = bestScore
 
-	v.s.logf("version@stat F·%v S·%s%v Sc·%v", statFiles, shortenb(int(statTotSize)), statSizes, statScore)
+	v.s.logf("version@stat F·%v S·%s%v Sc·%v", statFiles, shortenb(statTotSize), statSizes, statScore)
 }
 
 func (v *version) needCompaction() bool {

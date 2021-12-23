@@ -110,7 +110,7 @@ func (tr *Transaction) flush() error {
 		tr.tables = append(tr.tables, t)
 		tr.rec.addTableFile(0, t)
 		tr.stats.write += t.size
-		tr.db.logf("transaction@flush created L0@%d N·%d S·%s %q:%q", t.fd.Num, n, shortenb(int(t.size)), t.imin, t.imax)
+		tr.db.logf("transaction@flush created L0@%d N·%d S·%s %q:%q", t.fd.Num, n, shortenb(t.size), t.imin, t.imax)
 	}
 	return nil
 }
