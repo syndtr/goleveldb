@@ -70,14 +70,24 @@ type Batch struct {
 
 	// internalLen is sums of key/value pair length plus 8-bytes internal key.
 	internalLen int
+
+	// slowAllocate is the threshold in order to slow down the memory allocation
+	// for batch when the number of accumulated entries exceeds value.
+	//
+	// batchGrowRec is used as the default threshold if it's not configured.
+	slowAllocate int
 }
 
 func (b *Batch) grow(n int) {
 	o := len(b.data)
 	if cap(b.data)-o < n {
+		threshold := batchGrowRec
+		if b.slowAllocate != 0 {
+			threshold = b.slowAllocate
+		}
 		div := 1
-		if len(b.index) > batchGrowRec {
-			div = len(b.index) / batchGrowRec
+		if len(b.index) > threshold {
+			div = len(b.index) / threshold
 		}
 		ndata := make([]byte, o, o+n+o/div)
 		copy(ndata, b.data)
@@ -241,6 +251,37 @@ func newBatch() interface{} {
 // MakeBatch returns empty batch with preallocated buffer.
 func MakeBatch(n int) *Batch {
 	return &Batch{data: make([]byte, 0, n)}
+}
+
+// BatchConfig contains the config options for batch.
+type BatchConfig struct {
+	// Size refers to the number of bytes of pre-allocated buffer.
+	// The default value is 0.
+	Size int
+
+	// SlowAllocation is the threshold in order to slow down the
+	// memory allocation for batch. It's effective when the number
+	// of accumulated entries exceeds this value.
+	//
+	// Generally, the memory allocation step is larger if this value
+	// is configured large, vice versa.
+	//
+	// The default value is 3000.
+	SlowAllocation int
+}
+
+// MakeBatchWithConfig initializes a batch object with the given configs.
+func MakeBatchWithConfig(config *BatchConfig) *Batch {
+	var batch = new(Batch)
+	if config != nil {
+		if config.Size > 0 {
+			batch.data = make([]byte, 0, config.Size)
+		}
+		if config.SlowAllocation > 0 {
+			batch.slowAllocate = config.SlowAllocation
+		}
+	}
+	return batch
 }
 
 func decodeBatch(data []byte, fn func(i int, index batchIndex) error) error {
