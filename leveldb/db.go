@@ -370,7 +370,7 @@ func recoverTable(s *session, o *opt.Options) error {
 			tgoodKey, tcorruptedKey, tcorruptedBlock int
 			imin, imax                               []byte
 		)
-		tr, err := table.NewReader(reader, size, fd, nil, bpool, o)
+		tr, err := table.NewReader(reader, size, fd, nil, bpool, o, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1015,6 +1015,9 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveSnaps))
 	case p == "aliveiters":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveIters))
+	case p == "cache":
+		value = fmt.Sprintf("FileCacheTotal:%d FileCacheMiss:%d DataCacheTotal:%d DataCacheMiss:%d",
+			atomic.LoadUint64(&db.s.tops.cacheTotal), atomic.LoadUint64(&db.s.tops.cacheMiss), atomic.LoadUint64(&db.s.tops.bcacheTotal), atomic.LoadUint64(&db.s.tops.bcacheMiss))
 	default:
 		err = ErrNotFound
 	}
@@ -1047,6 +1050,11 @@ type DBStats struct {
 	Level0Comp    uint32
 	NonLevel0Comp uint32
 	SeekComp      uint32
+
+	FileCacheTotal uint64
+	FileCacheMiss  uint64
+	DataCacheTotal uint64
+	DataCacheMiss  uint64
 }
 
 // Stats populates s with database statistics.
@@ -1094,6 +1102,11 @@ func (db *DB) Stats(s *DBStats) error {
 	s.Level0Comp = atomic.LoadUint32(&db.level0Comp)
 	s.NonLevel0Comp = atomic.LoadUint32(&db.nonLevel0Comp)
 	s.SeekComp = atomic.LoadUint32(&db.seekComp)
+
+	s.FileCacheTotal = atomic.LoadUint64(&db.s.tops.cacheTotal)
+	s.FileCacheMiss = atomic.LoadUint64(&db.s.tops.cacheMiss)
+	s.DataCacheTotal = atomic.LoadUint64(&db.s.tops.bcacheTotal)
+	s.DataCacheMiss = atomic.LoadUint64(&db.s.tops.bcacheMiss)
 	return nil
 }
 

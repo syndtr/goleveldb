@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/golang/snappy"
 
@@ -525,6 +526,10 @@ type Reader struct {
 	metaBH, indexBH, filterBH blockHandle
 	indexBlock                *block
 	filterBlock               *filterBlock
+
+	// Cache statistics
+	cacheTotal *uint64 // The pointer to underlying cache counter passed by tops
+	cacheMiss  *uint64 // The pointer to underlying cache counter passed by tops
 }
 
 func (r *Reader) blockKind(bh blockHandle) string {
@@ -621,8 +626,14 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool)
 			err error
 			ch  *cache.Handle
 		)
+		if r.cacheTotal != nil {
+			atomic.AddUint64(r.cacheTotal, 1)
+		}
 		if fillCache {
 			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
+				if r.cacheMiss != nil {
+					atomic.AddUint64(r.cacheMiss, 1)
+				}
 				var b *block
 				b, err = r.readBlock(bh, verifyChecksum)
 				if err != nil {
@@ -632,6 +643,9 @@ func (r *Reader) readBlockCached(bh blockHandle, verifyChecksum, fillCache bool)
 			})
 		} else {
 			ch = r.cache.Get(bh.offset, nil)
+			if ch == nil && r.cacheMiss != nil {
+				atomic.AddUint64(r.cacheMiss, 1)
+			}
 		}
 		if ch != nil {
 			b, ok := ch.Value().(*block)
@@ -679,8 +693,14 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 			err error
 			ch  *cache.Handle
 		)
+		if r.cacheTotal != nil {
+			atomic.AddUint64(r.cacheTotal, 1)
+		}
 		if fillCache {
 			ch = r.cache.Get(bh.offset, func() (size int, value cache.Value) {
+				if r.cacheMiss != nil {
+					atomic.AddUint64(r.cacheMiss, 1)
+				}
 				var b *filterBlock
 				b, err = r.readFilterBlock(bh)
 				if err != nil {
@@ -690,6 +710,9 @@ func (r *Reader) readFilterBlockCached(bh blockHandle, fillCache bool) (*filterB
 			})
 		} else {
 			ch = r.cache.Get(bh.offset, nil)
+			if ch == nil && r.cacheMiss != nil {
+				atomic.AddUint64(r.cacheMiss, 1)
+			}
 		}
 		if ch != nil {
 			b, ok := ch.Value().(*filterBlock)
@@ -1022,7 +1045,7 @@ func (r *Reader) Release() {
 // The fi, cache and bpool is optional and can be nil.
 //
 // The returned table reader instance is safe for concurrent use.
-func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options) (*Reader, error) {
+func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.NamespaceGetter, bpool *util.BufferPool, o *opt.Options, cacheTotal *uint64, cacheMiss *uint64) (*Reader, error) {
 	if f == nil {
 		return nil, errors.New("leveldb/table: nil file")
 	}
@@ -1035,6 +1058,8 @@ func NewReader(f io.ReaderAt, size int64, fd storage.FileDesc, cache *cache.Name
 		o:              o,
 		cmp:            o.GetComparer(),
 		verifyChecksum: o.GetStrict(opt.StrictBlockChecksum),
+		cacheTotal:     cacheTotal,
+		cacheMiss:      cacheMiss,
 	}
 
 	if size < footerLen {
