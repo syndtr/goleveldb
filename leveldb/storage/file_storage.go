@@ -75,12 +75,13 @@ type fileStorage struct {
 	path     string
 	readOnly bool
 
-	mu      sync.Mutex
-	flock   fileLock
-	slock   *fileStorageLock
-	logw    *os.File
-	logSize int64
-	buf     []byte
+	mu          sync.Mutex
+	flock       fileLock
+	slock       *fileStorageLock
+	logw        *os.File
+	logSize     int64
+	disabledLog bool
+	buf         []byte
 	// Opened file counter; if open < 0 means closed.
 	open int
 	day  int
@@ -91,7 +92,7 @@ type fileStorage struct {
 // same path will fail.
 //
 // The storage must be closed after use, by calling Close method.
-func OpenFile(path string, readOnly bool) (Storage, error) {
+func OpenFile(path string, readOnly bool, disabledLog bool) (Storage, error) {
 	if fi, err := os.Stat(path); err == nil {
 		if !fi.IsDir() {
 			return nil, fmt.Errorf("leveldb/storage: open %s: not a directory", path)
@@ -119,7 +120,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		logw    *os.File
 		logSize int64
 	)
-	if !readOnly {
+	if !readOnly && !disabledLog {
 		logw, err = os.OpenFile(filepath.Join(path, "LOG"), os.O_WRONLY|os.O_CREATE, 0644)
 		if err != nil {
 			return nil, err
@@ -132,11 +133,12 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 	}
 
 	fs := &fileStorage{
-		path:     path,
-		readOnly: readOnly,
-		flock:    flock,
-		logw:     logw,
-		logSize:  logSize,
+		path:        path,
+		readOnly:    readOnly,
+		flock:       flock,
+		logw:        logw,
+		logSize:     logSize,
+		disabledLog: disabledLog,
 	}
 	runtime.SetFinalizer(fs, (*fileStorage).Close)
 	return fs, nil
@@ -176,6 +178,10 @@ func itoa(buf []byte, i int, wid int) []byte {
 }
 
 func (fs *fileStorage) printDay(t time.Time) {
+	if fs.disabledLog {
+		return
+	}
+
 	if fs.day == t.Day() {
 		return
 	}
@@ -184,6 +190,10 @@ func (fs *fileStorage) printDay(t time.Time) {
 }
 
 func (fs *fileStorage) doLog(t time.Time, str string) {
+	if fs.disabledLog {
+		return
+	}
+
 	if fs.logSize > logSizeThreshold {
 		// Rotate log file.
 		fs.logw.Close()
@@ -220,7 +230,7 @@ func (fs *fileStorage) doLog(t time.Time, str string) {
 }
 
 func (fs *fileStorage) Log(str string) {
-	if !fs.readOnly {
+	if !fs.readOnly && !fs.disabledLog {
 		t := time.Now()
 		fs.mu.Lock()
 		defer fs.mu.Unlock()
@@ -232,7 +242,7 @@ func (fs *fileStorage) Log(str string) {
 }
 
 func (fs *fileStorage) log(str string) {
-	if !fs.readOnly {
+	if !fs.readOnly && !fs.disabledLog {
 		fs.doLog(time.Now(), str)
 	}
 }

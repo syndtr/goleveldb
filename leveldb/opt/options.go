@@ -276,6 +276,10 @@ type Options struct {
 	// The default is false.
 	DisableLargeBatchTransaction bool
 
+	// DisableLogFile allows disabling creation and writing LOG file
+	// The default is false.
+	DisableLogFile bool
+
 	// DisableSeeksCompaction allows disabling 'seeks triggered compaction'.
 	// The purpose of 'seeks triggered compaction' is to optimize database so
 	// that 'level seeks' can be minimized, however this might generate many
@@ -535,6 +539,13 @@ func (o *Options) GetDisableLargeBatchTransaction() bool {
 		return false
 	}
 	return o.DisableLargeBatchTransaction
+}
+
+func (o *Options) GetDisableLogFile() bool {
+	if o == nil {
+		return false
+	}
+	return o.DisableLogFile
 }
 
 func (o *Options) GetDisableSeeksCompaction() bool {
