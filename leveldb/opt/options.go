@@ -41,6 +41,7 @@ var (
 	DefaultWriteL0PauseTrigger           = 12
 	DefaultWriteL0SlowdownTrigger        = 8
 	DefaultFilterBaseLg                  = 11
+	DefaultMaxManifestFileSize           = int64(64 * MiB)
 )
 
 // Cacher is a caching algorithm.
@@ -376,6 +377,13 @@ type Options struct {
 	//
 	// The default value is 11(as well as 2KB)
 	FilterBaseLg int
+
+	// MaxManifestFileSize is the maximum size limit of the MANIFEST-****** file.
+	// When the MANIFEST-****** file grows beyond this size, LevelDB will create
+	// a new MANIFEST file.
+	//
+	// The default value is 64 MiB.
+	MaxManifestFileSize int64
 }
 
 func (o *Options) GetAltFilters() []filter.Filter {
@@ -718,4 +726,11 @@ func GetStrict(o *Options, ro *ReadOptions, strict Strict) bool {
 	} else {
 		return o.GetStrict(strict) || ro.GetStrict(strict)
 	}
+}
+
+func (o *Options) GetMaxManifestFileSize() int64 {
+	if o == nil || o.MaxManifestFileSize <= 0 {
+		return DefaultMaxManifestFileSize
+	}
+	return o.MaxManifestFileSize
 }

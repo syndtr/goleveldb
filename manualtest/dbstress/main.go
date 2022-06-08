@@ -39,6 +39,7 @@ var (
 	enableBlockCache       = false
 	enableCompression      = false
 	enableBufferPool       = false
+	maxManifestFileSize    = int64(opt.DefaultMaxManifestFileSize)
 
 	wg         = new(sync.WaitGroup)
 	done, fail uint32
@@ -86,6 +87,7 @@ func init() {
 	flag.BoolVar(&enableBufferPool, "enablebufferpool", enableBufferPool, "enable buffer pool")
 	flag.BoolVar(&enableBlockCache, "enableblockcache", enableBlockCache, "enable block cache")
 	flag.BoolVar(&enableCompression, "enablecompression", enableCompression, "enable block compression")
+	flag.Int64Var(&maxManifestFileSize, "maxManifestFileSize", maxManifestFileSize, "max manifest file size")
 }
 
 func randomData(dst []byte, ns, prefix byte, i uint32, dataLen int) []byte {
@@ -352,6 +354,7 @@ func main() {
 		ErrorIfExist:           true,
 		Compression:            opt.NoCompression,
 		Filter:                 filter.NewBloomFilter(10),
+		MaxManifestFileSize:    maxManifestFileSize,
 	}
 	if enableCompression {
 		o.Compression = opt.DefaultCompression
