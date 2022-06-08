@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -625,8 +626,8 @@ func main() {
 	}
 
 	go func() {
-		sig := make(chan os.Signal)
-		signal.Notify(sig, os.Interrupt, os.Kill)
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 		log.Printf("Got signal: %v, exiting...", <-sig)
 		atomic.StoreUint32(&done, 1)
 	}()
