@@ -363,6 +363,12 @@ type tOps struct {
 	cache        *cache.Cache
 	bcache       *cache.Cache
 	bpool        *util.BufferPool
+
+	// cache statistics
+	cacheTotal  uint64
+	cacheMiss   uint64
+	bcacheTotal uint64
+	bcacheMiss  uint64
 }
 
 // Creates an empty table and returns table writer.
@@ -412,7 +418,10 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 // Opens table. It returns a cache handle, which should
 // be released after use.
 func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
+	atomic.AddUint64(&t.cacheTotal, 1)
 	ch = t.cache.Get(0, uint64(f.fd.Num), func() (size int, value cache.Value) {
+		atomic.AddUint64(&t.cacheMiss, 1)
+
 		var r storage.Reader
 		r, err = t.s.stor.Open(f.fd)
 		if err != nil {
@@ -425,7 +434,7 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 		}
 
 		var tr *table.Reader
-		tr, err = table.NewReader(r, f.size, f.fd, bcache, t.bpool, t.s.o.Options)
+		tr, err = table.NewReader(r, f.size, f.fd, bcache, t.bpool, t.s.o.Options, &t.bcacheTotal, &t.bcacheMiss)
 		if err != nil {
 			r.Close()
 			return 0, nil
