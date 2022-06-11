@@ -19,6 +19,8 @@ import (
 	"math/rand"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type dropper struct {
@@ -326,6 +328,28 @@ func TestStaleWriter(t *testing.T) {
 	if _, err := w1.Write([]byte("0")); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("stale write #1: unexpected error: %v", err)
 	}
+}
+
+func TestSize(t *testing.T) {
+	var buf bytes.Buffer
+	zeroes := make([]byte, 8<<10)
+	w := NewWriter(&buf)
+	for i := 0; i < 100; i++ {
+		writer, err := w.Next()
+		require.NoError(t, err)
+
+		for j := 0; j < rand.Intn(10); j++ {
+			n := rand.Intn(len(zeroes))
+			_, err = writer.Write(zeroes[:n])
+			require.NoError(t, err)
+		}
+
+		require.NoError(t, w.Flush())
+		if buf.Len() != int(w.Size()) {
+			t.Fatalf("expected %d, but found %d", buf.Len(), w.Size())
+		}
+	}
+	require.NoError(t, w.Close())
 }
 
 func TestCorrupt_MissingLastBlock(t *testing.T) {

@@ -1,6 +1,6 @@
-This is an implementation of the [LevelDB key/value database](http:code.google.com/p/leveldb) in the [Go programming language](http:golang.org).
+This is an implementation of the [LevelDB key/value database](https://github.com/google/leveldb) in the [Go programming language](https://go.dev).
 
-[![Build Status](https://travis-ci.org/syndtr/goleveldb.png?branch=master)](https://travis-ci.org/syndtr/goleveldb)
+[![Build Status](https://app.travis-ci.com/syndtr/goleveldb.svg?branch=master)](https://app.travis-ci.com/syndtr/goleveldb)
 
 Installation
 -----------
@@ -10,7 +10,7 @@ Installation
 Requirements
 -----------
 
-* Need at least `go1.5` or newer.
+* Need at least `go1.14` or newer.
 
 Usage
 -----------
@@ -104,4 +104,4 @@ defer db.Close()
 Documentation
 -----------
 
-You can read package documentation [here](http:godoc.org/github.com/syndtr/goleveldb).
+You can read package documentation [here](https://pkg.go.dev/github.com/syndtr/goleveldb).

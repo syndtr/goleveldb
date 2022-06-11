@@ -9,6 +9,7 @@ package leveldb
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"testing"
 	"testing/quick"
 
@@ -144,4 +145,34 @@ func TestBatch(t *testing.T) {
 		t.Error(err)
 	}
 	t.Logf("length=%d internalLen=%d", len(kvs), internalLen)
+}
+
+func BenchmarkDefaultBatchWrite(b *testing.B) {
+	benchmarkBatchWrite(b, nil)
+}
+
+func BenchmarkFastAllocationBatchWrite(b *testing.B) {
+	benchmarkBatchWrite(b, &BatchConfig{
+		GrowLimit: 10 * batchGrowLimit,
+	})
+}
+
+func benchmarkBatchWrite(b *testing.B, config *BatchConfig) {
+	var (
+		keys [][]byte
+		vals [][]byte
+		r    = rand.New(rand.NewSource(1337))
+	)
+	for i := 0; i < 50000; i++ {
+		keys = append(keys, randomString(r, 32))
+		vals = append(vals, randomString(r, 100))
+	}
+	b.ResetTimer()
+	for round := 0; round < b.N; round += 1 {
+		batch := MakeBatchWithConfig(config)
+		for i := 0; i < len(keys); i++ {
+			batch.Put(keys[i], vals[i])
+		}
+	}
+	b.ReportAllocs()
 }

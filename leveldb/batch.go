@@ -32,7 +32,7 @@ func newErrBatchCorrupted(reason string) error {
 
 const (
 	batchHeaderLen = 8 + 4
-	batchGrowRec   = 3000
+	batchGrowLimit = 3000
 	batchBufioSize = 16
 )
 
@@ -70,14 +70,24 @@ type Batch struct {
 
 	// internalLen is sums of key/value pair length plus 8-bytes internal key.
 	internalLen int
+
+	// growLimit is the threshold in order to slow down the memory allocation
+	// for batch when the number of accumulated entries exceeds value.
+	//
+	// batchGrowLimit is used as the default threshold if it's not configured.
+	growLimit int
 }
 
 func (b *Batch) grow(n int) {
 	o := len(b.data)
 	if cap(b.data)-o < n {
+		limit := batchGrowLimit
+		if b.growLimit > 0 {
+			limit = b.growLimit
+		}
 		div := 1
-		if len(b.index) > batchGrowRec {
-			div = len(b.index) / batchGrowRec
+		if len(b.index) > limit {
+			div = len(b.index) / limit
 		}
 		ndata := make([]byte, o, o+n+o/div)
 		copy(ndata, b.data)
@@ -241,6 +251,42 @@ func newBatch() interface{} {
 // MakeBatch returns empty batch with preallocated buffer.
 func MakeBatch(n int) *Batch {
 	return &Batch{data: make([]byte, 0, n)}
+}
+
+// BatchConfig contains the config options for batch.
+type BatchConfig struct {
+	// InitialCapacity is the batch initial capacity to preallocate.
+	//
+	// The default value is 0.
+	InitialCapacity int
+
+	// GrowLimit is the limit (in terms of entry) of how much buffer
+	// can grow each cycle.
+	//
+	// Initially the buffer will grow twice its current size until
+	// GrowLimit threshold is reached, after that the buffer will grow
+	// up to GrowLimit each cycle. This buffer grow size in bytes is
+	// loosely calculated from average entry size multiplied by GrowLimit.
+	//
+	// Generally, the memory allocation step is larger if this value
+	// is configured large, vice versa.
+	//
+	// The default value is 3000.
+	GrowLimit int
+}
+
+// MakeBatchWithConfig initializes a batch object with the given configs.
+func MakeBatchWithConfig(config *BatchConfig) *Batch {
+	var batch = new(Batch)
+	if config != nil {
+		if config.InitialCapacity > 0 {
+			batch.data = make([]byte, 0, config.InitialCapacity)
+		}
+		if config.GrowLimit > 0 {
+			batch.growLimit = config.GrowLimit
+		}
+	}
+	return batch
 }
 
 func decodeBatch(data []byte, fn func(i int, index batchIndex) error) error {

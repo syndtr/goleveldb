@@ -93,6 +93,10 @@ func TestCacheMap(t *testing.T) {
 				r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 				for j := len(objects) * repeat; j >= 0; j-- {
+					if t.Failed() {
+						return
+					}
+
 					key := uint64(r.Intn(len(objects)))
 					h := c.Get(uint64(ns), key, func() (int, Value) {
 						o := &objects[key]
@@ -100,10 +104,12 @@ func TestCacheMap(t *testing.T) {
 						return 1, o
 					})
 					if v := h.Value().(*int32o); v != &objects[key] {
-						t.Fatalf("#%d invalid value: want=%p got=%p", ns, &objects[key], v)
+						t.Errorf("#%d invalid value: want=%p got=%p", ns, &objects[key], v)
+						return
 					}
 					if objects[key] != 1 {
-						t.Fatalf("#%d invalid object %d: %d", ns, key, objects[key])
+						t.Errorf("#%d invalid object %d: %d", ns, key, objects[key])
+						return
 					}
 					if !atomic.CompareAndSwapPointer(&handles[r.Intn(len(handles))], nil, unsafe.Pointer(h)) {
 						h.Release()
