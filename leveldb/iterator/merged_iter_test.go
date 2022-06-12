@@ -7,6 +7,8 @@
 package iterator_test
 
 import (
+	"testing"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -58,3 +60,22 @@ var _ = testutil.Defer(func() {
 		Describe("with one filled, two empty iterators", Test(1, 2))
 	})
 })
+
+func BenchmarkMergedIterator(b *testing.B) {
+	n := 11
+	iters := make([]Iterator, n)
+	for i := range iters {
+		kv := testutil.KeyValue_Generate(nil, 100, 1, 1, 10, 4, 4)
+		iters[i] = NewArrayIterator(kv)
+	}
+
+	mi := NewMergedIterator(iters, comparer.DefaultComparer, true)
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		mi.First()
+		for mi.Next() {
+			mi.Key()
+		}
+	}
+}
