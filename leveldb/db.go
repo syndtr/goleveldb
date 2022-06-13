@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/syndtr/goleveldb/leveldb/cache"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/journal"
@@ -1037,6 +1038,9 @@ type DBStats struct {
 	BlockCacheSize    int
 	OpenedTablesCount int
 
+	FileCache  cache.Stats
+	BlockCache cache.Stats
+
 	LevelSizes        Sizes
 	LevelTablesCounts []int
 	LevelRead         Sizes
@@ -1067,6 +1071,13 @@ func (db *DB) Stats(s *DBStats) error {
 		s.BlockCacheSize = db.s.tops.blockCache.Size()
 	} else {
 		s.BlockCacheSize = 0
+	}
+
+	s.FileCache = db.s.tops.fileCache.GetStats()
+	if db.s.tops.blockCache != nil {
+		s.BlockCache = db.s.tops.blockCache.GetStats()
+	} else {
+		s.BlockCache = cache.Stats{}
 	}
 
 	s.AliveIterators = atomic.LoadInt32(&db.aliveIters)
