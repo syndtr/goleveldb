@@ -15,5 +15,5 @@ script:
       echo "skipping go vet for go verion $TRAVIS_GO_VERSION"
     fi
     )
-  - go test -timeout 1h ./...
+  - go test -short -timeout 1h ./...
   - go test -timeout 30m -race -run "TestDB_(Concurrent|GoleveldbIssue74)" ./leveldb
