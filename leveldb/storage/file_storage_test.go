@@ -75,7 +75,7 @@ func TestFileStorage_CreateFileName(t *testing.T) {
 
 func TestFileStorage_MetaSetGet(t *testing.T) {
 	temp := tempDir(t)
-	fs, err := OpenFile(temp, false)
+	fs, err := OpenFile(temp, false, false)
 	if err != nil {
 		t.Fatal("OpenFile: got error: ", err)
 	}
@@ -220,7 +220,7 @@ func TestFileStorage_Meta(t *testing.T) {
 	for i, tc := range cases {
 		t.Logf("Test-%d", i)
 		temp := tempDir(t)
-		fs, err := OpenFile(temp, false)
+		fs, err := OpenFile(temp, false, false)
 		if err != nil {
 			t.Fatal("OpenFile: got error: ", err)
 		}
@@ -321,12 +321,12 @@ func TestFileStorage_Locking(t *testing.T) {
 	temp := tempDir(t)
 	defer os.RemoveAll(temp)
 
-	p1, err := OpenFile(temp, false)
+	p1, err := OpenFile(temp, false, false)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	p2, err := OpenFile(temp, false)
+	p2, err := OpenFile(temp, false, false)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -337,7 +337,7 @@ func TestFileStorage_Locking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(temp, false)
+	p3, err := OpenFile(temp, false, false)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
@@ -364,12 +364,12 @@ func TestFileStorage_ReadOnlyLocking(t *testing.T) {
 	temp := tempDir(t)
 	defer os.RemoveAll(temp)
 
-	p1, err := OpenFile(temp, false)
+	p1, err := OpenFile(temp, false, false)
 	if err != nil {
 		t.Fatal("OpenFile(1): got error: ", err)
 	}
 
-	_, err = OpenFile(temp, true)
+	_, err = OpenFile(temp, true, false)
 	if err != nil {
 		t.Logf("OpenFile(2): got error: %s (expected)", err)
 	} else {
@@ -378,17 +378,17 @@ func TestFileStorage_ReadOnlyLocking(t *testing.T) {
 
 	p1.Close()
 
-	p3, err := OpenFile(temp, true)
+	p3, err := OpenFile(temp, true, false)
 	if err != nil {
 		t.Fatal("OpenFile(3): got error: ", err)
 	}
 
-	p4, err := OpenFile(temp, true)
+	p4, err := OpenFile(temp, true, false)
 	if err != nil {
 		t.Fatal("OpenFile(4): got error: ", err)
 	}
 
-	_, err = OpenFile(temp, false)
+	_, err = OpenFile(temp, false, false)
 	if err != nil {
 		t.Logf("OpenFile(5): got error: %s (expected)", err)
 	} else {

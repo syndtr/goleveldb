@@ -671,7 +671,7 @@ func NewStorage() *Storage {
 			storageMu.Unlock()
 			path = filepath.Join(os.TempDir(), fmt.Sprintf("goleveldb-test%d0%d0%d", os.Getuid(), os.Getpid(), num))
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				stor, err = storage.OpenFile(path, false)
+				stor, err = storage.OpenFile(path, false, false)
 				ExpectWithOffset(1, err).NotTo(HaveOccurred(), "creating storage at %s", path)
 				break
 			}

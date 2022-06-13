@@ -91,7 +91,7 @@ func openDBBench(b *testing.B, noCompress bool) *dbBench {
 		ro: &opt.ReadOptions{},
 		wo: &opt.WriteOptions{},
 	}
-	p.stor, err = storage.OpenFile(benchDB, false)
+	p.stor, err = storage.OpenFile(benchDB, false, false)
 	if err != nil {
 		b.Fatal("cannot open stor: ", err)
 	}

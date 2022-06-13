@@ -219,7 +219,7 @@ func Open(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func OpenFile(path string, o *opt.Options) (db *DB, err error) {
-	stor, err := storage.OpenFile(path, o.GetReadOnly())
+	stor, err := storage.OpenFile(path, o.GetReadOnly(), o.GetDisableLogFile())
 	if err != nil {
 		return
 	}
@@ -269,7 +269,7 @@ func Recover(stor storage.Storage, o *opt.Options) (db *DB, err error) {
 // The returned DB instance is safe for concurrent use.
 // The DB must be closed after use, by calling Close method.
 func RecoverFile(path string, o *opt.Options) (db *DB, err error) {
-	stor, err := storage.OpenFile(path, false)
+	stor, err := storage.OpenFile(path, false, o.GetDisableLogFile())
 	if err != nil {
 		return
 	}
