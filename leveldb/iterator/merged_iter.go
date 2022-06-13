@@ -156,7 +156,7 @@ func (i *mergedIterator) Next() bool {
 	case dirSOI:
 		return i.First()
 	case dirBackward:
-		key := append([]byte{}, i.keys[i.index]...)
+		key := append([]byte(nil), i.keys[i.index]...)
 		if !i.Seek(key) {
 			return false
 		}
@@ -207,7 +207,7 @@ func (i *mergedIterator) Prev() bool {
 	case dirEOI:
 		return i.Last()
 	case dirForward:
-		key := append([]byte{}, i.keys[i.index]...)
+		key := append([]byte(nil), i.keys[i.index]...)
 		for x, iter := range i.iters {
 			if x == i.index {
 				continue

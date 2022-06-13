@@ -86,7 +86,7 @@ func BytesSeparator(a, b []byte) []byte {
 	}
 	for ; i < n && (a[i] == b[i]); i++ {
 	}
-	x := append([]byte{}, a[:i]...)
+	x := append([]byte(nil), a[:i]...)
 	if i < n {
 		if c := a[i] + 1; c < b[i] {
 			return append(x, c)

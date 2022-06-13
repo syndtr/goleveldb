@@ -425,7 +425,7 @@ func (b *tableCompactionBuilder) cleanup() {
 func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
-	lastUkey := append([]byte{}, b.snapLastUkey...)
+	lastUkey := append([]byte(nil), b.snapLastUkey...)
 	lastSeq := b.snapLastSeq
 	b.kerrCnt = b.snapKerrCnt
 	b.dropCnt = b.snapDropCnt

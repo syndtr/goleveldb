@@ -552,7 +552,7 @@ type tWriter struct {
 // Append key/value pair to the table.
 func (w *tWriter) append(key, value []byte) error {
 	if w.first == nil {
-		w.first = append([]byte{}, key...)
+		w.first = append([]byte(nil), key...)
 	}
 	w.last = append(w.last[:0], key...)
 	return w.tw.Append(key, value)

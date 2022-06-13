@@ -25,7 +25,7 @@ func (e *ErrInternalKeyCorrupted) Error() string {
 }
 
 func newErrInternalKeyCorrupted(ikey []byte, reason string) error {
-	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrInternalKeyCorrupted{append([]byte{}, ikey...), reason})
+	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrInternalKeyCorrupted{append([]byte(nil), ikey...), reason})
 }
 
 type keyType uint

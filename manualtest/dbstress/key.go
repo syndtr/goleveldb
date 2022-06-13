@@ -18,7 +18,7 @@ func (e *ErrIkeyCorrupted) Error() string {
 }
 
 func newErrIkeyCorrupted(ikey []byte, reason string) error {
-	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrIkeyCorrupted{append([]byte{}, ikey...), reason})
+	return errors.NewErrCorrupted(storage.FileDesc{}, &ErrIkeyCorrupted{append([]byte(nil), ikey...), reason})
 }
 
 type kType int
