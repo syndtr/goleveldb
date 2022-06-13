@@ -171,10 +171,10 @@ func TestCacheMap(t *testing.T) {
 						o.acquire()
 						return 1, o
 					})
-					if !assert.Equal(t, &objects[i], h.Value()) {
+					if !assert.True(t, h.Value().(*int32o) == &objects[i]) {
 						return
 					}
-					if !assert.EqualValues(t, objects[i], 1) {
+					if !assert.True(t, objects[i] == 1) {
 						return
 					}
 					if !atomic.CompareAndSwapPointer(&handles[r.Intn(len(handles))], nil, unsafe.Pointer(h)) {
