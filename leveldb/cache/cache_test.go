@@ -200,6 +200,7 @@ func TestCacheMap(t *testing.T) {
 	}
 
 	// Emulate constant grow-shrink.
+	growShrinkStop := make(chan bool, 1)
 	go func() {
 		handles := make([]*Handle, 100000)
 		for atomic.LoadInt32(&done) == 0 {
@@ -212,6 +213,7 @@ func TestCacheMap(t *testing.T) {
 				h.Release()
 			}
 		}
+		growShrinkStop <- true
 	}()
 
 	wg.Wait()
@@ -236,6 +238,8 @@ func TestCacheMap(t *testing.T) {
 			require.EqualValues(t, 0, o, "invalid object ref: %d-%03d", id, i)
 		}
 	}
+
+	<-growShrinkStop
 
 	require.Zero(t, c.Nodes())
 	require.Zero(t, c.Size())
