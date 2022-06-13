@@ -49,23 +49,60 @@ type Cacher interface {
 	New(capacity int) cache.Cacher
 }
 
-type CacherFunc struct {
+type cacherFunc struct {
 	NewFunc func(capacity int) cache.Cacher
 }
 
-func (f *CacherFunc) New(capacity int) cache.Cacher {
+func (f *cacherFunc) New(capacity int) cache.Cacher {
 	if f != nil && f.NewFunc != nil {
 		return f.NewFunc(capacity)
 	}
 	return nil
 }
 
+func CacherFunc(f func(capacity int) cache.Cacher) Cacher {
+	return &cacherFunc{f}
+}
+
+type passthroughCacher struct {
+	Cacher cache.Cacher
+}
+
+func (p *passthroughCacher) New(capacity int) cache.Cacher {
+	return p.Cacher
+}
+
+// PassthroughCacher can be used to passthrough pre-initialized
+// 'cacher instance'. This is useful for sharing cache over multiple
+// DB instances.
+//
+// Shared cache example:
+//
+//     fileCache := opt.NewLRU(500)
+//     blockCache := opt.NewLRU(8 * opt.MiB)
+// 	   options := &opt.Options{
+//         OpenFilesCacher: fileCache,
+//         BlockCacher: blockCache,
+//     }
+//     db1, err1 := leveldb.OpenFile("path/to/db1", options)
+//     ...
+//     db2, err2 := leveldb.OpenFile("path/to/db2", options)
+//     ...
+func PassthroughCacher(x cache.Cacher) Cacher {
+	return &passthroughCacher{x}
+}
+
+// NewLRU creates LRU 'passthrough cacher'.
+func NewLRU(capacity int) Cacher {
+	return PassthroughCacher(cache.NewLRU(capacity))
+}
+
 var (
 	// LRUCacher is the LRU-cache algorithm.
-	LRUCacher = &CacherFunc{cache.NewLRU}
+	LRUCacher = CacherFunc(cache.NewLRU)
 
 	// NoCacher is the value to disable caching algorithm.
-	NoCacher = &CacherFunc{}
+	NoCacher = CacherFunc(nil)
 )
 
 // Compression is the 'sorted table' block compression algorithm to use.

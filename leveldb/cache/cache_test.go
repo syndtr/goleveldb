@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type int32o int32
@@ -50,12 +53,73 @@ func set(c *Cache, ns, key uint64, value Value, charge int, relf func()) *Handle
 	})
 }
 
-type cacheMapTestParams struct {
-	nobjects, nhandles, concurrent, repeat int
+func shuffleNodes(nodes mNodes) mNodes {
+	shuffled := append(mNodes(nil), nodes...)
+	rand.Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+	return shuffled
+}
+
+func generateSortedNodes(nNS, minNKey, maxNKey int) mNodes {
+	var generated mNodes
+	for i := 0; i < nNS; i++ {
+		nKey := minNKey
+		if maxNKey-minNKey > 0 {
+			nKey += rand.Intn(maxNKey - minNKey)
+		}
+		for j := 0; j < nKey; j++ {
+			generated = append(generated, &Node{ns: uint64(i), key: uint64(j)})
+		}
+	}
+	return generated
+}
+
+func TestNodesSort(t *testing.T) {
+	testFunc := func(nNS, minNKey, maxNKey int) func(t *testing.T) {
+		return func(t *testing.T) {
+			sorted := generateSortedNodes(nNS, minNKey, maxNKey)
+			for i := 0; i < 3; i++ {
+				shuffled := shuffleNodes(sorted)
+				require.NotEqual(t, sorted, shuffled)
+				shuffled.sort()
+				require.Equal(t, sorted, shuffled)
+			}
+			for i, x := range sorted {
+				r := sorted.search(x.ns, x.key)
+				require.Equal(t, i, r)
+			}
+		}
+	}
+
+	t.Run("SingleNS", testFunc(1, 100, 100))
+	t.Run("MultipleNS", testFunc(10, 1, 10))
+
+	t.Run("SearchInexact", func(t *testing.T) {
+		data := mNodes{
+			&Node{ns: 0, key: 2},
+			&Node{ns: 0, key: 3},
+			&Node{ns: 0, key: 4},
+			&Node{ns: 2, key: 1},
+			&Node{ns: 2, key: 2},
+			&Node{ns: 2, key: 3},
+		}
+		require.Equal(t, 0, data.search(0, 1))
+		require.Equal(t, 0, data.search(0, 2))
+		require.Equal(t, 3, data.search(0, 5))
+		require.Equal(t, 3, data.search(1, 1001000))
+		require.Equal(t, 5, data.search(2, 3))
+		require.Equal(t, 6, data.search(2, 4))
+		require.Equal(t, 6, data.search(10, 10))
+	})
 }
 
 func TestCacheMap(t *testing.T) {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	type cacheMapTestParams struct {
+		nObjects, nHandles, concurrent, repeat int
+	}
 
 	var params []cacheMapTestParams
 	if testing.Short() {
@@ -76,8 +140,8 @@ func TestCacheMap(t *testing.T) {
 	)
 
 	for _, x := range params {
-		objects = append(objects, make([]int32o, x.nobjects))
-		handles = append(handles, make([]unsafe.Pointer, x.nhandles))
+		objects = append(objects, make([]int32o, x.nObjects))
+		handles = append(handles, make([]unsafe.Pointer, x.nHandles))
 	}
 
 	c := NewCache(nil)
@@ -85,40 +149,43 @@ func TestCacheMap(t *testing.T) {
 	wg := new(sync.WaitGroup)
 	var done int32
 
-	for ns, x := range params {
-		for i := 0; i < x.concurrent; i++ {
+	for id, param := range params {
+		id := id
+		param := param
+		objects := objects[id]
+		handles := handles[id]
+		for job := 0; job < param.concurrent; job++ {
 			wg.Add(1)
-			go func(ns, i, repeat int, objects []int32o, handles []unsafe.Pointer) {
+			go func() {
 				defer wg.Done()
-				r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-				for j := len(objects) * repeat; j >= 0; j-- {
+				r := rand.New(rand.NewSource(time.Now().UnixNano()))
+				for j := len(objects) * param.repeat; j >= 0; j-- {
 					if t.Failed() {
 						return
 					}
 
-					key := uint64(r.Intn(len(objects)))
-					h := c.Get(uint64(ns), key, func() (int, Value) {
-						o := &objects[key]
+					i := r.Intn(len(objects))
+					h := c.Get(uint64(id), uint64(i), func() (int, Value) {
+						o := &objects[i]
 						o.acquire()
 						return 1, o
 					})
-					if v := h.Value().(*int32o); v != &objects[key] {
-						t.Errorf("#%d invalid value: want=%p got=%p", ns, &objects[key], v)
+					if !assert.Equal(t, &objects[i], h.Value()) {
 						return
 					}
-					if objects[key] != 1 {
-						t.Errorf("#%d invalid object %d: %d", ns, key, objects[key])
+					if !assert.EqualValues(t, objects[i], 1) {
 						return
 					}
 					if !atomic.CompareAndSwapPointer(&handles[r.Intn(len(handles))], nil, unsafe.Pointer(h)) {
 						h.Release()
 					}
 				}
-			}(ns, i, x.repeat, objects[ns], handles[ns])
+			}()
 		}
 
-		go func(handles []unsafe.Pointer) {
+		// Randomly release handles at interval.
+		go func() {
 			r := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 			for atomic.LoadInt32(&done) == 0 {
@@ -129,9 +196,10 @@ func TestCacheMap(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-		}(handles[ns])
+		}()
 	}
 
+	// Emulate constant grow-shrink.
 	go func() {
 		handles := make([]*Handle, 100000)
 		for atomic.LoadInt32(&done) == 0 {
@@ -147,52 +215,49 @@ func TestCacheMap(t *testing.T) {
 	}()
 
 	wg.Wait()
-
 	atomic.StoreInt32(&done, 1)
 
-	for _, handles0 := range handles {
-		for i := range handles0 {
-			h := (*Handle)(atomic.LoadPointer(&handles0[i]))
-			if h != nil && atomic.CompareAndSwapPointer(&handles0[i], unsafe.Pointer(h), nil) {
+	// Releasing handles.
+	activeCount := 0
+	for _, handle := range handles {
+		for i := range handle {
+			h := (*Handle)(atomic.LoadPointer(&handle[i]))
+			if h != nil && atomic.CompareAndSwapPointer(&handle[i], unsafe.Pointer(h), nil) {
+				activeCount++
 				h.Release()
 			}
 		}
 	}
+	t.Logf("active_handles=%d", activeCount)
 
-	for ns, objects0 := range objects {
-		for i, o := range objects0 {
-			if o != 0 {
-				t.Fatalf("invalid object #%d.%d: ref=%d", ns, i, o)
-			}
+	// Checking object refs
+	for id, object := range objects {
+		for i, o := range object {
+			require.EqualValues(t, 0, o, "invalid object ref: %d-%03d", id, i)
 		}
 	}
+
+	require.Zero(t, c.Nodes())
+	require.Zero(t, c.Size())
+	t.Logf("STATS: %#v", c.GetStats())
 }
 
 func TestCacheMap_NodesAndSize(t *testing.T) {
 	c := NewCache(nil)
-	if c.Nodes() != 0 {
-		t.Errorf("invalid nodes counter: want=%d got=%d", 0, c.Nodes())
-	}
-	if c.Size() != 0 {
-		t.Errorf("invalid size counter: want=%d got=%d", 0, c.Size())
-	}
+	require.Zero(t, c.Capacity())
+	require.Zero(t, c.Nodes())
+	require.Zero(t, c.Size())
 	set(c, 0, 1, 1, 1, nil)
 	set(c, 0, 2, 2, 2, nil)
 	set(c, 1, 1, 3, 3, nil)
 	set(c, 2, 1, 4, 1, nil)
-	if c.Nodes() != 4 {
-		t.Errorf("invalid nodes counter: want=%d got=%d", 4, c.Nodes())
-	}
-	if c.Size() != 7 {
-		t.Errorf("invalid size counter: want=%d got=%d", 4, c.Size())
-	}
+	require.Equal(t, 4, c.Nodes())
+	require.Equal(t, 7, c.Size())
 }
 
 func TestLRUCache_Capacity(t *testing.T) {
 	c := NewCache(NewLRU(10))
-	if c.Capacity() != 10 {
-		t.Errorf("invalid capacity: want=%d got=%d", 10, c.Capacity())
-	}
+	require.Equal(t, 10, c.Capacity())
 	set(c, 0, 1, 1, 1, nil).Release()
 	set(c, 0, 2, 2, 2, nil).Release()
 	set(c, 1, 1, 3, 3, nil).Release()
@@ -201,22 +266,12 @@ func TestLRUCache_Capacity(t *testing.T) {
 	set(c, 2, 3, 6, 1, nil).Release()
 	set(c, 2, 4, 7, 1, nil).Release()
 	set(c, 2, 5, 8, 1, nil).Release()
-	if c.Nodes() != 7 {
-		t.Errorf("invalid nodes counter: want=%d got=%d", 7, c.Nodes())
-	}
-	if c.Size() != 10 {
-		t.Errorf("invalid size counter: want=%d got=%d", 10, c.Size())
-	}
+	require.Equal(t, 7, c.Nodes())
+	require.Equal(t, 10, c.Size())
 	c.SetCapacity(9)
-	if c.Capacity() != 9 {
-		t.Errorf("invalid capacity: want=%d got=%d", 9, c.Capacity())
-	}
-	if c.Nodes() != 6 {
-		t.Errorf("invalid nodes counter: want=%d got=%d", 6, c.Nodes())
-	}
-	if c.Size() != 8 {
-		t.Errorf("invalid size counter: want=%d got=%d", 8, c.Size())
-	}
+	require.Equal(t, 9, c.Capacity())
+	require.Equal(t, 6, c.Nodes())
+	require.Equal(t, 8, c.Size())
 }
 
 func TestCacheMap_NilValue(t *testing.T) {
@@ -224,15 +279,9 @@ func TestCacheMap_NilValue(t *testing.T) {
 	h := c.Get(0, 0, func() (size int, value Value) {
 		return 1, nil
 	})
-	if h != nil {
-		t.Error("cache handle is non-nil")
-	}
-	if c.Nodes() != 0 {
-		t.Errorf("invalid nodes counter: want=%d got=%d", 0, c.Nodes())
-	}
-	if c.Size() != 0 {
-		t.Errorf("invalid size counter: want=%d got=%d", 0, c.Size())
-	}
+	require.Nil(t, h)
+	require.Zero(t, c.Nodes())
+	require.Zero(t, c.Size())
 }
 
 func TestLRUCache_GetLatency(t *testing.T) {
@@ -243,7 +292,7 @@ func TestLRUCache_GetLatency(t *testing.T) {
 		concurrentGet = 3
 		duration      = 3 * time.Second
 		delay         = 3 * time.Millisecond
-		maxkey        = 100000
+		maxKey        = 100000
 	)
 
 	var (
@@ -260,7 +309,7 @@ func TestLRUCache_GetLatency(t *testing.T) {
 			defer wg.Done()
 			r := rand.New(rand.NewSource(time.Now().UnixNano()))
 			for time.Now().Before(until) {
-				c.Get(0, uint64(r.Intn(maxkey)), func() (int, Value) {
+				c.Get(0, uint64(r.Intn(maxKey)), func() (int, Value) {
 					time.Sleep(delay)
 					atomic.AddInt32(&set, 1)
 					return 1, 1
@@ -276,8 +325,8 @@ func TestLRUCache_GetLatency(t *testing.T) {
 			for {
 				mark := time.Now()
 				if mark.Before(until) {
-					h := c.Get(0, uint64(r.Intn(maxkey)), nil)
-					latency := int64(time.Now().Sub(mark))
+					h := c.Get(0, uint64(r.Intn(maxKey)), nil)
+					latency := int64(time.Since(mark))
 					m := atomic.LoadInt64(&getMaxLatency)
 					if latency > m {
 						atomic.CompareAndSwapInt64(&getMaxLatency, m, latency)
@@ -296,13 +345,12 @@ func TestLRUCache_GetLatency(t *testing.T) {
 	}
 
 	wg.Wait()
-	getAvglatency := time.Duration(getDuration) / time.Duration(getAll)
+	getAvgLatency := time.Duration(getDuration) / time.Duration(getAll)
 	t.Logf("set=%d getHit=%d getAll=%d getMaxLatency=%v getAvgLatency=%v",
-		set, getHit, getAll, time.Duration(getMaxLatency), getAvglatency)
+		set, getHit, getAll, time.Duration(getMaxLatency), getAvgLatency)
 
-	if getAvglatency > delay/3 {
-		t.Errorf("get avg latency > %v: got=%v", delay/3, getAvglatency)
-	}
+	require.LessOrEqual(t, getAvgLatency, delay/3)
+	t.Logf("STATS: %#v", c.GetStats())
 }
 
 func TestLRUCache_HitMiss(t *testing.T) {
@@ -322,28 +370,21 @@ func TestLRUCache_HitMiss(t *testing.T) {
 		{9, "v9"},
 	}
 
-	setfin := 0
+	setFin := 0
 	c := NewCache(NewLRU(1000))
 	for i, x := range cases {
 		set(c, 0, x.key, x.value, len(x.value), func() {
-			setfin++
+			setFin++
 		}).Release()
 		for j, y := range cases {
 			h := c.Get(0, y.key, nil)
 			if j <= i {
 				// should hit
-				if h == nil {
-					t.Errorf("case '%d' iteration '%d' is miss", i, j)
-				} else {
-					if x := h.Value().(releaserFunc).value.(string); x != y.value {
-						t.Errorf("case '%d' iteration '%d' has invalid value got '%s', want '%s'", i, j, x, y.value)
-					}
-				}
+				require.NotNilf(t, h, "case '%d' iteration '%d' should hit", i, j)
+				require.Equalf(t, y.value, h.Value().(releaserFunc).value, "case '%d' iteration '%d' should have valid value", i, j)
 			} else {
 				// should miss
-				if h != nil {
-					t.Errorf("case '%d' iteration '%d' is hit , value '%s'", i, j, h.Value().(releaserFunc).value.(string))
-				}
+				require.Nilf(t, h, "case '%d' iteration '%d' should miss", i, j)
 			}
 			if h != nil {
 				h.Release()
@@ -357,26 +398,17 @@ func TestLRUCache_HitMiss(t *testing.T) {
 			finalizerOk = true
 		})
 
-		if !finalizerOk {
-			t.Errorf("case %d delete finalizer not executed", i)
-		}
+		require.True(t, finalizerOk)
 
 		for j, y := range cases {
 			h := c.Get(0, y.key, nil)
 			if j > i {
 				// should hit
-				if h == nil {
-					t.Errorf("case '%d' iteration '%d' is miss", i, j)
-				} else {
-					if x := h.Value().(releaserFunc).value.(string); x != y.value {
-						t.Errorf("case '%d' iteration '%d' has invalid value got '%s', want '%s'", i, j, x, y.value)
-					}
-				}
+				require.NotNilf(t, h, "case '%d' iteration '%d' should hit", i, j)
+				require.Equalf(t, y.value, h.Value().(releaserFunc).value, "case '%d' iteration '%d' should have valid value", i, j)
 			} else {
 				// should miss
-				if h != nil {
-					t.Errorf("case '%d' iteration '%d' is hit, value '%s'", i, j, h.Value().(releaserFunc).value.(string))
-				}
+				require.Nilf(t, h, "case '%d' iteration '%d' should miss", i, j)
 			}
 			if h != nil {
 				h.Release()
@@ -384,9 +416,7 @@ func TestLRUCache_HitMiss(t *testing.T) {
 		}
 	}
 
-	if setfin != len(cases) {
-		t.Errorf("some set finalizer may not be executed, want=%d got=%d", len(cases), setfin)
-	}
+	require.Equal(t, len(cases), setFin, "some set finalizer may not be executed")
 }
 
 func TestLRUCache_Eviction(t *testing.T) {
@@ -403,84 +433,64 @@ func TestLRUCache_Eviction(t *testing.T) {
 
 	for _, key := range []uint64{9, 2, 5, 1} {
 		h := c.Get(0, key, nil)
-		if h == nil {
-			t.Errorf("miss for key '%d'", key)
-		} else {
-			if x := h.Value().(int); x != int(key) {
-				t.Errorf("invalid value for key '%d' want '%d', got '%d'", key, key, x)
-			}
-			h.Release()
-		}
+		require.NotNilf(t, h, "miss for key '%d'", key)
+		require.Equalf(t, int(key), h.Value(), "invalid value for key '%d'", key)
+		h.Release()
 	}
 	o1.Release()
 	for _, key := range []uint64{1, 2, 5} {
 		h := c.Get(0, key, nil)
-		if h == nil {
-			t.Errorf("miss for key '%d'", key)
-		} else {
-			if x := h.Value().(int); x != int(key) {
-				t.Errorf("invalid value for key '%d' want '%d', got '%d'", key, key, x)
-			}
-			h.Release()
-		}
+		require.NotNilf(t, h, "miss for key '%d'", key)
+		require.Equalf(t, int(key), h.Value(), "invalid value for key '%d'", key)
+		h.Release()
 	}
 	for _, key := range []uint64{3, 4, 9} {
 		h := c.Get(0, key, nil)
-		if h != nil {
-			t.Errorf("hit for key '%d'", key)
-			if x := h.Value().(int); x != int(key) {
-				t.Errorf("invalid value for key '%d' want '%d', got '%d'", key, key, x)
-			}
+		if !assert.Nilf(t, h, "hit for key '%d'", key) {
+			require.Equalf(t, int(key), h.Value(), "invalid value for key '%d'", key)
 			h.Release()
 		}
 	}
 }
 
 func TestLRUCache_Evict(t *testing.T) {
-	c := NewCache(NewLRU(6))
+	lru := NewLRU(6).(*lru)
+	c := NewCache(lru)
 	set(c, 0, 1, 1, 1, nil).Release()
 	set(c, 0, 2, 2, 1, nil).Release()
-	set(c, 1, 1, 4, 1, nil).Release()
-	set(c, 1, 2, 5, 1, nil).Release()
-	set(c, 2, 1, 6, 1, nil).Release()
-	set(c, 2, 2, 7, 1, nil).Release()
+	set(c, 1, 1, 3, 1, nil).Release()
+	set(c, 1, 2, 4, 1, nil).Release()
+	set(c, 2, 1, 5, 1, nil).Release()
+	set(c, 2, 2, 6, 1, nil).Release()
 
+	v := 1
 	for ns := 0; ns < 3; ns++ {
 		for key := 1; key < 3; key++ {
-			if h := c.Get(uint64(ns), uint64(key), nil); h != nil {
-				h.Release()
-			} else {
-				t.Errorf("Cache.Get on #%d.%d return nil", ns, key)
-			}
+			h := c.Get(uint64(ns), uint64(key), nil)
+			require.NotNilf(t, h, "NS=%d key=%d", ns, key)
+			require.Equal(t, v, h.Value())
+			h.Release()
+			v++
 		}
 	}
 
-	if ok := c.Evict(0, 1); !ok {
-		t.Error("first Cache.Evict on #0.1 return false")
-	}
-	if ok := c.Evict(0, 1); ok {
-		t.Error("second Cache.Evict on #0.1 return true")
-	}
-	if h := c.Get(0, 1, nil); h != nil {
-		t.Errorf("Cache.Get on #0.1 return non-nil: %v", h.Value())
-	}
+	require.True(t, c.Evict(0, 1))
+	require.Equal(t, 5, lru.used)
+	require.False(t, c.Evict(0, 1))
 
 	c.EvictNS(1)
-	if h := c.Get(1, 1, nil); h != nil {
-		t.Errorf("Cache.Get on #1.1 return non-nil: %v", h.Value())
-	}
-	if h := c.Get(1, 2, nil); h != nil {
-		t.Errorf("Cache.Get on #1.2 return non-nil: %v", h.Value())
-	}
+	require.Equal(t, 3, lru.used)
+	require.Nil(t, c.Get(1, 1, nil))
+	require.Nil(t, c.Get(1, 2, nil))
 
 	c.EvictAll()
-	for ns := 0; ns < 3; ns++ {
-		for key := 1; key < 3; key++ {
-			if h := c.Get(uint64(ns), uint64(key), nil); h != nil {
-				t.Errorf("Cache.Get on #%d.%d return non-nil: %v", ns, key, h.Value())
-			}
-		}
-	}
+	require.Zero(t, lru.used)
+	require.Nil(t, c.Get(0, 1, nil))
+	require.Nil(t, c.Get(0, 2, nil))
+	require.Nil(t, c.Get(1, 1, nil))
+	require.Nil(t, c.Get(1, 2, nil))
+	require.Nil(t, c.Get(2, 1, nil))
+	require.Nil(t, c.Get(2, 2, nil))
 }
 
 func TestLRUCache_Delete(t *testing.T) {
@@ -493,47 +503,28 @@ func TestLRUCache_Delete(t *testing.T) {
 	set(c, 0, 1, 1, 1, nil).Release()
 	set(c, 0, 2, 2, 1, nil).Release()
 
-	if ok := c.Delete(0, 1, delFunc); !ok {
-		t.Error("Cache.Delete on #1 return false")
-	}
-	if h := c.Get(0, 1, nil); h != nil {
-		t.Errorf("Cache.Get on #1 return non-nil: %v", h.Value())
-	}
-	if ok := c.Delete(0, 1, delFunc); ok {
-		t.Error("Cache.Delete on #1 return true")
-	}
+	require.True(t, c.Delete(0, 1, delFunc))
+	require.Nil(t, c.Get(0, 1, nil))
+	require.False(t, c.Delete(0, 1, delFunc))
 
 	h2 := c.Get(0, 2, nil)
-	if h2 == nil {
-		t.Error("Cache.Get on #2 return nil")
-	}
-	if ok := c.Delete(0, 2, delFunc); !ok {
-		t.Error("(1) Cache.Delete on #2 return false")
-	}
-	if ok := c.Delete(0, 2, delFunc); !ok {
-		t.Error("(2) Cache.Delete on #2 return false")
-	}
+	require.NotNil(t, h2)
+	require.True(t, c.Delete(0, 2, delFunc))
+	require.True(t, c.Delete(0, 2, delFunc))
 
 	set(c, 0, 3, 3, 1, nil).Release()
 	set(c, 0, 4, 4, 1, nil).Release()
 	c.Get(0, 2, nil).Release()
 
 	for key := 2; key <= 4; key++ {
-		if h := c.Get(0, uint64(key), nil); h != nil {
-			h.Release()
-		} else {
-			t.Errorf("Cache.Get on #%d return nil", key)
-		}
+		h := c.Get(0, uint64(key), nil)
+		require.NotNil(t, h)
+		h.Release()
 	}
 
 	h2.Release()
-	if h := c.Get(0, 2, nil); h != nil {
-		t.Errorf("Cache.Get on #2 return non-nil: %v", h.Value())
-	}
-
-	if delFuncCalled != 4 {
-		t.Errorf("delFunc isn't called 4 times: got=%d", delFuncCalled)
-	}
+	require.Nil(t, c.Get(0, 2, nil))
+	require.Equal(t, 4, delFuncCalled)
 }
 
 func TestLRUCache_Close(t *testing.T) {
@@ -551,19 +542,11 @@ func TestLRUCache_Close(t *testing.T) {
 	set(c, 0, 2, 2, 1, relFunc).Release()
 
 	h3 := set(c, 0, 3, 3, 1, relFunc)
-	if h3 == nil {
-		t.Error("Cache.Get on #3 return nil")
-	}
-	if ok := c.Delete(0, 3, delFunc); !ok {
-		t.Error("Cache.Delete on #3 return false")
-	}
+	require.NotNil(t, h3)
+	require.True(t, c.Delete(0, 3, delFunc))
 
-	c.Close()
+	c.Close(true)
 
-	if relFuncCalled != 3 {
-		t.Errorf("relFunc isn't called 3 times: got=%d", relFuncCalled)
-	}
-	if delFuncCalled != 1 {
-		t.Errorf("delFunc isn't called 1 times: got=%d", delFuncCalled)
-	}
+	require.Equal(t, 3, relFuncCalled)
+	require.Equal(t, 1, delFuncCalled)
 }

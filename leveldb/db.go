@@ -1002,15 +1002,15 @@ func (db *DB) GetProperty(name string) (value string, err error) {
 			}
 		}
 	case p == "blockpool":
-		value = fmt.Sprintf("%v", db.s.tops.bpool)
+		value = fmt.Sprintf("%v", db.s.tops.blockBuffer)
 	case p == "cachedblock":
-		if db.s.tops.bcache != nil {
-			value = fmt.Sprintf("%d", db.s.tops.bcache.Size())
+		if db.s.tops.blockCache != nil {
+			value = fmt.Sprintf("%d", db.s.tops.blockCache.Size())
 		} else {
 			value = "<nil>"
 		}
 	case p == "openedtables":
-		value = fmt.Sprintf("%d", db.s.tops.cache.Size())
+		value = fmt.Sprintf("%d", db.s.tops.fileCache.Size())
 	case p == "alivesnaps":
 		value = fmt.Sprintf("%d", atomic.LoadInt32(&db.aliveSnaps))
 	case p == "aliveiters":
@@ -1062,9 +1062,9 @@ func (db *DB) Stats(s *DBStats) error {
 	s.WriteDelayDuration = time.Duration(atomic.LoadInt64(&db.cWriteDelay))
 	s.WritePaused = atomic.LoadInt32(&db.inWritePaused) == 1
 
-	s.OpenedTablesCount = db.s.tops.cache.Size()
-	if db.s.tops.bcache != nil {
-		s.BlockCacheSize = db.s.tops.bcache.Size()
+	s.OpenedTablesCount = db.s.tops.fileCache.Size()
+	if db.s.tops.blockCache != nil {
+		s.BlockCacheSize = db.s.tops.blockCache.Size()
 	} else {
 		s.BlockCacheSize = 0
 	}
