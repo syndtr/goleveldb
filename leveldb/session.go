@@ -54,7 +54,7 @@ type session struct {
 
 	stCompPtrs  []internalKey // compaction pointers; need external synchronization
 	stVersion   *version      // current version
-	ntVersionId int64         // next version id to assign
+	ntVersionID int64         // next version id to assign
 	refCh       chan *vTask
 	relCh       chan *vTask
 	deltaCh     chan *vDelta
@@ -107,7 +107,7 @@ func (s *session) close() {
 	}
 	s.manifest = nil
 	s.manifestWriter = nil
-	s.setVersion(nil, &version{s: s, closing: true, id: s.ntVersionId})
+	s.setVersion(nil, &version{s: s, closing: true, id: s.ntVersionID})
 
 	// Close all background goroutines
 	close(s.closeC)
@@ -171,7 +171,7 @@ func (s *session) recover() (err error) {
 		if err == nil {
 			// save compact pointers
 			for _, r := range rec.compPtrs {
-				s.setCompPtr(r.level, internalKey(r.ikey))
+				s.setCompPtr(r.level, r.ikey)
 			}
 			// commit record to version staging
 			staging.commit(rec)

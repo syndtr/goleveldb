@@ -88,18 +88,6 @@ type tFiles []*tFile
 func (tf tFiles) Len() int      { return len(tf) }
 func (tf tFiles) Swap(i, j int) { tf[i], tf[j] = tf[j], tf[i] }
 
-func (tf tFiles) nums() string {
-	x := "[ "
-	for i, f := range tf {
-		if i != 0 {
-			x += ", "
-		}
-		x += fmt.Sprint(f.fd.Num)
-	}
-	x += " ]"
-	return x
-}
-
 // Returns true if i smallest key is less than j.
 // This used for sort by key in ascending order.
 func (tf tFiles) lessByKey(icmp *iComparer, i, j int) bool {
@@ -389,7 +377,9 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 
 	defer func() {
 		if err != nil {
-			w.drop()
+			if derr := w.drop(); derr != nil {
+				err = fmt.Errorf("error createFrom (%v); error dropping (%v)", err, derr)
+			}
 		}
 	}()
 
@@ -427,7 +417,7 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 		var tr *table.Reader
 		tr, err = table.NewReader(r, f.size, f.fd, blockCache, t.blockBuffer, t.s.o.Options)
 		if err != nil {
-			r.Close()
+			_ = r.Close()
 			return 0, nil
 		}
 		return 1, tr
@@ -564,16 +554,27 @@ func (w *tWriter) empty() bool {
 }
 
 // Closes the storage.Writer.
-func (w *tWriter) close() {
+func (w *tWriter) close() error {
 	if w.w != nil {
-		w.w.Close()
+		if err := w.w.Close(); err != nil {
+			return err
+		}
 		w.w = nil
 	}
+	return nil
 }
 
 // Finalizes the table and returns table file.
 func (w *tWriter) finish() (f *tFile, err error) {
-	defer w.close()
+	defer func() {
+		if cerr := w.close(); cerr != nil {
+			if err == nil {
+				err = cerr
+			} else {
+				err = fmt.Errorf("error opening file (%v); error unlocking file (%v)", err, cerr)
+			}
+		}
+	}()
 	err = w.tw.Close()
 	if err != nil {
 		return
@@ -589,11 +590,16 @@ func (w *tWriter) finish() (f *tFile, err error) {
 }
 
 // Drops the table.
-func (w *tWriter) drop() {
-	w.close()
-	w.t.s.stor.Remove(w.fd)
-	w.t.s.reuseFileNum(w.fd.Num)
+func (w *tWriter) drop() error {
+	if err := w.close(); err != nil {
+		return err
+	}
 	w.tw = nil
 	w.first = nil
 	w.last = nil
+	if err := w.t.s.stor.Remove(w.fd); err != nil {
+		return err
+	}
+	w.t.s.reuseFileNum(w.fd.Num)
+	return nil
 }

@@ -343,7 +343,7 @@ func KeyValue_Generate(rnd *rand.Rand, n, incr, minlen, maxlen, vminlen, vmaxlen
 			key[j] = keymap[gen[j]]
 		}
 		value := make([]byte, rrand(vminlen, vmaxlen))
-		for n := copy(value, []byte(fmt.Sprintf("v%d", i))); n < len(value); n++ {
+		for n := copy(value, fmt.Sprintf("v%d", i)); n < len(value); n++ {
 			value[n] = 'x'
 		}
 		kv.Put(key, value)

@@ -16,7 +16,7 @@ import (
 var defaultIComparer = &iComparer{comparer.DefaultComparer}
 
 func ikey(key string, seq uint64, kt keyType) internalKey {
-	return makeInternalKey(nil, []byte(key), uint64(seq), kt)
+	return makeInternalKey(nil, []byte(key), seq, kt)
 }
 
 func shortSep(a, b []byte) []byte {
@@ -110,7 +110,7 @@ func TestInternalKeyShortSeparator(t *testing.T) {
 			ikey("bar", 99, keyTypeVal)))
 
 	// When user keys are different, but correctly ordered
-	assertBytes(t, ikey("g", uint64(keyMaxSeq), keyTypeSeek),
+	assertBytes(t, ikey("g", keyMaxSeq, keyTypeSeek),
 		shortSep(ikey("foo", 100, keyTypeVal),
 			ikey("hello", 200, keyTypeVal)))
 
@@ -126,7 +126,7 @@ func TestInternalKeyShortSeparator(t *testing.T) {
 }
 
 func TestInternalKeyShortestSuccessor(t *testing.T) {
-	assertBytes(t, ikey("g", uint64(keyMaxSeq), keyTypeSeek),
+	assertBytes(t, ikey("g", keyMaxSeq, keyTypeSeek),
 		shortSuccessor(ikey("foo", 100, keyTypeVal)))
 	assertBytes(t, ikey("\xff\xff", 100, keyTypeVal),
 		shortSuccessor(ikey("\xff\xff", 100, keyTypeVal)))

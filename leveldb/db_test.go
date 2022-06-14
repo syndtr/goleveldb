@@ -113,7 +113,7 @@ func (h *dbHarness) closeDB0() error {
 
 func (h *dbHarness) closeDB() {
 	if h.db != nil {
-		if err := h.closeDB0(); err != nil {
+		if err := h.closeDB0(); err != nil && err != ErrClosed {
 			h.t.Error("Close: got error: ", err)
 		}
 	}
@@ -130,7 +130,9 @@ func (h *dbHarness) reopenDB() {
 
 func (h *dbHarness) close() {
 	if h.db != nil {
-		h.closeDB0()
+		if err := h.closeDB0(); err != nil && err != ErrClosed {
+			h.t.Error("Close: got error: ", err)
+		}
 		h.db = nil
 	}
 	h.stor.Close()
@@ -538,8 +540,7 @@ func truno(t *testing.T, o *opt.Options, f func(h *dbHarness)) {
 			}
 			h := newDbHarnessWopt(t, o)
 			defer h.close()
-			switch i {
-			case 3:
+			if i == 3 {
 				h.reopenDB()
 			}
 			f(h)
@@ -558,9 +559,9 @@ func testAligned(t *testing.T, name string, offset uintptr) {
 }
 
 func Test_FieldsAligned(t *testing.T) {
-	p1 := new(DB)
+	p1 := new(DB) //nolint:staticcheck
 	testAligned(t, "DB.seq", unsafe.Offsetof(p1.seq))
-	p2 := new(session)
+	p2 := new(session) //nolint:staticcheck
 	testAligned(t, "session.stNextFileNum", unsafe.Offsetof(p2.stNextFileNum))
 	testAligned(t, "session.stJournalNum", unsafe.Offsetof(p2.stJournalNum))
 	testAligned(t, "session.stPrevJournalNum", unsafe.Offsetof(p2.stPrevJournalNum))
@@ -1351,11 +1352,17 @@ func TestDB_CompactionTableOpenError(t *testing.T) {
 	}
 
 	h.stor.EmulateError(testutil.ModeOpen, storage.TypeTable, errors.New("open error during table compaction"))
-	go h.db.CompactRange(util.Range{})
+	go func() {
+		if err := h.db.CompactRange(util.Range{}); err != nil && err != ErrClosed {
+			t.Error("CompactRange error: ", err)
+		}
+	}()
 	if err := h.db.compTriggerWait(h.db.tcompCmdC); err != nil {
 		t.Log("compaction error: ", err)
 	}
-	h.closeDB0()
+	if err := h.closeDB0(); err != nil {
+		t.Error("Close: got error: ", err)
+	}
 	h.openDB()
 	h.stor.EmulateError(testutil.ModeOpen, storage.TypeTable, nil)
 
@@ -2454,10 +2461,9 @@ func TestDB_TransientError(t *testing.T) {
 					if err := iter.Error(); err != nil {
 						t.Errorf("READER_ITER #%d K%d error: %v", i, k, err)
 						return
-					} else {
-						t.Errorf("READER_ITER #%d K%d eoi", i, k)
-						return
 					}
+					t.Errorf("READER_ITER #%d K%d eoi", i, k)
+					return
 				}
 				key := fmt.Sprintf("KEY%8d", k)
 				xkey := iter.Key()
@@ -2898,11 +2904,15 @@ func TestDB_BulkInsertDelete(t *testing.T) {
 		offset := N * i
 		for j := 0; j < N; j++ {
 			binary.BigEndian.PutUint32(key, uint32(offset+j))
-			h.db.Put(key, value, nil)
+			if err := h.db.Put(key, value, nil); err != nil {
+				t.Fatal("Put error: ", err)
+			}
 		}
 		for j := 0; j < N; j++ {
 			binary.BigEndian.PutUint32(key, uint32(offset+j))
-			h.db.Delete(key, nil)
+			if err := h.db.Delete(key, nil); err != nil {
+				t.Fatal("Delete error: ", err)
+			}
 		}
 	}
 

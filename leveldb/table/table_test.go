@@ -48,14 +48,22 @@ var _ = testutil.Defer(func() {
 
 			// Building the table.
 			tw := NewWriter(buf, o, nil, 0)
-			tw.Append([]byte("k01"), []byte("hello"))
-			tw.Append([]byte("k02"), []byte("hello2"))
-			tw.Append([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
-			tw.Append([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
-			tw.Append([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
-			tw.Append([]byte("k06"), []byte("hello3"))
-			tw.Append([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
-			err := tw.Close()
+			err := tw.Append([]byte("k01"), []byte("hello"))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k02"), []byte("hello2"))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k03"), bytes.Repeat([]byte{'x'}, 10000))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k04"), bytes.Repeat([]byte{'x'}, 200000))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k05"), bytes.Repeat([]byte{'x'}, 300000))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k06"), []byte("hello3"))
+			Expect(err).ShouldNot(HaveOccurred())
+			err = tw.Append([]byte("k07"), bytes.Repeat([]byte{'x'}, 100000))
+			Expect(err).ShouldNot(HaveOccurred())
+
+			err = tw.Close()
 
 			It("Should be able to approximate offset of a key correctly", func() {
 				Expect(err).ShouldNot(HaveOccurred())
@@ -92,7 +100,7 @@ var _ = testutil.Defer(func() {
 				// Building the table.
 				tw := NewWriter(buf, o, nil, 0)
 				kv.Iterate(func(i int, key, value []byte) {
-					tw.Append(key, value)
+					Expect(tw.Append(key, value)).ShouldNot(HaveOccurred())
 				})
 				tw.Close()
 

@@ -43,7 +43,7 @@ type version struct {
 
 // newVersion creates a new version with an unique monotonous increasing id.
 func newVersion(s *session) *version {
-	id := atomic.AddInt64(&s.ntVersionId, 1)
+	id := atomic.AddInt64(&s.ntVersionID, 1)
 	nv := &version{s: s, id: id - 1}
 	return nv
 }

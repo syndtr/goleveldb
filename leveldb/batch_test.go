@@ -168,7 +168,7 @@ func benchmarkBatchWrite(b *testing.B, config *BatchConfig) {
 		vals = append(vals, randomString(r, 100))
 	}
 	b.ResetTimer()
-	for round := 0; round < b.N; round += 1 {
+	for round := 0; round < b.N; round++ {
 		batch := MakeBatchWithConfig(config)
 		for i := 0; i < len(keys); i++ {
 			batch.Put(keys[i], vals[i])

@@ -760,9 +760,8 @@ func (wo *WriteOptions) GetSync() bool {
 func GetStrict(o *Options, ro *ReadOptions, strict Strict) bool {
 	if ro.GetStrict(StrictOverride) {
 		return ro.GetStrict(strict)
-	} else {
-		return o.GetStrict(strict) || ro.GetStrict(strict)
 	}
+	return o.GetStrict(strict) || ro.GetStrict(strict)
 }
 
 func (o *Options) GetMaxManifestFileSize() int64 {

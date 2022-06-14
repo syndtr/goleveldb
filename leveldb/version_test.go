@@ -422,7 +422,7 @@ func benchmarkVersionStaging(b *testing.B, trivial bool, size int) {
 		cnt := 0
 		for j := index; j < size && cnt <= 3; j++ {
 			rec.addTable(1, int64(i), 1, ik, ik)
-			cnt += 1
+			cnt++
 		}
 		vs := v.newStaging()
 		vs.commit(rec)

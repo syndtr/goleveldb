@@ -7,6 +7,7 @@
 package leveldb
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -350,11 +351,11 @@ func (db *DB) memCompaction() {
 }
 
 type tableCompactionBuilder struct {
-	db           *DB
-	s            *session
-	c            *compaction
-	rec          *sessionRecord
-	stat0, stat1 *cStatStaging
+	db    *DB
+	s     *session
+	c     *compaction
+	rec   *sessionRecord
+	stat1 *cStatStaging
 
 	snapHasLastUkey bool
 	snapLastUkey    []byte
@@ -415,14 +416,17 @@ func (b *tableCompactionBuilder) flush() error {
 	return nil
 }
 
-func (b *tableCompactionBuilder) cleanup() {
+func (b *tableCompactionBuilder) cleanup() error {
 	if b.tw != nil {
-		b.tw.drop()
+		if err := b.tw.drop(); err != nil {
+			return err
+		}
 		b.tw = nil
 	}
+	return nil
 }
 
-func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
+func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error) {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
 	lastUkey := append([]byte(nil), b.snapLastUkey...)
@@ -432,7 +436,15 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) error {
 	// Restore compaction state.
 	b.c.restore()
 
-	defer b.cleanup()
+	defer func() {
+		if cerr := b.cleanup(); cerr != nil {
+			if err == nil {
+				err = cerr
+			} else {
+				err = fmt.Errorf("tableCompactionBuilder error: %v, cleanup error (%v)", err, cerr)
+			}
+		}
+	}()
 
 	b.stat1.startTimer()
 	defer b.stat1.stopTimer()
@@ -655,10 +667,7 @@ func (db *DB) tableNeedCompaction() bool {
 func (db *DB) resumeWrite() bool {
 	v := db.s.version()
 	defer v.release()
-	if v.tLen(0) < db.s.o.GetWriteL0PauseTrigger() {
-		return true
-	}
-	return false
+	return v.tLen(0) < db.s.o.GetWriteL0PauseTrigger()
 }
 
 func (db *DB) pauseCompaction(ch chan<- struct{}) {
@@ -681,7 +690,7 @@ type cAuto struct {
 func (r cAuto) ack(err error) {
 	if r.ackC != nil {
 		defer func() {
-			recover()
+			_ = recover()
 		}()
 		r.ackC <- err
 	}
@@ -696,7 +705,7 @@ type cRange struct {
 func (r cRange) ack(err error) {
 	if r.ackC != nil {
 		defer func() {
-			recover()
+			_ = recover()
 		}()
 		r.ackC <- err
 	}

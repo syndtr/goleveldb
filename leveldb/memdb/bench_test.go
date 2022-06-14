@@ -23,7 +23,9 @@ func BenchmarkPut(b *testing.B) {
 	b.ResetTimer()
 	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
-		p.Put(buf[i][:], nil)
+		if err := p.Put(buf[i][:], nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -36,7 +38,9 @@ func BenchmarkPutRandom(b *testing.B) {
 	b.ResetTimer()
 	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
-		p.Put(buf[i][:], nil)
+		if err := p.Put(buf[i][:], nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -48,12 +52,16 @@ func BenchmarkGet(b *testing.B) {
 
 	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
-		p.Put(buf[i][:], nil)
+		if err := p.Put(buf[i][:], nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	b.ResetTimer()
 	for i := range buf {
-		p.Get(buf[i][:])
+		if _, err := p.Get(buf[i][:]); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
@@ -65,11 +73,15 @@ func BenchmarkGetRandom(b *testing.B) {
 
 	p := New(comparer.DefaultComparer, 0)
 	for i := range buf {
-		p.Put(buf[i][:], nil)
+		if err := p.Put(buf[i][:], nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.Get(buf[rand.Int()%b.N][:])
+		if _, err := p.Get(buf[rand.Int()%b.N][:]); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

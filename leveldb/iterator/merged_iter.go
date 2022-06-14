@@ -37,7 +37,7 @@ type mergedIterator struct {
 	releaser util.Releaser
 
 	indexes []int // the heap of iterator indexes
-	reverse bool  // if true, indexes is a max-heap
+	reverse bool  //nolint: structcheck // if true, indexes is a max-heap
 }
 
 func assertKey(key []byte) []byte {
