@@ -389,24 +389,24 @@ func (w *Writer) Close() error {
 // NewWriter creates a new initialized table writer for the file.
 //
 // Table writer is not safe for concurrent use.
-func NewWriter(f io.Writer, o *opt.Options, pool *util.BufferPool, size int) *Writer {
+func NewWriter(f io.Writer, o *opt.Options, pool *util.BufferPool) *Writer {
+	blockSize := o.GetBlockSize()
 	var bufBytes []byte
 	if pool == nil {
-		bufBytes = make([]byte, size)
+		bufBytes = make([]byte, blockSize)
 	} else {
-		bufBytes = pool.Get(size)
+		bufBytes = pool.Get(blockSize)
 	}
 	bufBytes = bufBytes[:0]
 
 	w := &Writer{
-		writer:          f,
-		cmp:             o.GetComparer(),
-		filter:          o.GetFilter(),
-		compression:     o.GetCompression(),
-		blockSize:       o.GetBlockSize(),
-		comparerScratch: make([]byte, 0),
-		bpool:           pool,
-		dataBlock:       blockWriter{buf: *util.NewBuffer(bufBytes)},
+		writer:      f,
+		cmp:         o.GetComparer(),
+		filter:      o.GetFilter(),
+		compression: o.GetCompression(),
+		blockSize:   blockSize,
+		bpool:       pool,
+		dataBlock:   blockWriter{buf: *util.NewBuffer(bufBytes)},
 	}
 	// data block
 	w.dataBlock.restartInterval = o.GetBlockRestartInterval()
