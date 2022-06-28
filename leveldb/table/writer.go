@@ -393,9 +393,9 @@ func NewWriter(f io.Writer, o *opt.Options, pool *util.BufferPool) *Writer {
 	blockSize := o.GetBlockSize()
 	var bufBytes []byte
 	if pool == nil {
-		bufBytes = make([]byte, blockSize)
+		bufBytes = make([]byte, blockSize+blockTrailerLen)
 	} else {
-		bufBytes = pool.Get(blockSize)
+		bufBytes = pool.Get(blockSize + blockTrailerLen)
 	}
 	bufBytes = bufBytes[:0]
 

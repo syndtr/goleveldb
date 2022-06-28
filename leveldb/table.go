@@ -515,7 +515,7 @@ func newTableOps(s *session) *tOps {
 		blockCache = cache.NewCache(blockCacher)
 	}
 	if !s.o.GetDisableBufferPool() {
-		blockBuffer = util.NewBufferPool(s.o.GetBlockSize() + 5)
+		blockBuffer = util.NewBufferPool(s.o.GetBlockSize())
 	}
 	return &tOps{
 		s:            s,
