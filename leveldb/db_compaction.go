@@ -390,7 +390,7 @@ func (b *tableCompactionBuilder) appendKV(key, value []byte) error {
 
 		// Create new table.
 		var err error
-		b.tw, err = b.s.tops.create(b.tableSize)
+		b.tw, err = b.s.tops.create()
 		if err != nil {
 			return err
 		}

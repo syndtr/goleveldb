@@ -17,8 +17,8 @@ import (
 
 // BufferPool is a 'buffer pool'.
 type BufferPool struct {
-	pool     [6]byteSlicePool
-	baseline [5]int
+	pool     byteSlicePool
+	baseline int
 
 	get     uint32
 	put     uint32
@@ -28,15 +28,6 @@ type BufferPool struct {
 	miss    uint32
 }
 
-func (p *BufferPool) poolNum(n int) int {
-	for i, x := range p.baseline {
-		if n <= x {
-			return i
-		}
-	}
-	return len(p.baseline)
-}
-
 // Get returns buffer with length of n.
 func (p *BufferPool) Get(n int) []byte {
 	if p == nil {
@@ -44,18 +35,11 @@ func (p *BufferPool) Get(n int) []byte {
 	}
 	atomic.AddUint32(&p.get, 1)
 
-	poolNum := p.poolNum(n)
-
-	b := p.pool[poolNum].Get()
+	b := p.pool.Get()
 	if cap(b) == 0 {
 		// If we grabbed nothing, increment the miss stats.
 		atomic.AddUint32(&p.miss, 1)
 
-		if poolNum == len(p.baseline) {
-			return make([]byte, n)
-		}
-
-		return make([]byte, p.baseline[poolNum])[:n]
 	} else {
 		// If there is enough capacity in the bytes grabbed, resize the length
 		// to n and return.
@@ -67,13 +51,13 @@ func (p *BufferPool) Get(n int) []byte {
 			return b[:n]
 		} else if n > cap(b) {
 			atomic.AddUint32(&p.greater, 1)
+			p.pool.Put(b)
 		}
 	}
-
-	if poolNum == len(p.baseline) {
+	if n >= p.baseline {
 		return make([]byte, n)
 	}
-	return make([]byte, p.baseline[poolNum])[:n]
+	return make([]byte, n, p.baseline)
 }
 
 // Put adds given buffer to the pool.
@@ -82,30 +66,21 @@ func (p *BufferPool) Put(b []byte) {
 		return
 	}
 
-	poolNum := p.poolNum(cap(b))
-
 	atomic.AddUint32(&p.put, 1)
-	p.pool[poolNum].Put(b)
+	p.pool.Put(b)
 }
 
 func (p *BufferPool) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("BufferPool{B·%d G·%d P·%d <·%d =·%d >·%d M·%d}",
-		p.baseline, p.get, p.put, p.less, p.equal, p.greater, p.miss)
+	return fmt.Sprintf("BufferPool{G·%d P·%d <·%d =·%d >·%d M·%d}",
+		p.get, p.put, p.less, p.equal, p.greater, p.miss)
 }
 
 // NewBufferPool creates a new initialized 'buffer pool'.
 func NewBufferPool(baseline int) *BufferPool {
-	if baseline <= 0 {
-		panic("baseline can't be <= 0")
-	}
-	bufPool := &BufferPool{
-		baseline: [...]int{baseline / 4, baseline / 2, baseline, baseline * 2, baseline * 4},
-	}
-
-	return bufPool
+	return &BufferPool{baseline: baseline}
 }
 
 // byteSlicePool pools byte-slices avoid extra allocations.

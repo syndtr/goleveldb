@@ -47,7 +47,7 @@ var _ = testutil.Defer(func() {
 			)
 
 			// Building the table.
-			tw := NewWriter(buf, o, nil, 0)
+			tw := NewWriter(buf, o, nil)
 			err := tw.Append([]byte("k01"), []byte("hello"))
 			Expect(err).ShouldNot(HaveOccurred())
 			err = tw.Append([]byte("k02"), []byte("hello2"))
@@ -98,7 +98,7 @@ var _ = testutil.Defer(func() {
 				buf := &bytes.Buffer{}
 
 				// Building the table.
-				tw := NewWriter(buf, o, nil, 0)
+				tw := NewWriter(buf, o, nil)
 				kv.Iterate(func(i int, key, value []byte) {
 					Expect(tw.Append(key, value)).ShouldNot(HaveOccurred())
 				})

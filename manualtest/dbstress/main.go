@@ -309,7 +309,7 @@ func main() {
 	flag.Parse()
 
 	if enableBufferPool {
-		bpool = util.NewBufferPool(opt.DefaultBlockSize + 128)
+		bpool = util.NewBufferPool(opt.DefaultBlockSize * 2)
 	}
 
 	log.Printf("Test DB stored at %q", dbPath)
