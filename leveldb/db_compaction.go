@@ -164,7 +164,7 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 	const (
 		backoffMin = 1 * time.Second
 		backoffMax = 8 * time.Second
-		backoffMul = 2 * time.Second
+		backoffMul = 2
 	)
 	var (
 		backoff  = backoffMin
