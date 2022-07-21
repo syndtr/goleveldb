@@ -223,9 +223,12 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 		}
 	}()
 
-	if s.manifest == nil || s.manifest.Size() >= s.o.GetMaxManifestFileSize() {
+	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
 		err = s.newManifest(r, nv)
+	} else if s.manifest.Size() >= s.o.GetMaxManifestFileSize() {
+		// pass nil sessionRecord to avoid over-reference table file
+		err = s.newManifest(nil, nv)
 	} else {
 		err = s.flushManifest(r)
 	}
