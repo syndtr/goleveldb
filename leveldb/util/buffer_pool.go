@@ -7,15 +7,18 @@
 package util
 
 import (
+	"encoding/binary"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 // BufferPool is a 'buffer pool'.
 type BufferPool struct {
-	pool     [6]sync.Pool
-	baseline [5]int
+	pool     byteSlicePool
+	baseline int
 
 	get     uint32
 	put     uint32
@@ -25,15 +28,6 @@ type BufferPool struct {
 	miss    uint32
 }
 
-func (p *BufferPool) poolNum(n int) int {
-	for i, x := range p.baseline {
-		if n <= x {
-			return i
-		}
-	}
-	return len(p.baseline)
-}
-
 // Get returns buffer with length of n.
 func (p *BufferPool) Get(n int) []byte {
 	if p == nil {
@@ -41,45 +35,29 @@ func (p *BufferPool) Get(n int) []byte {
 	}
 	atomic.AddUint32(&p.get, 1)
 
-	poolNum := p.poolNum(n)
-
-	b := p.pool[poolNum].Get().(*[]byte)
-
-	if cap(*b) == 0 {
+	b := p.pool.Get()
+	if cap(b) == 0 {
 		// If we grabbed nothing, increment the miss stats.
 		atomic.AddUint32(&p.miss, 1)
 
-		if poolNum == len(p.baseline) {
-			*b = make([]byte, n)
-			return *b
-		}
-
-		*b = make([]byte, p.baseline[poolNum])
-		*b = (*b)[:n]
-		return *b
 	} else {
 		// If there is enough capacity in the bytes grabbed, resize the length
 		// to n and return.
-		if n < cap(*b) {
+		if n < cap(b) {
 			atomic.AddUint32(&p.less, 1)
-			*b = (*b)[:n]
-			return *b
-		} else if n == cap(*b) {
+			return b[:n]
+		} else if n == cap(b) {
 			atomic.AddUint32(&p.equal, 1)
-			*b = (*b)[:n]
-			return *b
-		} else if n > cap(*b) {
+			return b[:n]
+		} else if n > cap(b) {
 			atomic.AddUint32(&p.greater, 1)
+			p.pool.Put(b)
 		}
 	}
-
-	if poolNum == len(p.baseline) {
-		*b = make([]byte, n)
-		return *b
+	if n >= p.baseline {
+		return make([]byte, n)
 	}
-	*b = make([]byte, p.baseline[poolNum])
-	*b = (*b)[:n]
-	return *b
+	return make([]byte, n, p.baseline)
 }
 
 // Put adds given buffer to the pool.
@@ -88,48 +66,48 @@ func (p *BufferPool) Put(b []byte) {
 		return
 	}
 
-	poolNum := p.poolNum(cap(b))
-
 	atomic.AddUint32(&p.put, 1)
-	p.pool[poolNum].Put(&b)
+	p.pool.Put(b)
 }
 
 func (p *BufferPool) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-	return fmt.Sprintf("BufferPool{B·%d G·%d P·%d <·%d =·%d >·%d M·%d}",
-		p.baseline, p.get, p.put, p.less, p.equal, p.greater, p.miss)
+	return fmt.Sprintf("BufferPool{G·%d P·%d <·%d =·%d >·%d M·%d}",
+		p.get, p.put, p.less, p.equal, p.greater, p.miss)
 }
 
 // NewBufferPool creates a new initialized 'buffer pool'.
 func NewBufferPool(baseline int) *BufferPool {
-	if baseline <= 0 {
-		panic("baseline can't be <= 0")
-	}
-	bufPool := &BufferPool{
-		baseline: [...]int{baseline / 4, baseline / 2, baseline, baseline * 2, baseline * 4},
-		pool: [6]sync.Pool{
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-			{
-				New: func() interface{} { return new([]byte) },
-			},
-		},
-	}
+	return &BufferPool{baseline: baseline}
+}
 
-	return bufPool
+// byteSlicePool pools byte-slices avoid extra allocations.
+type byteSlicePool struct {
+	pool sync.Pool
+}
+
+func (p *byteSlicePool) Get() (s []byte) {
+	if ptr, ok := p.pool.Get().(unsafe.Pointer); ok {
+		sh := (*reflect.SliceHeader)(unsafe.Pointer(&s))
+		// temporarily set len(s) to 8
+		sh.Data = uintptr(ptr)
+		sh.Cap = 8
+		sh.Len = 8
+		// extrat and set actual cap
+		sh.Cap = int(binary.BigEndian.Uint64(s))
+		sh.Len = 0
+	}
+	return
+}
+
+func (p *byteSlicePool) Put(b []byte) {
+	if cap(b) >= 8 {
+		// save the slice cap in first 8 bytes
+		b = b[:8]
+		binary.BigEndian.PutUint64(b, uint64(cap(b)))
+		// pools the pointer of the first byte
+		p.pool.Put(unsafe.Pointer(&b[0]))
+	}
 }

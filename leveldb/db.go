@@ -304,7 +304,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		noSync = o.GetNoSync()
 
 		rec   = &sessionRecord{}
-		bpool = util.NewBufferPool(o.GetBlockSize() + 5)
+		bpool = util.NewBufferPool(o.GetBlockSize() * 2)
 	)
 	buildTable := func(iter iterator.Iterator) (tmpFd storage.FileDesc, size int64, err error) {
 		tmpFd = s.newTemp()
@@ -329,7 +329,7 @@ func recoverTable(s *session, o *opt.Options) error {
 		}()
 
 		// Copy entries.
-		tw := table.NewWriter(writer, o, nil, 0)
+		tw := table.NewWriter(writer, o, nil)
 		for iter.Next() {
 			key := iter.Key()
 			if validInternalKey(key) {
