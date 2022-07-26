@@ -63,6 +63,8 @@ type session struct {
 	closeW      sync.WaitGroup
 	vmu         sync.Mutex
 
+	maxManifestFileSize int64
+
 	// Testing fields
 	fileRefCh chan chan map[int64]int // channel used to pass current reference stat
 }
@@ -85,6 +87,8 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 		abandon:   make(chan int64),
 		fileRefCh: make(chan chan map[int64]int),
 		closeC:    make(chan struct{}),
+
+		maxManifestFileSize: o.GetMaxManifestFileSize(),
 	}
 	s.setOptions(o)
 	s.tops = newTableOps(s)
@@ -226,9 +230,16 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
 		err = s.newManifest(r, nv)
-	} else if s.manifest.Size() >= s.o.GetMaxManifestFileSize() {
+	} else if s.manifest.Size() >= s.maxManifestFileSize {
 		// pass nil sessionRecord to avoid over-reference table file
 		err = s.newManifest(nil, nv)
+		if err == nil {
+			// increase the limit if the result manifest still over-sized, to prevent creation
+			// on each commit.
+			for s.manifest.Size() >= s.maxManifestFileSize {
+				s.maxManifestFileSize *= 2
+			}
+		}
 	} else {
 		err = s.flushManifest(r)
 	}
