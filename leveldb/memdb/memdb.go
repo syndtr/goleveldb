@@ -279,11 +279,24 @@ func (p *DB) Put(key []byte, value []byte) error {
 	defer p.mu.Unlock()
 
 	if node, exact := p.findGE(key, true); exact {
+		m := p.nodeData[node+nVal]
+		if len(value) == m { // if the length of new value  equals the old valued, just copy value
+			copy(p.kvData[p.nodeData[node]:p.nodeData[node]+m], value)
+			return nil
+		}
+
+		if len(value) < m { // if the length of new value  less the old valued, just copy value and update
+			copy(p.kvData[p.nodeData[node]:p.nodeData[node]+len(value)], value)
+			p.nodeData[node+nVal] = len(value)
+			p.kvSize += len(value) - m
+			return nil
+		}
+
 		kvOffset := len(p.kvData)
 		p.kvData = append(p.kvData, key...)
 		p.kvData = append(p.kvData, value...)
 		p.nodeData[node] = kvOffset
-		m := p.nodeData[node+nVal]
+
 		p.nodeData[node+nVal] = len(value)
 		p.kvSize += len(value) - m
 		return nil
@@ -330,7 +343,7 @@ func (p *DB) Delete(key []byte) error {
 	h := p.nodeData[node+nHeight]
 	for i, n := range p.prevNode[:h] {
 		m := n + nNext + i
-		p.nodeData[m] = p.nodeData[p.nodeData[m]+nNext+i]
+		p.nodeData[m] = p.nodeData[node+nNext+i]
 	}
 
 	p.kvSize -= p.nodeData[node+nKey] + p.nodeData[node+nVal]
