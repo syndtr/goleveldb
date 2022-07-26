@@ -1,4 +1,7 @@
 language: go
+arch:
+    - amd64
+    - ppc64le
 
 before_install:
   - curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.46.2
@@ -7,6 +10,12 @@ go:
   - 1.14.x
   - 1.18.x
   - tip
+matrix: 
+   allow_failures:
+    - go: 1.9.x
+    - go: 1.10.x
+    - go: tip
+
 
 script:
   - go vet ./...
