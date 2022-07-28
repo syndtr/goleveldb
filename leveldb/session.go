@@ -227,26 +227,28 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 		}
 	}()
 
+	create := true
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
 		err = s.newManifest(r, nv)
 	} else if s.manifest.Size() >= s.maxManifestFileSize {
 		// pass nil sessionRecord to avoid over-reference table file
 		err = s.newManifest(nil, nv)
-		if err == nil {
-			// increase the limit if the result manifest still over-sized, to prevent creation
-			// on each commit.
-			if manifestSize := s.manifest.Size(); manifestSize >= s.maxManifestFileSize {
-				s.maxManifestFileSize = 2 * manifestSize
-			}
-		}
 	} else {
+		create = false
 		err = s.flushManifest(r)
 	}
 
 	// finally, apply new version if no error rise
 	if err == nil {
 		s.setVersion(r, nv)
+		if create {
+			// increase the limit if the newly created manifest still over-sized, to prevent creation
+			// on each commit.
+			for s.manifest.Size() >= s.maxManifestFileSize {
+				s.maxManifestFileSize *= 2
+			}
+		}
 	}
 
 	return
