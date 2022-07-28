@@ -19,10 +19,9 @@ import (
 func (p *DB) TestFindLT(key []byte) (rkey, value []byte, err error) {
 	p.mu.RLock()
 	if node := p.findLT(key); node != 0 {
-		n := p.nodeData[node]
-		m := n + p.nodeData[node+nKey]
-		rkey = p.kvData[n:m]
-		value = p.kvData[m : m+p.nodeData[node+nVal]]
+		kv := p.kvSlice(p.nodeData[node])
+		rkey = kv[:p.nodeData[node+nKey]]
+		value = kv[p.nodeData[node+nKey]:][:p.nodeData[node+nVal]]
 	} else {
 		err = ErrNotFound
 	}
@@ -33,10 +32,9 @@ func (p *DB) TestFindLT(key []byte) (rkey, value []byte, err error) {
 func (p *DB) TestFindLast() (rkey, value []byte, err error) {
 	p.mu.RLock()
 	if node := p.findLast(); node != 0 {
-		n := p.nodeData[node]
-		m := n + p.nodeData[node+nKey]
-		rkey = p.kvData[n:m]
-		value = p.kvData[m : m+p.nodeData[node+nVal]]
+		kv := p.kvSlice(p.nodeData[node])
+		rkey = kv[:p.nodeData[node+nKey]]
+		value = kv[p.nodeData[node+nKey]:][:p.nodeData[node+nVal]]
 	} else {
 		err = ErrNotFound
 	}
