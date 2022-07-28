@@ -236,8 +236,8 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 		if err == nil {
 			// increase the limit if the result manifest still over-sized, to prevent creation
 			// on each commit.
-			for s.manifest.Size() >= s.maxManifestFileSize {
-				s.maxManifestFileSize *= 2
+			if manifestSize := s.manifest.Size(); manifestSize >= s.maxManifestFileSize {
+				s.maxManifestFileSize = 2 * manifestSize
 			}
 		}
 	} else {
