@@ -61,8 +61,7 @@ var _ = testutil.Defer(func() {
 	})
 })
 
-func BenchmarkMergedIterator(b *testing.B) {
-	n := 11
+func benchmarkMergedIteratorN(b *testing.B, n int) {
 	iters := make([]Iterator, n)
 	for i := range iters {
 		kv := testutil.KeyValue_Generate(nil, 100, 1, 1, 10, 4, 4)
@@ -78,4 +77,14 @@ func BenchmarkMergedIterator(b *testing.B) {
 			mi.Key()
 		}
 	}
+}
+
+func BenchmarkMergedIterator(b *testing.B) {
+	b.Run("2 iters", func(b *testing.B) {
+		benchmarkMergedIteratorN(b, 2)
+	})
+
+	b.Run("50 iters", func(b *testing.B) {
+		benchmarkMergedIteratorN(b, 50)
+	})
 }
