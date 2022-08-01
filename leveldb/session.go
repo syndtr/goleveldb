@@ -63,7 +63,7 @@ type session struct {
 	closeW      sync.WaitGroup
 	vmu         sync.Mutex
 
-	maxManifestFileSize int64
+	baseManifestSize int64 // manifest file size since last build
 
 	// Testing fields
 	fileRefCh chan chan map[int64]int // channel used to pass current reference stat
@@ -87,8 +87,6 @@ func newSession(stor storage.Storage, o *opt.Options) (s *session, err error) {
 		abandon:   make(chan int64),
 		fileRefCh: make(chan chan map[int64]int),
 		closeC:    make(chan struct{}),
-
-		maxManifestFileSize: o.GetMaxManifestFileSize(),
 	}
 	s.setOptions(o)
 	s.tops = newTableOps(s)
@@ -211,6 +209,18 @@ func (s *session) recover() (err error) {
 	return nil
 }
 
+// shouldRebuildManifest returns whether manifest file should be rebuilt; need external synchronization.
+func (s *session) shouldRebuildManifest() bool {
+	if s.manifest == nil {
+		return false
+	}
+	size := s.manifest.Size()
+	// To throttle manifest rebuilding, check if manifest size grows enough (doubled)
+	// since last build, in addition to size limit check.
+	// See: https://github.com/syndtr/goleveldb/issues/413.
+	return size >= s.baseManifestSize*2 && size >= s.o.GetMaxManifestFileSize()
+}
+
 // Commit session; need external synchronization.
 func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 	v := s.version()
@@ -227,28 +237,19 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 		}
 	}()
 
-	create := true
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
 		err = s.newManifest(r, nv)
-	} else if s.manifest.Size() >= s.maxManifestFileSize {
+	} else if s.shouldRebuildManifest() {
 		// pass nil sessionRecord to avoid over-reference table file
 		err = s.newManifest(nil, nv)
 	} else {
-		create = false
 		err = s.flushManifest(r)
 	}
 
 	// finally, apply new version if no error rise
 	if err == nil {
 		s.setVersion(r, nv)
-		if create {
-			// increase the limit if the newly created manifest still over-sized, to prevent creation
-			// on each commit.
-			for s.manifest.Size() >= s.maxManifestFileSize {
-				s.maxManifestFileSize *= 2
-			}
-		}
 	}
 
 	return
