@@ -1072,6 +1072,10 @@ type DBStats struct {
 
 // Stats populates s with database statistics.
 func (db *DB) Stats(s *DBStats) error {
+	// Ensure that the session isn't closed while this function is executing.
+	db.closeW.Add(1)
+	defer db.closeW.Done()
+
 	err := db.ok()
 	if err != nil {
 		return err
