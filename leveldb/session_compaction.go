@@ -144,6 +144,7 @@ func newCompaction(s *session, v *version, sourceLevel int, t0 tFiles, typ int) 
 		tPtrs:         make([]int, len(v.levels)),
 	}
 	c.expand()
+	c.reduce()
 	c.save()
 	return c
 }
@@ -157,6 +158,8 @@ type compaction struct {
 	sourceLevel   int
 	levels        [2]tFiles
 	maxGPOverlaps int64
+	skips         tFiles
+	skipIndex     int
 
 	gp                tFiles
 	gpi               int
@@ -170,6 +173,7 @@ type compaction struct {
 	snapSeenKey           bool
 	snapGPOverlappedBytes int64
 	snapTPtrs             []int
+	snapSkipIndex         int
 }
 
 func (c *compaction) save() {
@@ -177,6 +181,7 @@ func (c *compaction) save() {
 	c.snapSeenKey = c.seenKey
 	c.snapGPOverlappedBytes = c.gpOverlappedBytes
 	c.snapTPtrs = append(c.snapTPtrs[:0], c.tPtrs...)
+	c.snapSkipIndex = c.skipIndex
 }
 
 func (c *compaction) restore() {
@@ -184,6 +189,7 @@ func (c *compaction) restore() {
 	c.seenKey = c.snapSeenKey
 	c.gpOverlappedBytes = c.snapGPOverlappedBytes
 	c.tPtrs = append(c.tPtrs[:0], c.snapTPtrs...)
+	c.skipIndex = c.snapSkipIndex
 }
 
 func (c *compaction) release() {
@@ -245,6 +251,66 @@ func (c *compaction) expand() {
 	c.imin, c.imax = imin, imax
 }
 
+// reduce tries to reduce table set of target level; need external synchronization.
+func (c *compaction) reduce() {
+	t0, t1 := c.levels[0], c.levels[1]
+	if len(t1) <= 2 {
+		return
+	}
+
+	// Options.
+	ro := &opt.ReadOptions{
+		DontFillCache: true,
+		Strict:        opt.StrictOverride,
+	}
+	strict := c.s.o.GetStrict(opt.StrictCompaction)
+	if strict {
+		ro.Strict |= opt.StrictReader
+	}
+
+	// the source level iterator
+	var it iterator.Iterator
+	if c.sourceLevel == 0 {
+		its := make([]iterator.Iterator, 0, len(t0))
+		for _, t := range t0 {
+			its = append(its, c.s.tops.newIterator(t, nil, ro))
+		}
+		it = iterator.NewMergedIterator(its, c.s.icmp, strict)
+	} else {
+		it = iterator.NewIndexedIterator(t0.newIndexIterator(c.s.tops, c.s.icmp, nil, ro), strict)
+	}
+	defer it.Release()
+
+	ft := make(tFiles, 0, len(t1))
+	skips := make(tFiles, 0, len(t1)-2)
+	for i, t := range t1 {
+		if i == 0 || i == len(t1)-1 {
+			ft = append(ft, t)
+			continue
+		}
+		// If no key in source level falls within this table, this table can be safely skipped.
+		if it.Seek(t.imin) {
+			// It's important to compare ukeys here, to prevent ukey from hopping across tables
+			// after compaction done.
+			if c.s.icmp.uCompare(internalKey(it.Key()).ukey(), t.imax.ukey()) > 0 {
+				if it.Prev() {
+					if c.s.icmp.uCompare(internalKey(it.Key()).ukey(), t.imin.ukey()) < 0 {
+						skips = append(skips, t)
+						continue
+					}
+				}
+			}
+		}
+		ft = append(ft, t)
+	}
+
+	if it.Error() == nil && len(skips) > 0 {
+		c.s.logf("table@compaction reducing L%d -> L%d F·-%d S·-%s", c.sourceLevel, c.sourceLevel+1, len(skips), shortenb(skips.size()))
+		c.levels[1] = ft
+		c.skips = skips
+	}
+}
+
 // Check whether compaction is trivial.
 func (c *compaction) trivial() bool {
 	return len(c.levels[0]) == 1 && len(c.levels[1]) == 0 && c.gp.size() <= c.maxGPOverlaps
@@ -269,7 +335,7 @@ func (c *compaction) baseLevelForKey(ukey []byte) bool {
 	return true
 }
 
-func (c *compaction) shouldStopBefore(ikey internalKey) bool {
+func (c *compaction) shouldStopBefore(ikey internalKey) (shouldStop bool) {
 	for ; c.gpi < len(c.gp); c.gpi++ {
 		gp := c.gp[c.gpi]
 		if c.s.icmp.Compare(ikey, gp.imax) <= 0 {
@@ -284,9 +350,18 @@ func (c *compaction) shouldStopBefore(ikey internalKey) bool {
 	if c.gpOverlappedBytes > c.maxGPOverlaps {
 		// Too much overlap for current output; start new output.
 		c.gpOverlappedBytes = 0
-		return true
+		shouldStop = true
 	}
-	return false
+
+	for c.skipIndex < len(c.skips) {
+		if c.s.icmp.uCompare(ikey.ukey(), c.skips[c.skipIndex].imin.ukey()) < 0 {
+			break
+		}
+		// hop across the current skipped table; start new output.
+		c.skipIndex++
+		shouldStop = true
+	}
+	return
 }
 
 // Creates an iterator.
