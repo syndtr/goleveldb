@@ -283,13 +283,13 @@ func (c *compaction) reduce() {
 
 	ft := make(tFiles, 0, len(t1))
 	skips := make(tFiles, 0, len(t1)-2)
+	targetTableSize := c.s.o.GetCompactionTableSize(c.sourceLevel + 1)
 	for i, t := range t1 {
-		if i == 0 || i == len(t1)-1 {
-			ft = append(ft, t)
-			continue
-		}
+		// the first, the last and small tables are ignored.
+		ignore := i == 0 || i == len(t1)-1 || t.size < int64(targetTableSize/10)
+
 		// If no key in source level falls within this table, this table can be safely skipped.
-		if it.Seek(t.imin) {
+		if !ignore && it.Seek(t.imin) {
 			// It's important to compare ukeys here, to prevent ukey from hopping across tables
 			// after compaction done.
 			if c.s.icmp.uCompare(internalKey(it.Key()).ukey(), t.imax.ukey()) > 0 {
