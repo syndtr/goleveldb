@@ -516,10 +516,16 @@ func (p *versionStaging) finish(trivial bool) *version {
 					index := nt.searchNumLess(added[len(added)-1].fd.Num)
 					nt = append(nt[:index], append(added, nt[index:]...)...)
 				} else {
+					imin, imax := added.getRange(p.base.s.icmp)
+					i1 := nt.searchMin(p.base.s.icmp, imin)
+					i2 := nt.searchMin(p.base.s.icmp, imax)
+
+					// join with overlaps, and sort
+					added = append(added, nt[i1:i2]...)
 					added.sortByKey(p.base.s.icmp)
-					_, amax := added.getRange(p.base.s.icmp)
-					index := nt.searchMin(p.base.s.icmp, amax)
-					nt = append(nt[:index], append(added, nt[index:]...)...)
+
+					added = append(added, nt[i2:]...)
+					nt = append(nt[:i1], added...)
 				}
 				nv.levels[level] = nt
 				continue
