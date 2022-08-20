@@ -1,29 +1,25 @@
 # goLevelDB
 
-This is an implementation of the [LevelDB key/value database](https://github.com/google/leveldb) in the [Go programming language](https://go.dev).
+Этот проект является реализацией [LevelDB key/value database](https://github.com/google/leveldb) на языке программирования [Go](https://go.dev).
 
 [![Build Status](https://app.travis-ci.com/syndtr/goleveldb.svg?branch=master)](https://app.travis-ci.com/syndtr/goleveldb)
 
-## Other language
-
-[ru_RU.UTF-8](./docs/README_ru.md)
-
-## Installation
+## Установка
 
 ```bash
 go get github.com/syndtr/goleveldb/leveldb
 ```
 
-## Requirements
+## Требования
 
-Need at least `go1.14` or newer.
+Необходим компилятор `go1.14` или новее.
 
-## Usage
+## Использование
 
-Create or open a database:
+Cjplfybt yjdjq ,fps lfyys[]:
 
 ```go
-// The returned DB instance is safe for concurrent use. Which mean that all
+// Возвращает новый экземпляр DB, безопасный для конкурентного использования. Which mean that all
 // DB's methods may be called concurrently from multiple goroutine.
 db, err := leveldb.OpenFile("path/to/db", nil)
 ...
@@ -31,7 +27,7 @@ defer db.Close()
 ...
 ```
 
-Read or modify the database content:
+Чтение или изменение содержимого базы данных:
 
 ```go
 // Remember that the contents of the returned slice should not be modified.
@@ -43,7 +39,7 @@ err = db.Delete([]byte("key"), nil)
 ...
 ```
 
-Iterate over database content:
+Итерация по содержимому базы данных:
 
 ```go
 iter := db.NewIterator(nil, nil)
@@ -59,7 +55,7 @@ err = iter.Error()
 ...
 ```
 
-Seek-then-Iterate:
+Поиск через итерацию:
 
 ```go
 iter := db.NewIterator(nil, nil)
@@ -73,6 +69,7 @@ err = iter.Error()
 ```
 
 Iterate over subset of database content:
+Итерация по подмножеству ключей по содержимому базы данных:
 
 ```go
 iter := db.NewIterator(&util.Range{Start: []byte("foo"), Limit: []byte("xoo")}, nil)
@@ -85,7 +82,7 @@ err = iter.Error()
 ...
 ```
 
-Iterate over subset of database content with a particular prefix:
+Итерация по подмножеству ключей с указанным префиксом:
 
 ```go
 iter := db.NewIterator(util.BytesPrefix([]byte("foo-")), nil)
@@ -98,7 +95,7 @@ err = iter.Error()
 ...
 ```
 
-Batch writes:
+Пакетная запись
 
 ```go
 batch := new(leveldb.Batch)
@@ -109,7 +106,7 @@ err = db.Write(batch, nil)
 ...
 ```
 
-Use bloom filter:
+С использованием фильтра Блума:
 
 ```go
 o := &opt.Options{
@@ -121,6 +118,6 @@ defer db.Close()
 ...
 ```
 
-## Documentation
+## Документация
 
-You can read package documentation [here](https://pkg.go.dev/github.com/syndtr/goleveldb).
+Вы можете прочитать документацию [здесь](https://pkg.go.dev/github.com/syndtr/goleveldb).
