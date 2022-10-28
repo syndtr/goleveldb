@@ -62,14 +62,16 @@ type block struct {
 }
 
 func (b *block) seek(cmp comparer.Comparer, rstart, rlimit int, key []byte) (index, offset int, err error) {
-	index = sort.Search(b.restartsLen-rstart-(b.restartsLen-rlimit), func(i int) bool {
-		offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
-		offset++                                    // shared always zero, since this is a restart point
-		v1, n1 := binary.Uvarint(b.data[offset:])   // key length
-		_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
-		m := offset + n1 + n2
-		return cmp.Compare(b.data[m:m+int(v1)], key) > 0
-	}) + rstart - 1
+	index = sort.Search(
+		b.restartsLen-rstart-(b.restartsLen-rlimit),
+		func(i int) bool {
+			offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
+			offset++                                    // shared always zero, since this is a restart point
+			v1, n1 := binary.Uvarint(b.data[offset:])   // key length
+			_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
+			m := offset + n1 + n2
+			return cmp.Compare(b.data[m:m+int(v1)], key) > 0
+		}) + rstart - 1
 	if index < rstart {
 		// The smallest key is greater-than key sought.
 		index = rstart
@@ -121,7 +123,7 @@ type dir int
 const (
 	dirReleased dir = iota - 1
 	dirSOI
-	dirEOI
+	dirEOI // 到了流的尾部，在用 dir 表达iterator的状态
 	dirBackward
 	dirForward
 )
@@ -221,6 +223,7 @@ func (i *blockIter) Last() bool {
 	return i.Prev()
 }
 
+// 找到第一个大于等于 key 的记录
 func (i *blockIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
@@ -262,20 +265,27 @@ func (i *blockIter) Next() bool {
 		i.prevNode = i.prevNode[:0]
 		i.prevKeys = i.prevKeys[:0]
 	}
+
+	// 使用 i.offset 在作iteration
+	// 为什么时一个循环？如果多次循环，那么 i.key 和 i.value 之前的值不久被覆盖了吗？s
 	for i.offset < i.offsetRealStart {
 		key, value, nShared, n, err := i.block.entry(i.offset)
 		if err != nil {
 			i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 			return false
 		}
+
 		if n == 0 {
 			i.dir = dirEOI
 			return false
 		}
+
+		// 读到新的key-value pair
 		i.key = append(i.key[:nShared], key...)
 		i.value = value
 		i.offset += n
 	}
+
 	if i.offset >= i.offsetLimit {
 		i.dir = dirEOI
 		if i.offset != i.offsetLimit {
@@ -283,6 +293,7 @@ func (i *blockIter) Next() bool {
 		}
 		return false
 	}
+
 	key, value, nShared, n, err := i.block.entry(i.offset)
 	if err != nil {
 		i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
@@ -292,6 +303,7 @@ func (i *blockIter) Next() bool {
 		i.dir = dirEOI
 		return false
 	}
+
 	i.key = append(i.key[:nShared], key...)
 	i.value = value
 	i.prevOffset = i.offset
@@ -527,6 +539,7 @@ type Reader struct {
 	filterBlock               *filterBlock
 }
 
+// 一个 SST 包含多个blocks
 func (r *Reader) blockKind(bh blockHandle) string {
 	switch bh.offset {
 	case r.metaBH.offset:
@@ -549,6 +562,7 @@ func (r *Reader) newErrCorruptedBH(bh blockHandle, reason string) error {
 	return r.newErrCorrupted(int64(bh.offset), int64(bh.length), r.blockKind(bh), reason)
 }
 
+// 汇报一个block的错误
 func (r *Reader) fixErrCorruptedBH(bh blockHandle, err error) error {
 	if cerr, ok := err.(*ErrCorrupted); ok {
 		cerr.Pos = int64(bh.offset)

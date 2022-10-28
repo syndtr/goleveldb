@@ -36,7 +36,7 @@ func (db *DB) rotateMem(n int, wait bool) (mem *memDB, err error) {
 	retryLimit := 3
 retry:
 	// Wait for pending memdb compaction.
-	err = db.compTriggerWait(db.mcompCmdC)
+	err = db.compTriggerWait(db.mcompCmdC) // 这一步成功之后，就不该还有 frozen memDB
 	if err != nil {
 		return
 	}
@@ -47,6 +47,7 @@ retry:
 	if err != nil {
 		if err == errHasFrozenMem {
 			if retryLimit <= 0 {
+				// 既然之前已经 wait 过 compaction了，那么这时就不该还有 frozen memDB
 				panic("BUG: still has frozen memdb")
 			}
 			goto retry
@@ -63,6 +64,7 @@ retry:
 	return
 }
 
+// 如果 db 写入数据量过快，则会触发 throttle
 func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 	delayed := false
 	slowdownTrigger := db.s.o.GetWriteL0SlowdownTrigger()
@@ -79,15 +81,18 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 				mdb = nil
 			}
 		}()
-		tLen := db.s.tLen(0)
-		mdbFree = mdb.Free()
+		tLen := db.s.tLen(0) // 当前版本 Level-0 的 SST 个数s
+		mdbFree = mdb.Free() // cap - size，即 mdb 还有多少剩下的空间s
 		switch {
 		case tLen >= slowdownTrigger && !delayed:
+			// level-0 的文件个数超出了阈值，默认为 slowdownTrigger=8，会减缓写入速度一次
 			delayed = true
 			time.Sleep(time.Millisecond)
 		case mdbFree >= n:
+			// mdb 的剩余空间足够容纳这么多数据量
 			return false
 		case tLen >= pauseTrigger:
+			// 注意：此时 mdbFree < n，也就是说 mdb 目前不足以容纳 n 规模的数据
 			delayed = true
 			// Set the write paused flag explicitly.
 			atomic.StoreInt32(&db.inWritePaused, 1)
@@ -97,13 +102,17 @@ func (db *DB) flush(n int) (mdb *memDB, mdbFree int, err error) {
 			if err != nil {
 				return false
 			}
+
+			// 注意：当 err==nil 时，会 return true，也就是继续重试，如果还是 tLen >= pausedTrigger，则继续触发 L0 compaction
+			// 直到 Level-0 的 SST 数目不 block write
 		default:
+			// 此时，mdb 的空间不足以容纳 n 规模的数据，且 write 没有被 Level-0 的 compaction block
 			// Allow memdb to grow if it has no entry.
 			if mdb.Len() == 0 {
 				mdbFree = n
 			} else {
 				mdb.decref()
-				mdb, err = db.rotateMem(n, false)
+				mdb, err = db.rotateMem(n, false) // 不会等待 memDB compaction 完成
 				if err == nil {
 					mdbFree = mdb.Free()
 				} else {

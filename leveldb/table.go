@@ -149,6 +149,7 @@ func (tf tFiles) searchNumLess(num int64) int {
 
 // Searches smallest index of tables whose its smallest
 // key is after the given key.
+// 按照 user key 来作比较
 func (tf tFiles) searchMinUkey(icmp *iComparer, umin []byte) int {
 	return sort.Search(len(tf), func(i int) bool {
 		return icmp.ucmp.Compare(tf[i].imin.ukey(), umin) > 0
@@ -157,6 +158,7 @@ func (tf tFiles) searchMinUkey(icmp *iComparer, umin []byte) int {
 
 // Searches smallest index of tables whose its largest
 // key is after the given key.
+// 按照 user key 来作比较
 func (tf tFiles) searchMaxUkey(icmp *iComparer, umax []byte) int {
 	return sort.Search(len(tf), func(i int) bool {
 		return icmp.ucmp.Compare(tf[i].imax.ukey(), umax) > 0
@@ -179,13 +181,14 @@ func (tf tFiles) overlaps(icmp *iComparer, umin, umax []byte, unsorted bool) boo
 	i := 0
 	if len(umin) > 0 {
 		// Find the earliest possible internal key for min.
+		// 先找第一个 imax 大于等于 umin 的 SSTs
 		i = tf.searchMax(icmp, makeInternalKey(nil, umin, keyMaxSeq, keyTypeSeek))
 	}
 	if i >= len(tf) {
 		// Beginning of range is after all files, so no overlap.
 		return false
 	}
-	return !tf[i].before(icmp, umax)
+	return !tf[i].before(icmp, umax) // umax 不在这个文件前面，即此 SST 与 [umin, umax] 有交集
 }
 
 // Returns tables whose its key range overlaps with given key range.
@@ -202,7 +205,7 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 	// And what's more, the files in these levels are strictly sorted,
 	// so use binary search instead of heavy traverse.
 	if !overlapped {
-		var begin, end int
+		var begin, end int // 区间 [begin, end)
 		// Determine the begin index of the overlapped file
 		if umin != nil {
 			index := tf.searchMinUkey(icmp, umin)
@@ -242,6 +245,8 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 	for i := 0; i < len(tf); {
 		t := tf[i]
 		if t.overlaps(icmp, umin, umax) {
+
+			// 扩大 [umin, umax] 的范围
 			if umin != nil && icmp.uCompare(t.imin.ukey(), umin) < 0 {
 				umin = t.imin.ukey()
 				dst = dst[:0]
@@ -284,7 +289,7 @@ func (tf tFiles) getRange(icmp *iComparer) (imin, imax internalKey) {
 // Creates iterator index from tables.
 func (tf tFiles) newIndexIterator(tops *tOps, icmp *iComparer, slice *util.Range, ro *opt.ReadOptions) iterator.IteratorIndexer {
 	if slice != nil {
-		var start, limit int
+		var start, limit int // 区间 [start, limit)，limit 更像是 end 的概念
 		if slice.Start != nil {
 			start = tf.searchMax(icmp, internalKey(slice.Start))
 		}
@@ -389,7 +394,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 			return
 		}
 	}
-	err = src.Error()
+	err = src.Error() // accumulated error
 	if err != nil {
 		return
 	}
@@ -402,7 +407,8 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 // Opens table. It returns a cache handle, which should
 // be released after use.
 func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
-	ch = t.fileCache.Get(0, uint64(f.fd.Num), func() (size int, value cache.Value) {
+
+	loader := func() (size int, value cache.Value) {
 		var r storage.Reader
 		r, err = t.s.stor.Open(f.fd)
 		if err != nil {
@@ -421,8 +427,9 @@ func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 			return 0, nil
 		}
 		return 1, tr
+	}
 
-	})
+	ch = t.fileCache.Get(0, uint64(f.fd.Num), loader)
 	if ch == nil && err == nil {
 		err = ErrClosed
 	}

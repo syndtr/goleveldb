@@ -87,6 +87,7 @@ func (db *DB) mpoolGet(n int) *memDB {
 	default:
 	}
 	if mdb == nil || mdb.Capacity() < n {
+		// 取 WriteBuffer 和 n 的最大值，很小的 n 可能在满的 memDB 下触发 rotateMem 操作，所以需要取这个最大值
 		mdb = memdb.New(db.s.icmp, maxInt(db.s.o.GetWriteBuffer(), n))
 	}
 	return &memDB{
@@ -120,6 +121,8 @@ func (db *DB) mpoolDrain() {
 // Create new memdb and froze the old one; need external synchronization.
 // newMem only called synchronously by the writer.
 func (db *DB) newMem(n int) (mem *memDB, err error) {
+
+	// Why: 先创建了 journal 文件，如果后面有 err 不会导致此文件一直存在得不到清理吗？
 	fd := storage.FileDesc{Type: storage.TypeJournal, Num: db.s.allocFileNum()}
 	w, err := db.s.stor.Create(fd)
 	if err != nil {
@@ -130,6 +133,8 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 	db.memMu.Lock()
 	defer db.memMu.Unlock()
 
+	// 已经有 immutable memtable 的话不可以再创建 immutable memtable
+	// 这也是 LevelDB 的一个限制
 	if db.frozenMem != nil {
 		return nil, errHasFrozenMem
 	}
@@ -146,12 +151,12 @@ func (db *DB) newMem(n int) (mem *memDB, err error) {
 		db.frozenJournalFd = db.journalFd
 	}
 	db.journalWriter = w
-	db.journalFd = fd
+	db.journalFd = fd // 新的 journal fd
 	db.frozenMem = db.mem
 	mem = db.mpoolGet(n)
 	mem.incref() // for self
 	mem.incref() // for caller
-	db.mem = mem
+	db.mem = mem // 切换了 memDBs
 	// The seq only incremented by the writer. And whoever called newMem
 	// should hold write lock, so no need additional synchronization here.
 	db.frozenSeq = db.seq

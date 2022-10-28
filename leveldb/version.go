@@ -22,6 +22,7 @@ type tSet struct {
 	table *tFile
 }
 
+// 保存每个层级的文件信息以及判断是否需要更新compaction相关的变量
 type version struct {
 	id int64 // unique monotonous increasing version id
 	s  *session

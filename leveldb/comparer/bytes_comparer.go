@@ -6,7 +6,9 @@
 
 package comparer
 
-import "bytes"
+import (
+	"bytes"
+)
 
 type bytesComparer struct{}
 

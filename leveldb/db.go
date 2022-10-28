@@ -52,11 +52,11 @@ type DB struct {
 	memMu           sync.RWMutex
 	memPool         chan *memdb.DB
 	mem, frozenMem  *memDB
-	journal         *journal.Writer
+	journal         *journal.Writer // 写 WAL
 	journalWriter   storage.Writer
 	journalFd       storage.FileDesc
 	frozenJournalFd storage.FileDesc
-	frozenSeq       uint64
+	frozenSeq       uint64 // 哪一个 seq 的写操作导致了 memDB 的切换，或者说导致了当前的 memDB 被 freeze 成 immutable memDB
 
 	// Snapshot.
 	snapsMu   sync.Mutex

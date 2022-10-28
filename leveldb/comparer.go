@@ -10,6 +10,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/comparer"
 )
 
+// iComparer 处理关于 sequence 相关的逻辑
 type iComparer struct {
 	ucmp comparer.Comparer
 }
@@ -37,6 +38,8 @@ func (icmp *iComparer) Name() string {
 func (icmp *iComparer) Compare(a, b []byte) int {
 	x := icmp.uCompare(internalKey(a).ukey(), internalKey(b).ukey())
 	if x == 0 {
+		// 按照 seq 排序，seq 大的排在前面
+		// uCompare 指的是 user 指定的 compare function
 		if m, n := internalKey(a).num(), internalKey(b).num(); m > n {
 			return -1
 		} else if m < n {

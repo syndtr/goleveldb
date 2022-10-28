@@ -396,7 +396,7 @@ func NewWriter(f io.Writer, o *opt.Options, pool *util.BufferPool, size int) *Wr
 	} else {
 		bufBytes = pool.Get(size)
 	}
-	bufBytes = bufBytes[:0]
+	bufBytes = bufBytes[:0] // clear up bufBytes, in case it is fetched from pool
 
 	w := &Writer{
 		writer:          f,

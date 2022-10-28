@@ -413,12 +413,20 @@ func (w *Writer) writePending() {
 	if w.err != nil {
 		return
 	}
+
+	// pending 的 chunk 指的是写了payload，但是尚未 fillHeader 的 chunk
+	// 只有把 header 填充好，才是一个完备的 chunk，而填充 header 必须得在 chunk 的内容锁定之后
+	// chunk 内容的锁定有两种情况：
+	//   1. block 写满了，不得不截断出一个 chunk；
+	//   2. 需要写的 payload 的确写完了，没东西继续写了，要终止 chunk，跟下一条 journal record 使用的 chunk 分隔开
 	if w.pending {
 		w.fillHeader(true)
-		w.pending = false
+		w.pending = false // chunk 都写完了，没有还没有 header 的 chunk 了
 	}
 	_, w.err = w.w.Write(w.buf[w.written:w.j])
 	w.written = w.j
+
+	// 可以调用 Next() 了
 }
 
 // Close finishes the current journal and closes the writer.
@@ -508,6 +516,7 @@ type singleWriter struct {
 	seq int
 }
 
+// singleWrite 可以写入多次 p，写满 block 时会自动 fillHeader 然后开启下一个 block
 func (x singleWriter) Write(p []byte) (int, error) {
 	w := x.w
 	if w.seq != x.seq {
@@ -520,12 +529,12 @@ func (x singleWriter) Write(p []byte) (int, error) {
 	for len(p) > 0 {
 		// Write a block, if it is full.
 		if w.j == blockSize {
-			w.fillHeader(false)
+			w.fillHeader(false) // p 还没有写完，这时候一个 block 写满了，要开启下一个 block，所以这个 chunk 就不会是 last
 			w.writeBlock()
 			if w.err != nil {
-				return 0, w.err
+				return 0, w.err // 写 journal 的时候任意一段 chunk 写入失败就算作失败
 			}
-			w.first = false
+			w.first = false // 写了一个 chunk 后，下一个要写的 chunk 就不再是 first 了
 		}
 		// Copy bytes into the buffer.
 		n := copy(w.buf[w.j:], p)
