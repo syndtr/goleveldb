@@ -64,9 +64,9 @@ type DB struct {
 
 	// Write.
 	batchPool    sync.Pool
-	writeMergeC  chan writeMerge
+	writeMergeC  chan writeMerge // 有 merge write 需求时 chan<-，执行 merge write 的一方会不断地 <-chan 合并可以合并过来的写请求
 	writeMergedC chan bool
-	writeLockC   chan struct{}
+	writeLockC   chan struct{} // write 的写锁，成功 chan<- 说明拿到了锁，用完了之后 <-chan 就是释放锁
 	writeAckC    chan error
 	writeDelay   time.Duration
 	writeDelayN  int
@@ -76,7 +76,7 @@ type DB struct {
 	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
 	tcompPauseC      chan chan<- struct{}
-	mcompCmdC        chan cCmd
+	mcompCmdC        chan cCmd // 全称 memdb compaction command channel?
 	compErrC         chan error
 	compPerErrC      chan error
 	compErrSetC      chan error

@@ -678,6 +678,7 @@ func (db *DB) pauseCompaction(ch chan<- struct{}) {
 	}
 }
 
+// 是 compaction command?
 type cCmd interface {
 	ack(err error)
 }

@@ -192,14 +192,14 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 	merge:
 		for mergeLimit > 0 {
 			select {
-			case incoming := <-db.writeMergeC:
+			case incoming := <-db.writeMergeC: // 不断合并可得的写请求，可能是要合并一个 batch write，或者合并一个 put
 				if incoming.batch != nil {
 					// Merge batch.
 					if incoming.batch.internalLen > mergeLimit {
 						overflow = true
 						break merge
 					}
-					batches = append(batches, incoming.batch)
+					batches = append(batches, incoming.batch) // 注意：这里是整个 batch 合并，保证 batch 执行的原子性，不会存在 batch 一部分成功了，另一部分失败了的情况
 					mergeLimit -= incoming.batch.internalLen
 				} else {
 					// Merge put.
@@ -237,6 +237,8 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 	seq := db.seq + 1
 
 	// Write journal.
+	// 先写 journal，journal 写成功了就是 Write 成功了
+	// journal 的 seq 写入的时候用的是相同的 seq
 	if err := db.writeJournal(batches, seq, sync); err != nil {
 		db.unlockWrite(overflow, merged, err)
 		return err
@@ -244,6 +246,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 
 	// Put batches.
 	for _, batch := range batches {
+		// mdb 写入的时候不应该出现问题
 		if err := batch.putMem(seq, mdb.DB); err != nil {
 			panic(err)
 		}
