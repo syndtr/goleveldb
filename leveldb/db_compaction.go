@@ -59,6 +59,7 @@ func (p *cStatStaging) stopTimer() {
 	}
 }
 
+// 按照 level 来组织 cStat，level[n] 表示 level-n 的 cStat，level 从 0 开始
 type cStats struct {
 	lk    sync.Mutex
 	stats []cStat
@@ -173,6 +174,8 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 
 		disableBackoff = db.s.o.GetDisableCompactionBackoff()
 	)
+
+	// 有 backOff retry
 	for n := 0; ; n++ {
 		// Check whether the DB is closed.
 		if db.isClosed() {
@@ -192,6 +195,7 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 		// Set compaction error status.
 		select {
 		case db.compErrSetC <- err:
+			// 注意：err == nil 时也要放入 compErrSetC
 		case perr := <-db.compPerErrC:
 			if err != nil {
 				db.logf("%s exiting (persistent error %q)", name, perr)
@@ -204,6 +208,8 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 		if err == nil {
 			return
 		}
+
+		// 如果是 corrupted error，是不可以重试解决的
 		if errors.IsCorrupted(err) {
 			db.logf("%s exiting (corruption detected)", name)
 			db.compactionExitTransact()
@@ -279,6 +285,7 @@ func (db *DB) memCompaction() {
 	if mdb.Len() == 0 {
 		db.logf("memdb@flush skipping")
 		// drop frozen memdb
+		// 此时 immutable memdb 是空的，所以不用 compaction 了，直接删除掉对应的 journal 文件即可
 		db.dropFrozenMem()
 		return
 	}
@@ -304,11 +311,15 @@ func (db *DB) memCompaction() {
 	db.compactionTransactFunc("memdb@flush", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		flushLevel, err = db.s.flushMemdb(rec, mdb.DB, db.memdbMaxLevel)
+
+		// 这里 rec 应该只有一条记录，就是当前 memdb compaction 出来的 SST
+
 		stats.stopTimer()
 		return
 	}, func() error {
 		for _, r := range rec.addedTables {
 			db.logf("memdb@flush revert @%d", r.num)
+			// 删除创建的 SST，完成 revert
 			if err := db.s.stor.Remove(storage.FileDesc{Type: storage.TypeTable, Num: r.num}); err != nil {
 				return err
 			}

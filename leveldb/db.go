@@ -65,20 +65,20 @@ type DB struct {
 	// Write.
 	batchPool    sync.Pool
 	writeMergeC  chan writeMerge // 有 merge write 需求时 chan<-，执行 merge write 的一方会不断地 <-chan 合并可以合并过来的写请求
-	writeMergedC chan bool
-	writeLockC   chan struct{} // write 的写锁，成功 chan<- 说明拿到了锁，用完了之后 <-chan 就是释放锁
-	writeAckC    chan error
-	writeDelay   time.Duration
-	writeDelayN  int
+	writeMergedC chan bool       // chan<- false 用来通知某个 write 它没有被 merge
+	writeLockC   chan struct{}   // write 的写锁，成功 chan<- 说明拿到了锁，用完了之后 <-chan 就是释放锁
+	writeAckC    chan error      // chan<- 通知等待 ACK 的一方；<-chan 等待的一方读取 Write 的结果
+	writeDelay   time.Duration   // 记录 Write 被 compaction 所 delay 的时长
+	writeDelayN  int             // 记录 Write 被 compaction 所 delay 的次数
 	tr           *Transaction
 
 	// Compaction.
 	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
 	tcompPauseC      chan chan<- struct{}
-	mcompCmdC        chan cCmd // 全称 memdb compaction command channel?
-	compErrC         chan error
-	compPerErrC      chan error
+	mcompCmdC        chan cCmd  // 全称 memdb compaction command channel?
+	compErrC         chan error // compaction error
+	compPerErrC      chan error // 全称 compaction persistent error
 	compErrSetC      chan error
 	compWriteLocking bool
 	compStats        cStats
@@ -106,7 +106,7 @@ func openDB(s *session) (*DB, error) {
 		batchPool:    sync.Pool{New: newBatch},
 		writeMergeC:  make(chan writeMerge),
 		writeMergedC: make(chan bool),
-		writeLockC:   make(chan struct{}, 1),
+		writeLockC:   make(chan struct{}, 1), // 注意：channel 的 buffer 为 1，因为首个去获取 Write Lock 的 goroutine 必须得能通过 chan<- 拿到 Lock
 		writeAckC:    make(chan error),
 		// Compaction
 		tcompCmdC:   make(chan cCmd),

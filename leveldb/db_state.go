@@ -203,11 +203,14 @@ func (db *DB) getFrozenMem() *memDB {
 // Drop frozen memdb; assume that frozen memdb isn't nil.
 func (db *DB) dropFrozenMem() {
 	db.memMu.Lock()
+
+	// 删除 immutable memtable 的 journal
 	if err := db.s.stor.Remove(db.frozenJournalFd); err != nil {
 		db.logf("journal@remove removing @%d %q", db.frozenJournalFd.Num, err)
 	} else {
 		db.logf("journal@remove removed @%d", db.frozenJournalFd.Num)
 	}
+
 	db.frozenJournalFd = storage.FileDesc{}
 	db.frozenMem.decref()
 	db.frozenMem = nil

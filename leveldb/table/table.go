@@ -153,7 +153,7 @@ const (
 	blockTypeSnappyCompression = 1
 )
 
-// 一个 blockHandle 可以指定一块数据区域s
+// 一个 blockHandle 可以指定一块数据区域
 type blockHandle struct {
 	offset, length uint64
 }

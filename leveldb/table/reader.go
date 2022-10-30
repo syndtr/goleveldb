@@ -57,21 +57,36 @@ type block struct {
 	bpool          *util.BufferPool
 	bh             blockHandle
 	data           []byte
-	restartsLen    int
+	restartsLen    int // restart point 的个数
 	restartsOffset int
 }
 
+// 返回最后一个小于等于 key 的 restart point index，和对应 restart point 的 offset
+// 后续一半从这个 restart point 开始查找 key
 func (b *block) seek(cmp comparer.Comparer, rstart, rlimit int, key []byte) (index, offset int, err error) {
+	// 查 [rstart, rlimit) 上的 restart point
+	// 这个二分查找是要找到第一个比 key 大的 restart point，返回的下标是针对 [rstart, rlimit) 而言的
+	// 比如返回 i==0 的话，其实对应的是 restart point rstart
+	// 注意配合上后面的 + rstart - 1 使用，那么最终 index 是：最后一个小于等于 key 的 restart point
 	index = sort.Search(
-		b.restartsLen-rstart-(b.restartsLen-rlimit),
+		b.restartsLen-rstart-(b.restartsLen-rlimit), // [0, rlimit - rstart)
 		func(i int) bool {
+			// 看从 rstart 算起， restart point i (based 0) 的 key 是否比 key 大
+
+			// [rstart, rlimit] 上的第 i 个 offset，比如 i==0 的话，就是 rstart 这个 restart point
+			// offset 就定位到这个 restart point 指向的数据
+			// 因为 restart point 指向的数据没有“前面的”数据，所以 shared_length 必然等于 0
 			offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
-			offset++                                    // shared always zero, since this is a restart point
+			offset++ // shared always zero, since this is a restart point
+
 			v1, n1 := binary.Uvarint(b.data[offset:])   // key length
 			_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
-			m := offset + n1 + n2
+			m := offset + n1 + n2                       // key offset
 			return cmp.Compare(b.data[m:m+int(v1)], key) > 0
 		}) + rstart - 1
+
+	// 如果 [rstart, rlimit) 都比 key 大，那么最终调整 index=rstart，因为（调用方）最终是找第一个大于等于 key 的，这样一来对调用方来讲最终答案就是 rstart
+	// 如果 [rstart, rlimit) 都不比 key 大，那么最终 index=rlimit-1，即区间上的最后一个 restart point，因为数据有序排布，所以这个最后的 restart point 之后的数据也是可能会大于等于 key 的
 	if index < rstart {
 		// The smallest key is greater-than key sought.
 		index = rstart
@@ -90,22 +105,27 @@ func (b *block) restartOffset(index int) int {
 	return int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*index:]))
 }
 
+// n: 读取的这条 k/v 的总存储长度，包括 shared_bytes, unshared_bytes 等信息的所有 bytes
 func (b *block) entry(offset int) (key, value []byte, nShared, n int, err error) {
+
+	// offset 不应该伸展到 restartsOffset 区域
 	if offset >= b.restartsOffset {
 		if offset != b.restartsOffset {
 			err = &ErrCorrupted{Reason: "entries offset not aligned"}
 		}
 		return
 	}
+
 	v0, n0 := binary.Uvarint(b.data[offset:])       // Shared prefix length
-	v1, n1 := binary.Uvarint(b.data[offset+n0:])    // Key length
+	v1, n1 := binary.Uvarint(b.data[offset+n0:])    // 注：Unshard key length
 	v2, n2 := binary.Uvarint(b.data[offset+n0+n1:]) // Value length
 	m := n0 + n1 + n2
-	n = m + int(v1) + int(v2)
+	n = m + int(v1) + int(v2) // 一条 k/v 的长度
 	if n0 <= 0 || n1 <= 0 || n2 <= 0 || offset+n > b.restartsOffset {
 		err = &ErrCorrupted{Reason: "entries corrupted"}
 		return
 	}
+
 	key = b.data[offset+m : offset+m+int(v1)]
 	value = b.data[offset+m+int(v1) : offset+n]
 	nShared = int(v0)
@@ -122,8 +142,8 @@ type dir int
 
 const (
 	dirReleased dir = iota - 1
-	dirSOI
-	dirEOI // 到了流的尾部，在用 dir 表达iterator的状态
+	dirSOI          // 在 iteration 的头部，Start Of Iteration
+	dirEOI          // 到了 iteration 的尾部，在用 dir 表达iterator的状态
 	dirBackward
 	dirForward
 )
@@ -139,14 +159,14 @@ type blockIter struct {
 	prevOffset   int
 	prevNode     []int
 	prevKeys     []byte
-	restartIndex int
+	restartIndex int // 注：the index of restart point
 	// Iterator direction.
 	dir dir
 	// Restart index slice range.
-	riStart int
-	riLimit int
+	riStart int // 框定 iterator 的范围，起始的 restart point index
+	riLimit int // 框定 iterator 的范围，结束的 restart point index（不包括）
 	// Offset slice range.
-	offsetStart     int
+	offsetStart     int // 框定 iterator 的范围，起始的 offset
 	offsetRealStart int
 	offsetLimit     int
 	// Error.
@@ -232,6 +252,8 @@ func (i *blockIter) Seek(key []byte) bool {
 		return false
 	}
 
+	// 按照 restart point 二分查找
+	// 找第一个小于 key 的 restart point
 	ri, offset, err := i.block.seek(i.tr.cmp, i.riStart, i.riLimit, key)
 	if err != nil {
 		i.sErr(err)
@@ -242,6 +264,8 @@ func (i *blockIter) Seek(key []byte) bool {
 	if i.dir == dirSOI || i.dir == dirEOI {
 		i.dir = dirForward
 	}
+
+	// 最终找第一个大于等于 key 的记录
 	for i.Next() {
 		if i.tr.cmp.Compare(i.key, key) >= 0 {
 			return true
@@ -266,8 +290,8 @@ func (i *blockIter) Next() bool {
 		i.prevKeys = i.prevKeys[:0]
 	}
 
-	// 使用 i.offset 在作iteration
-	// 为什么时一个循环？如果多次循环，那么 i.key 和 i.value 之前的值不久被覆盖了吗？s
+	// 使用 i.offset 作 iteration
+	// 把 i.offset 推进到 i.offsetRealStart
 	for i.offset < i.offsetRealStart {
 		key, value, nShared, n, err := i.block.entry(i.offset)
 		if err != nil {
@@ -280,10 +304,11 @@ func (i *blockIter) Next() bool {
 			return false
 		}
 
-		// 读到新的key-value pair
+		// 读到新的 k/v
+		// 注意：这里新读到的 key 是由 shared + unshared 拼凑出来的
 		i.key = append(i.key[:nShared], key...)
 		i.value = value
-		i.offset += n
+		i.offset += n // 跨过整条 k/v
 	}
 
 	if i.offset >= i.offsetLimit {
@@ -533,7 +558,9 @@ type Reader struct {
 	filter         filter.Filter
 	verifyChecksum bool
 
-	dataEnd                   int64
+	dataEnd int64
+
+	// indexBH: data index block handle，检索 data blocks
 	metaBH, indexBH, filterBH blockHandle
 	indexBlock                *block
 	filterBlock               *filterBlock

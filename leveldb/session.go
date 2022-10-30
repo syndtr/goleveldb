@@ -213,6 +213,7 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 	defer v.release()
 
 	// spawn new version based on current version
+	// 记录在 current version 中！
 	nv := v.spawn(r, trivial)
 
 	// abandon useless version id to prevent blocking version processing loop.

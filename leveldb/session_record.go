@@ -39,9 +39,11 @@ type cpRecord struct {
 	ikey  internalKey
 }
 
+// add table Record
+// add SSTable
 type atRecord struct {
-	level int
-	num   int64
+	level int   // 把 table 添加到第几个 level
+	num   int64 // fileDesc num
 	size  int64
 	imin  internalKey
 	imax  internalKey
@@ -53,7 +55,7 @@ type dtRecord struct {
 }
 
 type sessionRecord struct {
-	hasRec         int
+	hasRec         int // enum, addTable: 7
 	comparer       string
 	journalNum     int64
 	prevJournalNum int64

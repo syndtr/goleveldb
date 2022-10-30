@@ -328,6 +328,7 @@ func (v *version) offsetOf(ikey internalKey) (n int64, err error) {
 	return
 }
 
+// maxLevel 通常只用于 testing，prod 使用中取 0
 func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 	if maxLevel > 0 {
 		if len(v.levels) == 0 {

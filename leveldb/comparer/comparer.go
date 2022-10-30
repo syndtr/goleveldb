@@ -45,13 +45,21 @@ type Comparer interface {
 	//
 	// Either contents of a or b should not by any means modified. Doing so
 	// may cause corruption on the internal state.
+	//
+	// 以 LevelDB 提供的 bytes comparer，a = {0xff, 0xff, 0x11}, b = {0xff, 0xff, 0x1A, ...} 来讲，
+	// 前提是 b > a，否则返回 nil
+	// Separator(dst, a, b) 的结果是：dst = dst + {0xff, 0xff, 0x12}
+	// “分隔”体现在 dst 的最后一个 0x12 把 a 和 b 给分隔开了
 	Separator(dst, a, b []byte) []byte
 
 	// Successor appends a sequence of bytes x to dst such that x >= b, where
 	// 'less than' is consistent with Compare. An implementation should return
 	// nil if x equal to b.
-	//
 	// Contents of b should not by any means modified. Doing so may cause
 	// corruption on the internal state.
+	//
+	// 以 LevelDB 提供的 bytes comparer，b = {0xff, 0xff, 0x1A, ...} 来讲， Successor(dst, b) 的结果是：
+	// dst = dst + {0xff, 0xff, 0x1B}，注意结尾是比 0x1A 大了 1 的 0x1B
+	// 如果 b 里面都是 0xff，会返回 nil
 	Successor(dst, b []byte) []byte
 }

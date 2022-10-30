@@ -190,6 +190,10 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 		}
 
 	merge:
+		// 只要容量还有剩余，就 merge 下一个 Write，直到超出容量上限
+		// 对于 merge 进来的 Write，通知负责 Write 的一端这个 Write 已经被 merge，于是负责的那一方可以不用管了，我们这里会负责到底，直到 Write 成功或失败
+		// 对于因为超出了容量，merge 不进来的那个 Write，我们通知它的负责人“这个 Write 得由你自己负责了，没赶上上一波发车”，
+		// Write Lock 交接给那个负责人，它可以继续执行从它开始的 merge write
 		for mergeLimit > 0 {
 			select {
 			case incoming := <-db.writeMergeC: // 不断合并可得的写请求，可能是要合并一个 batch write，或者合并一个 put
@@ -220,7 +224,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 				}
 				sync = sync || incoming.sync
 				merged++
-				db.writeMergedC <- true
+				db.writeMergedC <- true // 通知各个 Write，这次操作已经被 merge 了
 
 			default:
 				break merge
@@ -239,6 +243,7 @@ func (db *DB) writeLocked(batch, ourBatch *Batch, merge, sync bool) error {
 	// Write journal.
 	// 先写 journal，journal 写成功了就是 Write 成功了
 	// journal 的 seq 写入的时候用的是相同的 seq
+	// journal 包含了所有的 batches，同时成功或失败
 	if err := db.writeJournal(batches, seq, sync); err != nil {
 		db.unlockWrite(overflow, merged, err)
 		return err
@@ -374,6 +379,8 @@ func (db *DB) putRec(kt keyType, key, value []byte, wo *opt.WriteOptions) error 
 	batch := db.batchPool.Get().(*Batch)
 	batch.Reset()
 	batch.appendRec(kt, key, value)
+
+	// 这里传参 batch 和 ourBatch 都是同一个 `batch`，所以函数内 ourBatch 在合并 put 的时候，就相当于那个共同的 `batch` 把 put 合并掉了
 	return db.writeLocked(batch, batch, merge, sync)
 }
 
