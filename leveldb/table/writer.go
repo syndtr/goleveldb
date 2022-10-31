@@ -225,6 +225,7 @@ func (w *Writer) flushPendingBH(key []byte) error {
 	if separator == nil {
 		// 比如当 len(key) == 0 && w.dataBlock.prevKey 里面都是 0xff 时，separator 将会是 nil
 		// 或者 w.dataBlock.prevKey == key 时，separator 也会是 nil
+		// 总之，separator 得是大于等于 w.dataBlock 中的所有 key 的
 		separator = w.dataBlock.prevKey
 	} else {
 		w.comparerScratch = separator

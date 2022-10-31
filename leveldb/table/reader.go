@@ -802,6 +802,7 @@ func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Ran
 	return bi
 }
 
+// 读取 data block 的 iterator
 func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, verifyChecksum, fillCache bool) iterator.Iterator {
 	b, rel, err := r.readBlockCached(dataBH, verifyChecksum, fillCache)
 	if err != nil {
@@ -876,6 +877,17 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	index := r.newBlockIter(indexBlock, nil, nil, true)
 	defer index.Release()
 
+	// index 也是一个 data block
+	// 所以 index.Seek 方法也是去找第一个大于等于 key 的记录，只是该条记录的 val 是 data block handle
+	// data block handle 的 key 是这个 block 的 successor，所以比所索引的 data block 的所有记录都大
+	//
+	// 所以我们从第一个大于等于 key 的 data block handle 开始找就可以了，
+	// 前面的那个 data block 因为索引键都小于要找的key了，里面的数据就更不可能大于等于 key 了
+	//
+	// Why: data index 的 key 是 data block 的 last key 的 successor，
+	// 如果 user key 就全是 0xff, 0xff, 0xff...，那么 last key 的 successor 就必然会增加 seq number 的字段
+	// 那么，这个 successor 不就会“小于” data block 里面的记录了吗？不就不是 "successor" 了吗？
+	// 当然，这种情况生产环境下不大可能会出现
 	if !index.Seek(key) {
 		if err = index.Error(); err == nil {
 			err = ErrNotFound
@@ -883,6 +895,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		return
 	}
 
+	// 找到了潜在的 data block
 	dataBH, n := decodeBlockHandle(index.Value())
 	if n == 0 {
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
@@ -893,6 +906,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	if filtered && r.filter != nil {
 		filterBlock, frel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
+			// 使用 filter 来提前判断 key 不存在，省去读取 block 的内容再查询
 			if !filterBlock.contains(r.filter, dataBH.offset, key) {
 				frel.Release()
 				return nil, nil, ErrNotFound
@@ -904,6 +918,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	}
 
 	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
+	// 在具体的 block 中去找
 	if !data.Seek(key) {
 		data.Release()
 		if err = data.Error(); err != nil {
