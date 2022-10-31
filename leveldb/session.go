@@ -55,8 +55,8 @@ type session struct {
 	stCompPtrs  []internalKey // compaction pointers; need external synchronization
 	stVersion   *version      // current version
 	ntVersionID int64         // next version id to assign
-	refCh       chan *vTask
-	relCh       chan *vTask
+	refCh       chan *vTask   // 注：reference version task
+	relCh       chan *vTask   // 注：release version task
 	deltaCh     chan *vDelta
 	abandon     chan int64
 	closeC      chan struct{}

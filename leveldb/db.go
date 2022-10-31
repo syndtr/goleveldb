@@ -778,6 +778,8 @@ func memGet(mdb *memdb.DB, ikey internalKey, icmp *iComparer) (ok bool, mv []byt
 	return
 }
 
+// 正常的查询 auxm 和 auxt 都为 nil
+// 猜：auxm and auxt is only for testing?
 func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
@@ -794,6 +796,8 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		}
 		defer m.decref()
 
+		// 依次从 memtable 和 immutable memtable 获取
+		// 如果找到的话，可以返回结果，因为找到的这个必然是 seq number 小于等于 seq 且是最大的那个，小的 seq number 会被 compaction
 		if ok, mv, me := memGet(m.DB, ikey, db.s.icmp); ok {
 			return append([]byte(nil), mv...), me
 		}

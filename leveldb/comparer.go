@@ -11,6 +11,7 @@ import (
 )
 
 // iComparer 处理关于 sequence 相关的逻辑
+// 感觉可以称之为 internal Comparer?
 type iComparer struct {
 	ucmp comparer.Comparer
 }
@@ -35,6 +36,7 @@ func (icmp *iComparer) Name() string {
 	return icmp.uName()
 }
 
+//
 func (icmp *iComparer) Compare(a, b []byte) int {
 	x := icmp.uCompare(internalKey(a).ukey(), internalKey(b).ukey())
 	if x == 0 {
