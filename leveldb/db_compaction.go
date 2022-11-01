@@ -272,6 +272,7 @@ func (db *DB) compactionCommit(name string, rec *sessionRecord) {
 	}, nil)
 }
 
+// 触发 immutable memtable 的 compaction
 func (db *DB) memCompaction() {
 	mdb := db.getFrozenMem()
 	if mdb == nil {
@@ -701,7 +702,7 @@ func (db *DB) pauseCompaction(ch chan<- struct{}) {
 // 是 compaction command
 // 只有两种 cmd：cAuto | cRange
 type cCmd interface {
-	ack(err error)
+	ack(err error) // 回传 ack 消息
 }
 
 type cAuto struct {
@@ -712,6 +713,7 @@ type cAuto struct {
 func (r cAuto) ack(err error) {
 	if r.ackC != nil {
 		defer func() {
+			// 防止 r.ackC 被意外 close
 			_ = recover()
 		}()
 		r.ackC <- err
@@ -736,6 +738,7 @@ func (r cRange) ack(err error) {
 // This will trigger auto compaction but will not wait for it.
 func (db *DB) compTrigger(compC chan<- cCmd) {
 	select {
+	// 注意：尽量地触发 compaction，如果当前 compC 写不进去，实际的 compaction 可能就不触发了
 	case compC <- cAuto{}:
 	default:
 	}
@@ -786,6 +789,7 @@ func (db *DB) compTriggerRange(compC chan<- cCmd, level int, min, max []byte) (e
 	return err
 }
 
+// db 启动时一个 go routine 专门执行此函数，进行 memtable 的 compaction
 func (db *DB) mCompaction() {
 	var x cCmd
 
