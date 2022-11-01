@@ -368,7 +368,7 @@ type Writer struct {
 
 // NewWriter returns a new Writer.
 func NewWriter(w io.Writer) *Writer {
-	f, _ := w.(flusher)
+	f, _ := w.(flusher) // why: 从代码来看好像 storeage.Write 并没有 flush 方法，那怎么转化为 flusher ？
 	return &Writer{
 		w: w,
 		f: f,

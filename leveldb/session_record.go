@@ -55,7 +55,7 @@ type dtRecord struct {
 }
 
 type sessionRecord struct {
-	hasRec         int // enum, addTable: 7
+	hasRec         int // bitsmap, addTable: 7
 	comparer       string
 	journalNum     int64
 	prevJournalNum int64

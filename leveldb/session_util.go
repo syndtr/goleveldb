@@ -264,6 +264,7 @@ func (s *session) tLen(level int) int {
 }
 
 // Set current version to v.
+// r: 包含下一个 version 相对于当前 stVersion 的 change
 func (s *session) setVersion(r *sessionRecord, v *version) {
 	s.vmu.Lock()
 	defer s.vmu.Unlock()
@@ -367,7 +368,7 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 		}
 
 		if !r.has(recSeqNum) {
-			r.setSeqNum(s.stSeqNum)
+			r.setSeqNum(s.stSeqNum) // mem compacted seq
 		}
 
 		for level, ik := range s.stCompPtrs {
@@ -455,6 +456,8 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	if err != nil {
 		return
 	}
+
+	// 默认对 manifest 文件用 sync，GetNoSync 默认返回 false
 	if !s.o.GetNoSync() {
 		err = writer.Sync()
 		if err != nil {
@@ -466,6 +469,7 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 }
 
 // Flush record to disk.
+// Manifest 的写入复用了 journal
 func (s *session) flushManifest(rec *sessionRecord) (err error) {
 	s.fillRecord(rec, false)
 	w, err := s.manifest.Next()

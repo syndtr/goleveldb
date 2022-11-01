@@ -310,10 +310,11 @@ func (v *version) newStaging() *versionStaging {
 // Spawn a new version based on this version.
 func (v *version) spawn(r *sessionRecord, trivial bool) *version {
 	staging := v.newStaging()
-	staging.commit(r)
+	staging.commit(r) // 将变更记录、收集到 version staging 中
 	return staging.finish(trivial)
 }
 
+// 把 v 的所有 level 都添加到 r 中
 func (v *version) fillRecord(r *sessionRecord) {
 	for level, tables := range v.levels {
 		for _, t := range tables {
@@ -440,11 +441,13 @@ type tablesScratch struct {
 	deleted map[int64]struct{}
 }
 
+// 描述下一个 version 相比于 base version 的变化，增加了哪些 SSTable，删掉了哪些 SSTable
 type versionStaging struct {
 	base   *version
 	levels []tablesScratch
 }
 
+// 之所以叫 "Scratch"，是因为我们需要收集 rec 形成这个 version staging，收集的过程像是 from the scratch
 func (p *versionStaging) getScratch(level int) *tablesScratch {
 	if level >= len(p.levels) {
 		newLevels := make([]tablesScratch, level+1)
@@ -459,12 +462,14 @@ func (p *versionStaging) commit(r *sessionRecord) {
 	for _, r := range r.deletedTables {
 		scratch := p.getScratch(r.level)
 		if r.level < len(p.base.levels) && len(p.base.levels[r.level]) > 0 {
+			// 只有 base version 真的有要删的这个 level，这里做一个简单的预 check
 			if scratch.deleted == nil {
 				scratch.deleted = make(map[int64]struct{})
 			}
 			scratch.deleted[r.num] = struct{}{}
 		}
 		if scratch.added != nil {
+			// 如果是要删的，就不能继续在 add 里面了，预处理
 			delete(scratch.added, r.num)
 		}
 	}
@@ -482,6 +487,7 @@ func (p *versionStaging) commit(r *sessionRecord) {
 	}
 }
 
+// 由 version staging 构建一个新的 version
 func (p *versionStaging) finish(trivial bool) *version {
 	// Build new version.
 	nv := newVersion(p.base.s)

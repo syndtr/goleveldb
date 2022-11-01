@@ -42,7 +42,7 @@ type session struct {
 	stTempFileNum    int64
 	stSeqNum         uint64 // last mem compacted seq; need external synchronization
 
-	stor     *iStorage
+	stor     *iStorage // 底层是 file storage
 	storLock storage.Locker
 	o        *cachedOptions
 	icmp     *iComparer
@@ -208,6 +208,7 @@ func (s *session) recover() (err error) {
 }
 
 // Commit session; need external synchronization.
+// Commit 一次 compaction
 func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 	v := s.version()
 	defer v.release()

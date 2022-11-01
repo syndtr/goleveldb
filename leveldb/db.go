@@ -104,7 +104,7 @@ func openDB(s *session) (*DB, error) {
 		snapsList: list.New(),
 		// Write
 		batchPool:    sync.Pool{New: newBatch},
-		writeMergeC:  make(chan writeMerge),
+		writeMergeC:  make(chan writeMerge), // 用来合并 Write 操作
 		writeMergedC: make(chan bool),
 		writeLockC:   make(chan struct{}, 1), // 注意：channel 的 buffer 为 1，因为首个去获取 Write Lock 的 goroutine 必须得能通过 chan<- 拿到 Lock
 		writeAckC:    make(chan error),
