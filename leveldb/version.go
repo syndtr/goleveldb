@@ -122,7 +122,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 			// Level-0 files may overlap each other. Find all files that
 			// overlap ukey.
 			for _, t := range tables {
-				if t.overlaps(v.s.icmp, ukey, ukey) {
+				if t.overlaps(v.s.icmp, ukey, ukey) { // 按照 ukey 来做判定
 					if !f(level, t) {
 						return
 					}
@@ -271,6 +271,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	return
 }
 
+// 触发 ikey 所在
 func (v *version) sampleSeek(ikey internalKey) (tcomp bool) {
 	var tset *tSet
 
@@ -314,6 +315,7 @@ func (v *version) spawn(r *sessionRecord, trivial bool) *version {
 	return staging.finish(trivial)
 }
 
+// 把 version 中的 SSTables，全量转化为 atRecords
 func (v *version) fillRecord(r *sessionRecord) {
 	for level, tables := range v.levels {
 		for _, t := range tables {

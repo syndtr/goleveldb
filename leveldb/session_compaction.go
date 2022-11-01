@@ -100,10 +100,14 @@ func (s *session) getCompactionRange(sourceLevel int, umin, umax []byte, noLimit
 	v := s.version()
 
 	if sourceLevel >= len(v.levels) {
+		// sourceLevel >= 7，没有这样的 level
 		v.release()
 		return nil
 	}
 
+	// 注意：sourceLevel==0 时，因为 L0 上的 SSTable 可能有交叠，所以需要拓展 umin, umax 的范围
+	// 比如在 L0 上，umax 涉及到了一个新的 SSTable，那么这个 SSTable 的 max 会拓宽一点，就可能会交叠上下一个新的 SSTable
+	// 所以需要拓展 umin, umax 的范围，直到不可以继续拓展
 	t0 := v.levels[sourceLevel].getOverlaps(nil, s.icmp, umin, umax, sourceLevel == 0)
 	if len(t0) == 0 {
 		v.release()

@@ -39,7 +39,7 @@ type cpRecord struct {
 	ikey  internalKey
 }
 
-// add table Record
+// add table record
 // add SSTable
 type atRecord struct {
 	level int   // 把 table 添加到第几个 level
@@ -49,6 +49,7 @@ type atRecord struct {
 	imax  internalKey
 }
 
+// delete table record
 type dtRecord struct {
 	level int
 	num   int64

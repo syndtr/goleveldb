@@ -208,6 +208,7 @@ func (s *session) recover() (err error) {
 }
 
 // Commit session; need external synchronization.
+// r: 保存 new version 相比于当前 version 的 change
 func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 	v := s.version()
 	defer v.release()
@@ -226,15 +227,21 @@ func (s *session) commit(r *sessionRecord, trivial bool) (err error) {
 
 	if s.manifest == nil {
 		// manifest journal writer not yet created, create one
+		// why: 为什么要传 r，而不是传 nil ? 应该是保存新的全量 version 到 manifest 中就可以了 ?
+		// nv 已经是新的 version 了
 		err = s.newManifest(r, nv)
 	} else if s.manifest.Size() >= s.o.GetMaxManifestFileSize() {
 		// pass nil sessionRecord to avoid over-reference table file
+		// 当 manifest 的大小超出了阈值，就把 new version 里面的 SSTables 刷到一个全新的 manifest 里面
+		// 这个 manifest 就只包含 atRecord，不会有 dtRecord 了
 		err = s.newManifest(nil, nv)
 	} else {
+		// 当前已经有了 manifest，就将 version 的变更继续写在这个 manifest 中
 		err = s.flushManifest(r)
 	}
 
 	// finally, apply new version if no error rise
+	// 注意：这一步是在 new version 的 manifest 写入成功了之后才做的 version 切换
 	if err == nil {
 		s.setVersion(r, nv)
 	}

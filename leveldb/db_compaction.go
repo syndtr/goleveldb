@@ -332,6 +332,9 @@ func (db *DB) memCompaction() {
 
 	// Commit.
 	stats.startTimer()
+
+	// 写入 new version 的 manifest 到磁盘，完成持久化，然后切换当前 stVersion 到 new version
+	// new version 是在当前 stVersion 上 apply 了 rec 中的 change 之后产生的
 	db.compactionCommit("memdb", rec)
 	stats.stopTimer()
 
@@ -357,6 +360,8 @@ func (db *DB) memCompaction() {
 		}
 	}
 
+	// 注意：在做 memtable compaction 的时候，major compaction 是被停止的，也就是说不存在并行的 compaction
+	// 在 memtable compaction 结束之后会 trigger 一次 major compaction
 	// Trigger table compaction.
 	db.compTrigger(db.tcompCmdC)
 }
@@ -624,6 +629,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	}
 }
 
+// 注意，这里的
 func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
@@ -681,6 +687,9 @@ func (db *DB) resumeWrite() bool {
 	return v.tLen(0) < db.s.o.GetWriteL0PauseTrigger()
 }
 
+// 暂停 table compaction
+// 在 memtable compaction 期间，会暂停 table compaction
+// pause 直到 ch 可以写入
 func (db *DB) pauseCompaction(ch chan<- struct{}) {
 	select {
 	case ch <- struct{}{}:
@@ -689,7 +698,8 @@ func (db *DB) pauseCompaction(ch chan<- struct{}) {
 	}
 }
 
-// 是 compaction command?
+// 是 compaction command
+// 只有两种 cmd：cAuto | cRange
 type cCmd interface {
 	ack(err error)
 }
@@ -710,7 +720,7 @@ func (r cAuto) ack(err error) {
 
 type cRange struct {
 	level    int
-	min, max []byte
+	min, max []byte // 注意：min, max 都是 user key，用 user key 来在选择参与 compaction 的 SSTable 时判定是否重叠（是否选中）
 	ackC     chan<- error
 }
 
@@ -738,6 +748,7 @@ func (db *DB) compTriggerWait(compC chan<- cCmd) (err error) {
 	// Send cmd.
 	select {
 	case compC <- cAuto{ch}:
+		// 后续会通过读 <-ch 来等待 compaction 的结果
 	case err = <-db.compErrC:
 		return
 	case <-db.closeC:
@@ -807,6 +818,7 @@ func (db *DB) mCompaction() {
 	}
 }
 
+// 有专门的 go routine 来执行 tCompaction
 func (db *DB) tCompaction() {
 	var (
 		x     cCmd
@@ -833,7 +845,9 @@ func (db *DB) tCompaction() {
 		if db.tableNeedCompaction() {
 			select {
 			case x = <-db.tcompCmdC:
+				// 等到了 table compaction command
 			case ch := <-db.tcompPauseC:
+				// pause table compaction，直到 ch 可以写入
 				db.pauseCompaction(ch)
 				continue
 			case <-db.closeC:
@@ -863,6 +877,7 @@ func (db *DB) tCompaction() {
 				return
 			}
 		}
+
 		if x != nil {
 			switch cmd := x.(type) {
 			case cAuto:
@@ -871,6 +886,7 @@ func (db *DB) tCompaction() {
 					if db.resumeWrite() {
 						x.ack(nil)
 					} else {
+						// L0 的 SSTable 还很多，block 住了 Wrtie 操作
 						waitQ = append(waitQ, x)
 					}
 				}

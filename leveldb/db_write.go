@@ -403,6 +403,7 @@ func (db *DB) Delete(key []byte, wo *opt.WriteOptions) error {
 	return db.putRec(keyTypeDel, key, nil, wo)
 }
 
+// 注意：这里的 min, max 都是 user key，是使用 user key 来判定是否重叠
 func isMemOverlaps(icmp *iComparer, mem *memdb.DB, min, max []byte) bool {
 	iter := mem.NewIterator(nil)
 	defer iter.Release()
@@ -427,6 +428,8 @@ func (db *DB) CompactRange(r util.Range) error {
 	// Lock writer.
 	select {
 	case db.writeLockC <- struct{}{}:
+		// 获得了 Write lock，此时 DB 的 Write 操作会被 block
+		// 获得这个锁是为了完成 mem compaction
 	case err := <-db.compPerErrC:
 		return err
 	case <-db.closeC:
@@ -447,9 +450,12 @@ func (db *DB) CompactRange(r util.Range) error {
 		}
 		<-db.writeLockC
 		if err := db.compTriggerWait(db.mcompCmdC); err != nil {
+			// 等待 mem compaction 完毕，也就是刚才在 rotateMem 时被转化为 frozen memtable 的（也就是执行 CompactRange 时的当前 memtable）完成 mem compaction
+			// 此时就完成了 memtable 的 compaction，所以 Write lock 就被释放了
 			return err
 		}
 	} else {
+		// memtable 与 range 不重叠，不需要进行 mem compaction，所以直接释放锁
 		<-db.writeLockC
 	}
 
