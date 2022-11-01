@@ -158,16 +158,16 @@ type compaction struct {
 	s *session
 	v *version
 
-	typ           int
-	sourceLevel   int
-	levels        [2]tFiles
+	typ           int       // compaction 的 type: L0, non-L0, seek compaction
+	sourceLevel   int       // compaction 的 source level，发起 compaction 的 level
+	levels        [2]tFiles // 参与 compaction 的两个 level 上的文件
 	maxGPOverlaps int64
 
-	gp                tFiles
+	gp                tFiles // sourceLevel+2 上的、与某次 compaction 拓展之后的 range 相重叠的文件，gp 的意思是 grad parent
 	gpi               int
 	seenKey           bool
 	gpOverlappedBytes int64
-	imin, imax        internalKey
+	imin, imax        internalKey // 参与 compaction 的 sourceLevel 上的 internalKey range
 	tPtrs             []int
 	released          bool
 
@@ -230,6 +230,8 @@ func (c *compaction) expand() {
 			xmin, xmax := exp0.getRange(c.s.icmp)
 			exp1 := vt1.getOverlaps(nil, c.s.icmp, xmin.ukey(), xmax.ukey(), false)
 			if len(exp1) == len(t1) {
+				// 增选了 t0 上的 SSTable，并没有使的 t1 的 SSTable 被增选，即可以确定参与 compaction 的文件
+				// 为了避免这种 expand 变得无穷无尽
 				c.s.logf("table@compaction expanding L%d+L%d (F·%d S·%s)+(F·%d S·%s) -> (F·%d S·%s)+(F·%d S·%s)",
 					c.sourceLevel, c.sourceLevel+1, len(t0), shortenb(t0.size()), len(t1), shortenb(t1.size()),
 					len(exp0), shortenb(exp0.size()), len(exp1), shortenb(exp1.size()))

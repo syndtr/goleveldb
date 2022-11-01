@@ -630,7 +630,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	}
 }
 
-// 注意，这里的
+// 注意，这里的 umin, umax  指的是 user key
 func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
@@ -638,6 +638,7 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 			db.tableCompaction(c, true)
 		}
 	} else {
+		// level==-1 时，对 DB 所有的 SSTable 做 compaction 整理
 		// Retry until nothing to compact.
 		for {
 			compacted := false

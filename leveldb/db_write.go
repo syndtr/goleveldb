@@ -429,7 +429,7 @@ func (db *DB) CompactRange(r util.Range) error {
 	select {
 	case db.writeLockC <- struct{}{}:
 		// 获得了 Write lock，此时 DB 的 Write 操作会被 block
-		// 获得这个锁是为了完成 mem compaction
+		// 获得这个锁是为了完成 memtable 的 compaction，要锁定 memtable 的内容
 	case err := <-db.compPerErrC:
 		return err
 	case <-db.closeC:

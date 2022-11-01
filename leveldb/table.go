@@ -196,6 +196,7 @@ func (tf tFiles) overlaps(icmp *iComparer, umin, umax []byte, unsorted bool) boo
 // If overlapped is true then the search will be restarted if umax
 // expanded.
 // The dst content will be overwritten.
+// why: 为什么要用 ukey 参与 overlap 的判断？
 func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, overlapped bool) tFiles {
 	// Short circuit if tf is empty
 	if len(tf) == 0 {
@@ -225,11 +226,13 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 				end = len(tf)
 			} else if bytes.Compare(tf[index].imin.ukey(), umax) <= 0 {
 				// The max ukey overlaps with the index file, expand it.
+				// 注意：end 是开区间，所以这里要等于 index+1，是不包括 index+1 这个 SSTable 的
 				end = index + 1
 			} else {
 				end = index
 			}
 		} else {
+			// 注意：end 是开区间，所以这里要等于 len(tf)，也就是不存在的一个文件
 			end = len(tf)
 		}
 		// Ensure the overlapped file indexes are valid.
