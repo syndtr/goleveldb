@@ -350,6 +350,7 @@ func (s *session) setCompPtr(level int, ik internalKey) {
 // Get compaction ptr at given level; need external synchronization.
 func (s *session) getCompPtr(level int) internalKey {
 	if level >= len(s.stCompPtrs) {
+		// 从最小的 ikey 开始
 		return nil
 	}
 	return s.stCompPtrs[level]

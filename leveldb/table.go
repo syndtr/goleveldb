@@ -196,7 +196,7 @@ func (tf tFiles) overlaps(icmp *iComparer, umin, umax []byte, unsorted bool) boo
 // If overlapped is true then the search will be restarted if umax
 // expanded.
 // The dst content will be overwritten.
-// why: 为什么要用 ukey 参与 overlap 的判断？
+// why: 为什么要用 ukey 参与 overlap 的判断？Ans：使的 ukey 被完整地存在在一个 Level 中，不然如果部分被 dump 的话，可能某个 snapshot 读的时候读到旧的数据
 func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, overlapped bool) tFiles {
 	// Short circuit if tf is empty
 	if len(tf) == 0 {

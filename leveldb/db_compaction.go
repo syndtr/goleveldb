@@ -443,6 +443,7 @@ func (b *tableCompactionBuilder) cleanup() error {
 	return nil
 }
 
+// compactionTransactInterface
 func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error) {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
@@ -569,6 +570,7 @@ func (b *tableCompactionBuilder) revert() error {
 	return nil
 }
 
+// 执行 SSTable compaction
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	defer c.release()
 
@@ -576,6 +578,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	rec.addCompPtr(c.sourceLevel, c.imax)
 
 	if !noTrivial && c.trivial() {
+		// 只需要移动 SSTable
 		t := c.levels[0][0]
 		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.fd.Num, c.sourceLevel+1)
 		rec.delTable(c.sourceLevel, t.fd.Num)
@@ -589,6 +592,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		for _, t := range tables {
 			stats[i].read += t.size
 			// Insert deleted tables into record
+			// 旧的 SSTable 都是可以删除的
 			rec.delTable(c.sourceLevel+i, t.fd.Num)
 		}
 	}
@@ -604,7 +608,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		stat1:     &stats[1],
 		minSeq:    minSeq,
 		strict:    db.s.o.GetStrict(opt.StrictCompaction),
-		tableSize: db.s.o.GetCompactionTableSize(c.sourceLevel + 1),
+		tableSize: db.s.o.GetCompactionTableSize(c.sourceLevel + 1), // 在 default compaction table size 默认为 2MB，切 default multiplier 为 1 的情况下，tableSize 为 2MB
 	}
 	db.compactionTransact("table@build", b)
 

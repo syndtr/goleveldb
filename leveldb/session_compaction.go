@@ -67,12 +67,14 @@ func (s *session) pickCompaction() *compaction {
 		if cptr != nil && sourceLevel > 0 {
 			n := len(tables)
 			if i := sort.Search(n, func(i int) bool {
+				// 选取第一个 imax 大于 cptr 的 SSTable
 				return s.icmp.Compare(tables[i].imax, cptr) > 0
 			}); i < n {
 				t0 = append(t0, tables[i])
 			}
 		}
 		if len(t0) == 0 {
+			// 如果 ctpr==nil 或 cptr已经到了最后一个 SSTable，则从头开始循环
 			t0 = append(t0, tables[0])
 		}
 		if sourceLevel == 0 {
@@ -81,6 +83,7 @@ func (s *session) pickCompaction() *compaction {
 			typ = nonLevel0Compaction
 		}
 	} else {
+		// 执行 seek compaction
 		if p := atomic.LoadPointer(&v.cSeek); p != nil {
 			ts := (*tSet)(p)
 			sourceLevel = ts.level
@@ -108,6 +111,7 @@ func (s *session) getCompactionRange(sourceLevel int, umin, umax []byte, noLimit
 	// 注意：sourceLevel==0 时，因为 L0 上的 SSTable 可能有交叠，所以需要拓展 umin, umax 的范围
 	// 比如在 L0 上，umax 涉及到了一个新的 SSTable，那么这个 SSTable 的 max 会拓宽一点，就可能会交叠上下一个新的 SSTable
 	// 所以需要拓展 umin, umax 的范围，直到不可以继续拓展
+	// 使用的是 ukey，完整的 ukey 要完整地被 dump，不能出现部分 ukey 被 dump 了，这样会出现查询的错误
 	t0 := v.levels[sourceLevel].getOverlaps(nil, s.icmp, umin, umax, sourceLevel == 0)
 	if len(t0) == 0 {
 		v.release()
@@ -308,7 +312,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 
 	// Options.
 	ro := &opt.ReadOptions{
-		DontFillCache: true,
+		DontFillCache: true, // 作 compaction 的时候读取的数据跟业务无关，不要填充 cache
 		Strict:        opt.StrictOverride,
 	}
 	strict := c.s.o.GetStrict(opt.StrictCompaction)
