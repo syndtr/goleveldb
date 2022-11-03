@@ -374,6 +374,7 @@ type tableCompactionBuilder struct {
 	rec   *sessionRecord
 	stat1 *cStatStaging
 
+	// 暂存 snapshot 状态
 	snapHasLastUkey bool
 	snapLastUkey    []byte
 	snapLastSeq     uint64
@@ -384,7 +385,7 @@ type tableCompactionBuilder struct {
 	kerrCnt int
 	dropCnt int
 
-	minSeq    uint64
+	minSeq    uint64 // compaction 时的最小 seq
 	strict    bool
 	tableSize int
 
@@ -444,6 +445,7 @@ func (b *tableCompactionBuilder) cleanup() error {
 }
 
 // compactionTransactInterface
+// b 记录了 compaction 的状态
 func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error) {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
@@ -491,9 +493,13 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			shouldStop := !resumed && b.c.shouldStopBefore(ikey)
 
 			if !hasLastUkey || b.s.icmp.uCompare(lastUkey, ukey) != 0 {
+				// 做 iteration 的时候相同的 ukey 必然是连在一起的
+				// 这时遇到了 ukey 的切换
 				// First occurrence of this user key.
 
 				// Only rotate tables if ukey doesn't hop across.
+				// 相同的 ukey 不会写到两个 SSTable 中
+				// 注意这里 b.flush 是以 uKey 切换了为前提的，也就是说 shouldStop 只在 ukey 切换时才有效，相同的 ukey 是不能 stop 的
 				if b.tw != nil && (shouldStop || b.needFlush()) {
 					if err := b.flush(); err != nil {
 						return err
@@ -509,6 +515,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 					b.snapDropCnt = b.dropCnt
 				}
 
+				// ukey 成为新的 lastUkey
 				hasLastUkey = true
 				lastUkey = append(lastUkey[:0], ukey...)
 				lastSeq = keyMaxSeq
@@ -517,8 +524,12 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			switch {
 			case lastSeq <= b.minSeq:
 				// Dropped because newer entry for same user key exist
+				// 注意：这里的 fallthrough 会直接掉落到下一个 case，无论下一个 case 的条件是否满足！
+				// 于是，ukey 的 seq 在 minSeq 之后的、非首个记录必然会 fallthrough 到下一个 case，就会被 drop 掉了
+				// fallthrough 用的刚刚好！
 				fallthrough // (A)
 			case kt == keyTypeDel && seq <= b.minSeq && b.c.baseLevelForKey(lastUkey):
+				// 对于 ukey 的 seq 在 minSeq 之后的、首个记录，且 keyType==del，更高层又没有这个 ukey 的，可以 drop
 				// For this user key:
 				// (1) there is no data in higher levels
 				// (2) data in lower levels will have larger seq numbers
@@ -528,11 +539,14 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 				// Therefore this deletion marker is obsolete and can be dropped.
 				lastSeq = seq
 				b.dropCnt++
-				continue
+				continue // 这条数据就不会被写到新的 SSTable 中了
 			default:
+				// 对于 ukey 的 seq > minSeq，即在 minSeq 之前的，会到 default，记录被写入
+				// 对于 ukey 的 seq 在 minSeq 之后的、首个记录（因为必然有 lastSeq > b.minSeq，不会命中前两个 case），如果其 keyType==val，那么会到 default，记录会被写入
 				lastSeq = seq
 			}
 		} else {
+			// key error is not nil
 			if b.strict {
 				return kerr
 			}
@@ -544,6 +558,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			b.kerrCnt++
 		}
 
+		// 写到新的 SSTable
 		if err := b.appendKV(ikey, iter.Value()); err != nil {
 			return err
 		}

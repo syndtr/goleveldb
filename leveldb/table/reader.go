@@ -159,7 +159,7 @@ type blockIter struct {
 	prevOffset   int
 	prevNode     []int
 	prevKeys     []byte
-	restartIndex int // 注：the index of restart point
+	restartIndex int // blockIter 当前下标所在的（在这个restart point后面）restart point index
 	// Iterator direction.
 	dir dir
 	// Restart index slice range.
@@ -168,7 +168,7 @@ type blockIter struct {
 	// Offset slice range.
 	offsetStart     int // 框定 iterator 的范围，起始的 offset
 	offsetRealStart int
-	offsetLimit     int
+	offsetLimit     int // 框定 iterator 的范围，结束的 offset，当 blockIter.offset==offsetLimit 的时候，表示 iteration 结束，不应该出现 offset > offsetLimit 的情况
 	// Error.
 	err error
 }
@@ -254,6 +254,7 @@ func (i *blockIter) Seek(key []byte) bool {
 
 	// 按照 restart point 二分查找
 	// 找第一个小于 key 的 restart point
+	// 因为 restart point 是到下一个 restart point 最小的 ikey，如果不是选小于 key 的话，就错过这个 key 了
 	ri, offset, err := i.block.seek(i.tr.cmp, i.riStart, i.riLimit, key)
 	if err != nil {
 		i.sErr(err)
@@ -274,6 +275,8 @@ func (i *blockIter) Seek(key []byte) bool {
 	return false
 }
 
+// 按照 dirForward 的方向，如果 blockIter 还有下一个值，读取这个值并返回 true
+// 只做 dirForward 方向
 func (i *blockIter) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
@@ -283,6 +286,7 @@ func (i *blockIter) Next() bool {
 	}
 
 	if i.dir == dirSOI {
+		// 回到起点
 		i.restartIndex = i.riStart
 		i.offset = i.offsetStart
 	} else if i.dir == dirBackward {
@@ -319,7 +323,7 @@ func (i *blockIter) Next() bool {
 		return false
 	}
 
-	key, value, nShared, n, err := i.block.entry(i.offset)
+	key, value, nShared, n, err := i.block.entry(i.offset) // n: 整条 entry 的 size，于是 offset+=n 会跳到 下一个 entry
 	if err != nil {
 		i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 		return false
@@ -329,7 +333,7 @@ func (i *blockIter) Next() bool {
 		return false
 	}
 
-	i.key = append(i.key[:nShared], key...)
+	i.key = append(i.key[:nShared], key...) // 当前的值由 shard+unshared 拼凑起来得到
 	i.value = value
 	i.prevOffset = i.offset
 	i.offset += n
@@ -783,6 +787,7 @@ func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Ran
 				bi.offsetStart = b.restartOffset(bi.riStart)
 				bi.offsetRealStart = bi.prevOffset
 			} else {
+				// 整个 block 都不在 range 内
 				bi.riStart = b.restartsLen
 				bi.offsetStart = b.restartsOffset
 				bi.offsetRealStart = b.restartsOffset

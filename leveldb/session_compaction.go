@@ -167,12 +167,12 @@ type compaction struct {
 	levels        [2]tFiles // 参与 compaction 的两个 level 上的文件
 	maxGPOverlaps int64
 
-	gp                tFiles // sourceLevel+2 上的、与某次 compaction 拓展之后的 range 相重叠的文件，gp 的意思是 grad parent
+	gp                tFiles // sourceLevel+2 上的、与某次 compaction expand 之后的 range 相重叠的文件，gp 的意思是 grad parent
 	gpi               int
 	seenKey           bool
 	gpOverlappedBytes int64
 	imin, imax        internalKey // 参与 compaction 的 sourceLevel 上的 internalKey range
-	tPtrs             []int
+	tPtrs             []int       // tPtrs[level] 是 level 上的一个 SSTable 的 index，用于在 compaction 的时候快速判断 ukey 是否不会在 sourceLevel+2 及更深的 level 上出现
 	released          bool
 
 	snapGPI               int
@@ -261,7 +261,12 @@ func (c *compaction) trivial() bool {
 	return len(c.levels[0]) == 1 && len(c.levels[1]) == 0 && c.gp.size() <= c.maxGPOverlaps
 }
 
+// 如果 ukey 只存在于 compaction 涉及到的两个 level，不在更高的 level 出现，返回 true，否则返回 false
+// "baseLevel" 的意思在此
+// 因为在 compaction 的过程中，从 iterator 出来的 ukey 必然是递增的，后面的 ukey 只会大于等于前面的 ukey
+// 所以这个函数内部用到的 c.tPtrs[level] 是可以单调向前移动的
 func (c *compaction) baseLevelForKey(ukey []byte) bool {
+	// 从 sourceLevel+2 开始搜索
 	for level := c.sourceLevel + 2; level < len(c.v.levels); level++ {
 		tables := c.v.levels[level]
 		for c.tPtrs[level] < len(tables) {
@@ -270,6 +275,8 @@ func (c *compaction) baseLevelForKey(ukey []byte) bool {
 				// We've advanced far enough.
 				if c.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
 					// Key falls in this file's range, so definitely not base level.
+					// ukey 只是在这个文件的 range 内，其实并不一定代表这个文件一定包含这个 ukey ?
+					// 感觉这里是为了判断的速度，于是保守一点，给出了 ukey 可能出现在更高层的结论
 					return false
 				}
 				break
@@ -294,6 +301,9 @@ func (c *compaction) shouldStopBefore(ikey internalKey) bool {
 
 	if c.gpOverlappedBytes > c.maxGPOverlaps {
 		// Too much overlap for current output; start new output.
+		// compaction 之后在 sourceLevel+1 之后产生的新文件 f 也不可以太大，如果过大了的话，f 会跟 sourceLevel+2 的文件有过多的交集
+		// 那么将来当 f 需要做 compcation 的时候，下一层就会涉及到过多的文件，那时的 compaction 就过于 heavy 了
+		// 所以这时要终止当前的 SSTable，开启下一个 SSTable
 		c.gpOverlappedBytes = 0
 		return true
 	}
@@ -331,6 +341,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 				its = append(its, c.s.tops.newIterator(t, nil, ro))
 			}
 		} else {
+			// tables 本身就是排好序的，所以 newIndexIterator 内部做二分是没问题的
 			it := iterator.NewIndexedIterator(tables.newIndexIterator(c.s.tops, c.s.icmp, nil, ro), strict)
 			its = append(its, it)
 		}

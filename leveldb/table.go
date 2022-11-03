@@ -409,6 +409,7 @@ func (t *tOps) createFrom(src iterator.Iterator) (f *tFile, n int, err error) {
 
 // Opens table. It returns a cache handle, which should
 // be released after use.
+// 会 cache SSTable
 func (t *tOps) open(f *tFile) (ch *cache.Handle, err error) {
 
 	loader := func() (size int, value cache.Value) {

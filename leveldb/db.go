@@ -75,10 +75,10 @@ type DB struct {
 	// Compaction.
 	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
-	tcompPauseC      chan chan<- struct{}
-	mcompCmdC        chan cCmd  // 全称 memdb compaction command channel?
-	compErrC         chan error // compaction error
-	compPerErrC      chan error // 全称 compaction persistent error
+	tcompPauseC      chan chan<- struct{} // 从 tcompPauseC 读取 <-chan 读到了一个 chan<- struct{} 到了之后要 pause compaction，直到可以写入 chan<- struct{} 才恢复
+	mcompCmdC        chan cCmd            // 全称 memdb compaction command channel?
+	compErrC         chan error           // compaction error
+	compPerErrC      chan error           // 全称 compaction persistent error
 	compErrSetC      chan error
 	compWriteLocking bool
 	compStats        cStats

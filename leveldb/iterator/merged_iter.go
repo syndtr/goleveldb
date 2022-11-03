@@ -30,7 +30,7 @@ type mergedIterator struct {
 	strict bool
 
 	keys     [][]byte
-	index    int
+	index    int // 当前放出的 index, keys[index] 就是放出的 key, index in range [0, len(iters))
 	dir      dir
 	err      error
 	errf     func(err error)
@@ -77,11 +77,13 @@ func (i *mergedIterator) First() bool {
 	for x, iter := range i.iters {
 		switch {
 		case iter.First():
+			// merge sort
 			i.keys[x] = assertKey(iter.Key())
 			h.Push(x)
 		case i.iterErr(iter):
 			return false
 		default:
+			// x 从一开始就是空的
 			i.keys[x] = nil
 		}
 	}
@@ -181,6 +183,7 @@ func (i *mergedIterator) Next() bool {
 	case i.iterErr(iter):
 		return false
 	default:
+		// 表示 x 这个 iter 已经空了
 		i.keys[x] = nil
 	}
 	return i.next()
@@ -322,7 +325,7 @@ type indexHeap mergedIterator
 func (h *indexHeap) Len() int { return len(h.indexes) }
 func (h *indexHeap) Less(i, j int) bool {
 	i, j = h.indexes[i], h.indexes[j]
-	r := h.cmp.Compare(h.keys[i], h.keys[j])
+	r := h.cmp.Compare(h.keys[i], h.keys[j]) // why: 如果 h.keys[i]==nil 的话，怎么做比较？
 	if h.reverse {
 		return r > 0
 	}
