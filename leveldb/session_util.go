@@ -350,6 +350,7 @@ func (s *session) setCompPtr(level int, ik internalKey) {
 // Get compaction ptr at given level; need external synchronization.
 func (s *session) getCompPtr(level int) internalKey {
 	if level >= len(s.stCompPtrs) {
+		// 从最小的 ikey 开始
 		return nil
 	}
 	return s.stCompPtrs[level]
@@ -404,7 +405,7 @@ func (s *session) recordCommited(rec *sessionRecord) {
 // Create a new manifest file; need external synchronization.
 func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	fd := storage.FileDesc{Type: storage.TypeManifest, Num: s.allocFileNum()}
-	writer, err := s.stor.Create(fd)
+	writer, err := s.stor.Create(fd) // 创建 manifest 文件
 	if err != nil {
 		return
 	}
@@ -464,7 +465,7 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 			return
 		}
 	}
-	err = s.stor.SetMeta(fd)
+	err = s.stor.SetMeta(fd) // 设置 CURRENT 文件的内容
 	return
 }
 

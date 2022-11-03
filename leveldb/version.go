@@ -122,7 +122,7 @@ func (v *version) walkOverlapping(aux tFiles, ikey internalKey, f func(level int
 			// Level-0 files may overlap each other. Find all files that
 			// overlap ukey.
 			for _, t := range tables {
-				if t.overlaps(v.s.icmp, ukey, ukey) {
+				if t.overlaps(v.s.icmp, ukey, ukey) { // 按照 ukey 来做判定
 					if !f(level, t) {
 						return
 					}
@@ -271,6 +271,7 @@ func (v *version) get(aux tFiles, ikey internalKey, ro *opt.ReadOptions, noValue
 	return
 }
 
+// 触发 ikey 所在
 func (v *version) sampleSeek(ikey internalKey) (tcomp bool) {
 	var tset *tSet
 
@@ -314,7 +315,7 @@ func (v *version) spawn(r *sessionRecord, trivial bool) *version {
 	return staging.finish(trivial)
 }
 
-// 把 v 的所有 level 都添加到 r 中
+// 把 version 中的所有 level 上的所有 SSTable，全量转化到 r.atRecord 中，作为需要 add 的 tables
 func (v *version) fillRecord(r *sessionRecord) {
 	for level, tables := range v.levels {
 		for _, t := range tables {
@@ -385,6 +386,7 @@ func (v *version) pickMemdbLevel(umin, umax []byte, maxLevel int) (level int) {
 	return
 }
 
+// 计算 compaction score
 func (v *version) computeCompaction() {
 	// Precomputed best level for next compaction
 	bestLevel := int(-1)
@@ -410,8 +412,10 @@ func (v *version) computeCompaction() {
 			// file size is small (perhaps because of a small write-buffer
 			// setting, or very high compression ratios, or lots of
 			// overwrites/deletions).
+			// 默认 CompactionL0Trigger=4, 当 L0 的文件数目超过 4 个时触发 L0 compcation
 			score = float64(len(tables)) / float64(v.s.o.GetCompactionL0Trigger())
 		} else {
+			// 其他 Level，当数据规模过大时触发 compaction
 			score = float64(size) / float64(v.s.o.GetCompactionTotalSize(level))
 		}
 
@@ -595,6 +599,7 @@ func (p *versionStaging) finish(trivial bool) *version {
 	nv.levels = nv.levels[:n]
 
 	// Compute compaction score for new version.
+	// 当一次 compaction 产生了新的 version 时，立刻计算 new version 的 compaction score
 	nv.computeCompaction()
 
 	return nv

@@ -510,6 +510,7 @@ func (o *Options) GetCompactionTableSize(level int) int {
 		if level < len(o.CompactionTableSizeMultiplierPerLevel) && o.CompactionTableSizeMultiplierPerLevel[level] > 0 {
 			mult = o.CompactionTableSizeMultiplierPerLevel[level]
 		} else if o.CompactionTableSizeMultiplier > 0 {
+			// default CompactionTableSizeMultiplier is 1
 			mult = math.Pow(o.CompactionTableSizeMultiplier, float64(level))
 		}
 	}
