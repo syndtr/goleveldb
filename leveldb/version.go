@@ -441,8 +441,8 @@ func (v *version) needCompaction() bool {
 }
 
 type tablesScratch struct {
-	added   map[int64]atRecord
-	deleted map[int64]struct{}
+	added   map[int64]atRecord // key: file num
+	deleted map[int64]struct{} // key: file num
 }
 
 // 描述下一个 version 相比于 base version 的变化，增加了哪些 SSTable，删掉了哪些 SSTable
@@ -501,6 +501,7 @@ func (p *versionStaging) finish(trivial bool) *version {
 	}
 	nv.levels = make([]tFiles, numLevel)
 	for level := 0; level < numLevel; level++ {
+		// 逐个 level 地 delete、add SSTables
 		var baseTabels tFiles
 		if level < len(p.base.levels) {
 			baseTabels = p.base.levels[level]
@@ -553,14 +554,18 @@ func (p *versionStaging) finish(trivial bool) *version {
 				for _, r := range scratch.added {
 					added = append(added, tableFileFromRecord(r))
 				}
+
 				if level == 0 {
+					// 在 level=0 上，added 按照 file number 降序排序
+					// level-0 上的 SSTable 可能有 range 上的重叠，而且没有顺序性
 					added.sortByNum()
 					index := nt.searchNumLess(added[len(added)-1].fd.Num)
 					nt = append(nt[:index], append(added, nt[index:]...)...)
 				} else {
-					added.sortByKey(p.base.s.icmp)
+					// 其他 level 上，SSTable 是按照 imin 排序的，imin 相同的话按照 num 升序排序；
+					added.sortByKey(p.base.s.icmp) // 按照 imin 升序排序
 					_, amax := added.getRange(p.base.s.icmp)
-					index := nt.searchMin(p.base.s.icmp, amax)
+					index := nt.searchMin(p.base.s.icmp, amax) // 找 nt 中第一个 imin 大于等于 amax 的 SSTable，于是 added 可以被 insert 到 index 前面
 					nt = append(nt[:index], append(added, nt[index:]...)...)
 				}
 				nv.levels[level] = nt
