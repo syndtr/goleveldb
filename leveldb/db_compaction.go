@@ -59,6 +59,7 @@ func (p *cStatStaging) stopTimer() {
 	}
 }
 
+// 按照 level 来组织 cStat，level[n] 表示 level-n 的 cStat，level 从 0 开始
 type cStats struct {
 	lk    sync.Mutex
 	stats []cStat
@@ -173,6 +174,8 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 
 		disableBackoff = db.s.o.GetDisableCompactionBackoff()
 	)
+
+	// 有 backOff retry
 	for n := 0; ; n++ {
 		// Check whether the DB is closed.
 		if db.isClosed() {
@@ -192,6 +195,7 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 		// Set compaction error status.
 		select {
 		case db.compErrSetC <- err:
+			// 注意：err == nil 时也要放入 compErrSetC
 		case perr := <-db.compPerErrC:
 			if err != nil {
 				db.logf("%s exiting (persistent error %q)", name, perr)
@@ -204,6 +208,8 @@ func (db *DB) compactionTransact(name string, t compactionTransactInterface) {
 		if err == nil {
 			return
 		}
+
+		// 如果是 corrupted error，是不可以重试解决的
 		if errors.IsCorrupted(err) {
 			db.logf("%s exiting (corruption detected)", name)
 			db.compactionExitTransact()
@@ -266,6 +272,7 @@ func (db *DB) compactionCommit(name string, rec *sessionRecord) {
 	}, nil)
 }
 
+// 触发 immutable memtable 的 compaction
 func (db *DB) memCompaction() {
 	mdb := db.getFrozenMem()
 	if mdb == nil {
@@ -279,6 +286,7 @@ func (db *DB) memCompaction() {
 	if mdb.Len() == 0 {
 		db.logf("memdb@flush skipping")
 		// drop frozen memdb
+		// 此时 immutable memdb 是空的，所以不用 compaction 了，直接删除掉对应的 journal 文件即可
 		db.dropFrozenMem()
 		return
 	}
@@ -304,11 +312,15 @@ func (db *DB) memCompaction() {
 	db.compactionTransactFunc("memdb@flush", func(cnt *compactionTransactCounter) (err error) {
 		stats.startTimer()
 		flushLevel, err = db.s.flushMemdb(rec, mdb.DB, db.memdbMaxLevel)
+
+		// 这里 rec 应该只有一条记录，就是当前 memdb compaction 出来的 SST
+
 		stats.stopTimer()
 		return
 	}, func() error {
 		for _, r := range rec.addedTables {
 			db.logf("memdb@flush revert @%d", r.num)
+			// 删除创建的 SST，完成 revert
 			if err := db.s.stor.Remove(storage.FileDesc{Type: storage.TypeTable, Num: r.num}); err != nil {
 				return err
 			}
@@ -321,6 +333,9 @@ func (db *DB) memCompaction() {
 
 	// Commit.
 	stats.startTimer()
+
+	// 写入 new version 的 manifest 到磁盘，完成持久化，然后切换当前 stVersion 到 new version
+	// new version 是在当前 stVersion 上 apply 了 rec 中的 change 之后产生的
 	db.compactionCommit("memdb", rec)
 	stats.stopTimer()
 
@@ -346,6 +361,8 @@ func (db *DB) memCompaction() {
 		}
 	}
 
+	// 注意：在做 memtable compaction 的时候，major compaction 是被停止的，也就是说不存在并行的 compaction
+	// 在 memtable compaction 结束之后会 trigger 一次 major compaction
 	// Trigger table compaction.
 	db.compTrigger(db.tcompCmdC)
 }
@@ -357,6 +374,7 @@ type tableCompactionBuilder struct {
 	rec   *sessionRecord
 	stat1 *cStatStaging
 
+	// 暂存 snapshot 状态
 	snapHasLastUkey bool
 	snapLastUkey    []byte
 	snapLastSeq     uint64
@@ -367,7 +385,7 @@ type tableCompactionBuilder struct {
 	kerrCnt int
 	dropCnt int
 
-	minSeq    uint64
+	minSeq    uint64 // compaction 时的最小 seq
 	strict    bool
 	tableSize int
 
@@ -426,6 +444,8 @@ func (b *tableCompactionBuilder) cleanup() error {
 	return nil
 }
 
+// compactionTransactInterface
+// b 记录了 compaction 的状态
 func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error) {
 	snapResumed := b.snapIter > 0
 	hasLastUkey := b.snapHasLastUkey // The key might has zero length, so this is necessary.
@@ -473,9 +493,13 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			shouldStop := !resumed && b.c.shouldStopBefore(ikey)
 
 			if !hasLastUkey || b.s.icmp.uCompare(lastUkey, ukey) != 0 {
+				// 做 iteration 的时候相同的 ukey 必然是连在一起的
+				// 这时遇到了 ukey 的切换
 				// First occurrence of this user key.
 
 				// Only rotate tables if ukey doesn't hop across.
+				// 相同的 ukey 不会写到两个 SSTable 中
+				// 注意这里 b.flush 是以 uKey 切换了为前提的，也就是说 shouldStop 只在 ukey 切换时才有效，相同的 ukey 是不能 stop 的
 				if b.tw != nil && (shouldStop || b.needFlush()) {
 					if err := b.flush(); err != nil {
 						return err
@@ -491,6 +515,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 					b.snapDropCnt = b.dropCnt
 				}
 
+				// ukey 成为新的 lastUkey
 				hasLastUkey = true
 				lastUkey = append(lastUkey[:0], ukey...)
 				lastSeq = keyMaxSeq
@@ -499,8 +524,12 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			switch {
 			case lastSeq <= b.minSeq:
 				// Dropped because newer entry for same user key exist
+				// 注意：这里的 fallthrough 会直接掉落到下一个 case，无论下一个 case 的条件是否满足！
+				// 于是，ukey 的 seq 在 minSeq 之后的、非首个记录必然会 fallthrough 到下一个 case，就会被 drop 掉了
+				// fallthrough 用的刚刚好！
 				fallthrough // (A)
 			case kt == keyTypeDel && seq <= b.minSeq && b.c.baseLevelForKey(lastUkey):
+				// 对于 ukey 的 seq 在 minSeq 之后的、首个记录，且 keyType==del，更高层又没有这个 ukey 的，可以 drop
 				// For this user key:
 				// (1) there is no data in higher levels
 				// (2) data in lower levels will have larger seq numbers
@@ -510,11 +539,14 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 				// Therefore this deletion marker is obsolete and can be dropped.
 				lastSeq = seq
 				b.dropCnt++
-				continue
+				continue // 这条数据就不会被写到新的 SSTable 中了
 			default:
+				// 对于 ukey 的 seq > minSeq，即在 minSeq 之前的，会到 default，记录被写入
+				// 对于 ukey 的 seq 在 minSeq 之后的、首个记录（因为必然有 lastSeq > b.minSeq，不会命中前两个 case），如果其 keyType==val，那么会到 default，记录会被写入
 				lastSeq = seq
 			}
 		} else {
+			// key error is not nil
 			if b.strict {
 				return kerr
 			}
@@ -526,6 +558,7 @@ func (b *tableCompactionBuilder) run(cnt *compactionTransactCounter) (err error)
 			b.kerrCnt++
 		}
 
+		// 写到新的 SSTable
 		if err := b.appendKV(ikey, iter.Value()); err != nil {
 			return err
 		}
@@ -552,6 +585,7 @@ func (b *tableCompactionBuilder) revert() error {
 	return nil
 }
 
+// 执行 SSTable compaction
 func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	defer c.release()
 
@@ -559,6 +593,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	rec.addCompPtr(c.sourceLevel, c.imax)
 
 	if !noTrivial && c.trivial() {
+		// 只需要移动 SSTable
 		t := c.levels[0][0]
 		db.logf("table@move L%d@%d -> L%d", c.sourceLevel, t.fd.Num, c.sourceLevel+1)
 		rec.delTable(c.sourceLevel, t.fd.Num)
@@ -572,6 +607,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		for _, t := range tables {
 			stats[i].read += t.size
 			// Insert deleted tables into record
+			// 旧的 SSTable 都是可以删除的
 			rec.delTable(c.sourceLevel+i, t.fd.Num)
 		}
 	}
@@ -587,7 +623,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 		stat1:     &stats[1],
 		minSeq:    minSeq,
 		strict:    db.s.o.GetStrict(opt.StrictCompaction),
-		tableSize: db.s.o.GetCompactionTableSize(c.sourceLevel + 1),
+		tableSize: db.s.o.GetCompactionTableSize(c.sourceLevel + 1), // 在 default compaction table size 默认为 2MB，切 default multiplier 为 1 的情况下，tableSize 为 2MB
 	}
 	db.compactionTransact("table@build", b)
 
@@ -613,6 +649,7 @@ func (db *DB) tableCompaction(c *compaction, noTrivial bool) {
 	}
 }
 
+// 注意，这里的 umin, umax  指的是 user key
 func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 	db.logf("table@compaction range L%d %q:%q", level, umin, umax)
 	if level >= 0 {
@@ -620,6 +657,7 @@ func (db *DB) tableRangeCompaction(level int, umin, umax []byte) error {
 			db.tableCompaction(c, true)
 		}
 	} else {
+		// level==-1 时，对 DB 所有的 SSTable 做 compaction 整理
 		// Retry until nothing to compact.
 		for {
 			compacted := false
@@ -670,6 +708,9 @@ func (db *DB) resumeWrite() bool {
 	return v.tLen(0) < db.s.o.GetWriteL0PauseTrigger()
 }
 
+// 暂停 table compaction
+// 在 memtable compaction 期间，会暂停 table compaction
+// pause 直到 ch 可以写入
 func (db *DB) pauseCompaction(ch chan<- struct{}) {
 	select {
 	case ch <- struct{}{}:
@@ -678,8 +719,10 @@ func (db *DB) pauseCompaction(ch chan<- struct{}) {
 	}
 }
 
+// 是 compaction command
+// 只有两种 cmd：cAuto | cRange
 type cCmd interface {
-	ack(err error)
+	ack(err error) // 回传 ack 消息
 }
 
 type cAuto struct {
@@ -690,6 +733,7 @@ type cAuto struct {
 func (r cAuto) ack(err error) {
 	if r.ackC != nil {
 		defer func() {
+			// 防止 r.ackC 被意外 close
 			_ = recover()
 		}()
 		r.ackC <- err
@@ -698,7 +742,7 @@ func (r cAuto) ack(err error) {
 
 type cRange struct {
 	level    int
-	min, max []byte
+	min, max []byte // 注意：min, max 都是 user key，用 user key 来在选择参与 compaction 的 SSTable 时判定是否重叠（是否选中）
 	ackC     chan<- error
 }
 
@@ -714,6 +758,7 @@ func (r cRange) ack(err error) {
 // This will trigger auto compaction but will not wait for it.
 func (db *DB) compTrigger(compC chan<- cCmd) {
 	select {
+	// 注意：尽量地触发 compaction，如果当前 compC 写不进去，实际的 compaction 可能就不触发了
 	case compC <- cAuto{}:
 	default:
 	}
@@ -726,6 +771,7 @@ func (db *DB) compTriggerWait(compC chan<- cCmd) (err error) {
 	// Send cmd.
 	select {
 	case compC <- cAuto{ch}:
+		// 后续会通过读 <-ch 来等待 compaction 的结果
 	case err = <-db.compErrC:
 		return
 	case <-db.closeC:
@@ -763,6 +809,7 @@ func (db *DB) compTriggerRange(compC chan<- cCmd, level int, min, max []byte) (e
 	return err
 }
 
+// db 启动时一个 go routine 专门执行此函数，进行 memtable 的 compaction
 func (db *DB) mCompaction() {
 	var x cCmd
 
@@ -795,6 +842,7 @@ func (db *DB) mCompaction() {
 	}
 }
 
+// 有专门的 go routine 来执行 tCompaction
 func (db *DB) tCompaction() {
 	var (
 		x     cCmd
@@ -821,7 +869,9 @@ func (db *DB) tCompaction() {
 		if db.tableNeedCompaction() {
 			select {
 			case x = <-db.tcompCmdC:
+				// 等到了 table compaction command
 			case ch := <-db.tcompPauseC:
+				// pause table compaction，直到 ch 可以写入
 				db.pauseCompaction(ch)
 				continue
 			case <-db.closeC:
@@ -851,6 +901,7 @@ func (db *DB) tCompaction() {
 				return
 			}
 		}
+
 		if x != nil {
 			switch cmd := x.(type) {
 			case cAuto:
@@ -859,6 +910,7 @@ func (db *DB) tCompaction() {
 					if db.resumeWrite() {
 						x.ack(nil)
 					} else {
+						// L0 的 SSTable 还很多，block 住了 Wrtie 操作
 						waitQ = append(waitQ, x)
 					}
 				}

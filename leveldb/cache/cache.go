@@ -81,6 +81,7 @@ func (x mNodes) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
 func (x mNodes) sort() { sort.Sort(x) }
 
+// 找第一个大于等于 <ns, key> 的index
 func (x mNodes) search(ns, key uint64) int {
 	return sort.Search(len(x), func(i int) bool {
 		a := x[i].ns
@@ -155,7 +156,8 @@ func (b *mBucket) get(r *Cache, h *mHead, hash uint32, ns, key uint64, getOnly b
 	if i == len(b.nodes) {
 		b.nodes = append(b.nodes, n)
 	} else {
-		b.nodes = append(b.nodes[:i+1], b.nodes[i:]...)
+		// 把新的 node 插入到 i 的前面
+		b.nodes = append(b.nodes[:i+1], b.nodes[i:]...) // 添加到有序数组的对应位置，插入排序，所以 b.nodes 不可以过长
 		b.nodes[i] = n
 	}
 	bLen := len(b.nodes)
@@ -188,6 +190,7 @@ func (b *mBucket) get(r *Cache, h *mHead, hash uint32, ns, key uint64, getOnly b
 	return true, true, n
 }
 
+// delete 的返回值约定值得参考
 func (b *mBucket) delete(r *Cache, h *mHead, hash uint32, ns, key uint64) (done, deleted bool) {
 	b.mu.Lock()
 
@@ -260,9 +263,12 @@ func (b *mBucket) delete(r *Cache, h *mHead, hash uint32, ns, key uint64) (done,
 }
 
 type mHead struct {
-	buckets          []mBucket
-	mask             uint32
-	predecessor      unsafe.Pointer // *mNode
+	buckets []mBucket
+	mask    uint32 // 用当前的 mask 和 predecessor 的 mask 作对比，可以知道是在 grow 还是在 shrink
+
+	// 下面注释应该错了， 应该是 *mHead 吧
+	predecessor unsafe.Pointer // *mNode
+
 	resizeInProgress int32
 
 	overflow        int32
@@ -301,7 +307,7 @@ func (h *mHead) initBucket(i uint32) *mBucket {
 		nodes = make(mNodes, 0, len(m0)+len(m1))
 		nodes = append(nodes, m0...)
 		nodes = append(nodes, m1...)
-		nodes.sort()
+		nodes.sort() // 可以用 merge sort？不过 m0, m1 的 size 比较小，也无所谓
 	}
 	b.nodes = nodes
 	b.state = bucketInitialized

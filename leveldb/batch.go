@@ -372,6 +372,7 @@ func batchesLen(batches []*Batch) int {
 }
 
 func writeBatchesWithHeader(wr io.Writer, batches []*Batch, seq uint64) error {
+	// 实现是 singleWriter.Write
 	if _, err := wr.Write(encodeBatchHeader(nil, seq, batchesLen(batches))); err != nil {
 		return err
 	}

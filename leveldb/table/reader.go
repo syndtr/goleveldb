@@ -57,19 +57,36 @@ type block struct {
 	bpool          *util.BufferPool
 	bh             blockHandle
 	data           []byte
-	restartsLen    int
+	restartsLen    int // restart point 的个数
 	restartsOffset int
 }
 
+// 返回最后一个小于等于 key 的 restart point index，和对应 restart point 的 offset
+// 后续一半从这个 restart point 开始查找 key
 func (b *block) seek(cmp comparer.Comparer, rstart, rlimit int, key []byte) (index, offset int, err error) {
-	index = sort.Search(b.restartsLen-rstart-(b.restartsLen-rlimit), func(i int) bool {
-		offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
-		offset++                                    // shared always zero, since this is a restart point
-		v1, n1 := binary.Uvarint(b.data[offset:])   // key length
-		_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
-		m := offset + n1 + n2
-		return cmp.Compare(b.data[m:m+int(v1)], key) > 0
-	}) + rstart - 1
+	// 查 [rstart, rlimit) 上的 restart point
+	// 这个二分查找是要找到第一个比 key 大的 restart point，返回的下标是针对 [rstart, rlimit) 而言的
+	// 比如返回 i==0 的话，其实对应的是 restart point rstart
+	// 注意配合上后面的 + rstart - 1 使用，那么最终 index 是：最后一个小于等于 key 的 restart point
+	index = sort.Search(
+		b.restartsLen-rstart-(b.restartsLen-rlimit), // [0, rlimit - rstart)
+		func(i int) bool {
+			// 看从 rstart 算起， restart point i (based 0) 的 key 是否比 key 大
+
+			// [rstart, rlimit] 上的第 i 个 offset，比如 i==0 的话，就是 rstart 这个 restart point
+			// offset 就定位到这个 restart point 指向的数据
+			// 因为 restart point 指向的数据没有“前面的”数据，所以 shared_length 必然等于 0
+			offset := int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*(rstart+i):]))
+			offset++ // shared always zero, since this is a restart point
+
+			v1, n1 := binary.Uvarint(b.data[offset:])   // key length
+			_, n2 := binary.Uvarint(b.data[offset+n1:]) // value length
+			m := offset + n1 + n2                       // key offset
+			return cmp.Compare(b.data[m:m+int(v1)], key) > 0
+		}) + rstart - 1
+
+	// 如果 [rstart, rlimit) 都比 key 大，那么最终调整 index=rstart，因为（调用方）最终是找第一个大于等于 key 的，这样一来对调用方来讲最终答案就是 rstart
+	// 如果 [rstart, rlimit) 都不比 key 大，那么最终 index=rlimit-1，即区间上的最后一个 restart point，因为数据有序排布，所以这个最后的 restart point 之后的数据也是可能会大于等于 key 的
 	if index < rstart {
 		// The smallest key is greater-than key sought.
 		index = rstart
@@ -88,22 +105,27 @@ func (b *block) restartOffset(index int) int {
 	return int(binary.LittleEndian.Uint32(b.data[b.restartsOffset+4*index:]))
 }
 
+// n: 读取的这条 k/v 的总存储长度，包括 shared_bytes, unshared_bytes 等信息的所有 bytes
 func (b *block) entry(offset int) (key, value []byte, nShared, n int, err error) {
+
+	// offset 不应该伸展到 restartsOffset 区域
 	if offset >= b.restartsOffset {
 		if offset != b.restartsOffset {
 			err = &ErrCorrupted{Reason: "entries offset not aligned"}
 		}
 		return
 	}
+
 	v0, n0 := binary.Uvarint(b.data[offset:])       // Shared prefix length
-	v1, n1 := binary.Uvarint(b.data[offset+n0:])    // Key length
+	v1, n1 := binary.Uvarint(b.data[offset+n0:])    // 注：Unshard key length
 	v2, n2 := binary.Uvarint(b.data[offset+n0+n1:]) // Value length
 	m := n0 + n1 + n2
-	n = m + int(v1) + int(v2)
+	n = m + int(v1) + int(v2) // 一条 k/v 的长度
 	if n0 <= 0 || n1 <= 0 || n2 <= 0 || offset+n > b.restartsOffset {
 		err = &ErrCorrupted{Reason: "entries corrupted"}
 		return
 	}
+
 	key = b.data[offset+m : offset+m+int(v1)]
 	value = b.data[offset+m+int(v1) : offset+n]
 	nShared = int(v0)
@@ -120,8 +142,8 @@ type dir int
 
 const (
 	dirReleased dir = iota - 1
-	dirSOI
-	dirEOI
+	dirSOI          // 在 iteration 的头部，Start Of Iteration
+	dirEOI          // 到了 iteration 的尾部，在用 dir 表达iterator的状态
 	dirBackward
 	dirForward
 )
@@ -137,16 +159,16 @@ type blockIter struct {
 	prevOffset   int
 	prevNode     []int
 	prevKeys     []byte
-	restartIndex int
+	restartIndex int // blockIter 当前下标所在的（在这个restart point后面）restart point index
 	// Iterator direction.
 	dir dir
 	// Restart index slice range.
-	riStart int
-	riLimit int
+	riStart int // 框定 iterator 的范围，起始的 restart point index
+	riLimit int // 框定 iterator 的范围，结束的 restart point index（不包括）
 	// Offset slice range.
-	offsetStart     int
+	offsetStart     int // 框定 iterator 的范围，起始的 offset
 	offsetRealStart int
-	offsetLimit     int
+	offsetLimit     int // 框定 iterator 的范围，结束的 offset，当 blockIter.offset==offsetLimit 的时候，表示 iteration 结束，不应该出现 offset > offsetLimit 的情况
 	// Error.
 	err error
 }
@@ -221,6 +243,7 @@ func (i *blockIter) Last() bool {
 	return i.Prev()
 }
 
+// 找到第一个大于等于 key 的记录
 func (i *blockIter) Seek(key []byte) bool {
 	if i.err != nil {
 		return false
@@ -229,6 +252,9 @@ func (i *blockIter) Seek(key []byte) bool {
 		return false
 	}
 
+	// 按照 restart point 二分查找
+	// 找第一个小于 key 的 restart point
+	// 因为 restart point 是到下一个 restart point 最小的 ikey，如果不是选小于 key 的话，就错过这个 key 了
 	ri, offset, err := i.block.seek(i.tr.cmp, i.riStart, i.riLimit, key)
 	if err != nil {
 		i.sErr(err)
@@ -239,6 +265,8 @@ func (i *blockIter) Seek(key []byte) bool {
 	if i.dir == dirSOI || i.dir == dirEOI {
 		i.dir = dirForward
 	}
+
+	// 最终找第一个大于等于 key 的记录
 	for i.Next() {
 		if i.tr.cmp.Compare(i.key, key) >= 0 {
 			return true
@@ -247,6 +275,8 @@ func (i *blockIter) Seek(key []byte) bool {
 	return false
 }
 
+// 按照 dirForward 的方向，如果 blockIter 还有下一个值，读取这个值并返回 true
+// 只做 dirForward 方向
 func (i *blockIter) Next() bool {
 	if i.dir == dirEOI || i.err != nil {
 		return false
@@ -256,26 +286,35 @@ func (i *blockIter) Next() bool {
 	}
 
 	if i.dir == dirSOI {
+		// 回到起点
 		i.restartIndex = i.riStart
 		i.offset = i.offsetStart
 	} else if i.dir == dirBackward {
 		i.prevNode = i.prevNode[:0]
 		i.prevKeys = i.prevKeys[:0]
 	}
+
+	// 使用 i.offset 作 iteration
+	// 把 i.offset 推进到 i.offsetRealStart
 	for i.offset < i.offsetRealStart {
 		key, value, nShared, n, err := i.block.entry(i.offset)
 		if err != nil {
 			i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 			return false
 		}
+
 		if n == 0 {
 			i.dir = dirEOI
 			return false
 		}
+
+		// 读到新的 k/v
+		// 注意：这里新读到的 key 是由 shared + unshared 拼凑出来的
 		i.key = append(i.key[:nShared], key...)
 		i.value = value
-		i.offset += n
+		i.offset += n // 跨过整条 k/v
 	}
+
 	if i.offset >= i.offsetLimit {
 		i.dir = dirEOI
 		if i.offset != i.offsetLimit {
@@ -283,7 +322,8 @@ func (i *blockIter) Next() bool {
 		}
 		return false
 	}
-	key, value, nShared, n, err := i.block.entry(i.offset)
+
+	key, value, nShared, n, err := i.block.entry(i.offset) // n: 整条 entry 的 size，于是 offset+=n 会跳到 下一个 entry
 	if err != nil {
 		i.sErr(i.tr.fixErrCorruptedBH(i.block.bh, err))
 		return false
@@ -292,7 +332,8 @@ func (i *blockIter) Next() bool {
 		i.dir = dirEOI
 		return false
 	}
-	i.key = append(i.key[:nShared], key...)
+
+	i.key = append(i.key[:nShared], key...) // 当前的值由 shard+unshared 拼凑起来得到
 	i.value = value
 	i.prevOffset = i.offset
 	i.offset += n
@@ -521,12 +562,15 @@ type Reader struct {
 	filter         filter.Filter
 	verifyChecksum bool
 
-	dataEnd                   int64
+	dataEnd int64
+
+	// indexBH: data index block handle，检索 data blocks
 	metaBH, indexBH, filterBH blockHandle
 	indexBlock                *block
 	filterBlock               *filterBlock
 }
 
+// 一个 SST 包含多个blocks
 func (r *Reader) blockKind(bh blockHandle) string {
 	switch bh.offset {
 	case r.metaBH.offset:
@@ -549,6 +593,7 @@ func (r *Reader) newErrCorruptedBH(bh blockHandle, reason string) error {
 	return r.newErrCorrupted(int64(bh.offset), int64(bh.length), r.blockKind(bh), reason)
 }
 
+// 汇报一个block的错误
 func (r *Reader) fixErrCorruptedBH(bh blockHandle, err error) error {
 	if cerr, ok := err.(*ErrCorrupted); ok {
 		cerr.Pos = int64(bh.offset)
@@ -742,6 +787,7 @@ func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Ran
 				bi.offsetStart = b.restartOffset(bi.riStart)
 				bi.offsetRealStart = bi.prevOffset
 			} else {
+				// 整个 block 都不在 range 内
 				bi.riStart = b.restartsLen
 				bi.offsetStart = b.restartsOffset
 				bi.offsetRealStart = b.restartsOffset
@@ -761,6 +807,7 @@ func (r *Reader) newBlockIter(b *block, bReleaser util.Releaser, slice *util.Ran
 	return bi
 }
 
+// 读取 data block 的 iterator
 func (r *Reader) getDataIter(dataBH blockHandle, slice *util.Range, verifyChecksum, fillCache bool) iterator.Iterator {
 	b, rel, err := r.readBlockCached(dataBH, verifyChecksum, fillCache)
 	if err != nil {
@@ -817,6 +864,8 @@ func (r *Reader) NewIterator(slice *util.Range, ro *opt.ReadOptions) iterator.It
 	return iterator.NewIndexedIterator(index, opt.GetStrict(r.o, ro, opt.StrictReader))
 }
 
+// 在 SSTable 中查找 key
+// 从调用端来看，key 是 internal key
 func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bool) (rkey, value []byte, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -835,6 +884,17 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	index := r.newBlockIter(indexBlock, nil, nil, true)
 	defer index.Release()
 
+	// index 也是一个 data block
+	// 所以 index.Seek 方法也是去找第一个大于等于 key 的记录，只是该条记录的 val 是 data block handle
+	// data block handle 的 key 是这个 block 的 successor，所以比所索引的 data block 的所有记录都大
+	//
+	// 所以我们从第一个大于等于 key 的 data block handle 开始找就可以了，
+	// 前面的那个 data block 因为索引键都小于要找的key了，里面的数据就更不可能大于等于 key 了
+	//
+	// Why: data index 的 key 是 data block 的 last key 的 successor，
+	// 如果 user key 就全是 0xff, 0xff, 0xff...，那么 last key 的 successor 就必然会增加 seq number 的字段
+	// 那么，这个 successor 不就会“小于” data block 里面的记录了吗？不就不是 "successor" 了吗？
+	// 当然，这种情况生产环境下不大可能会出现
 	if !index.Seek(key) {
 		if err = index.Error(); err == nil {
 			err = ErrNotFound
@@ -842,6 +902,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 		return
 	}
 
+	// 找到了潜在的 data block
 	dataBH, n := decodeBlockHandle(index.Value())
 	if n == 0 {
 		r.err = r.newErrCorruptedBH(r.indexBH, "bad data block handle")
@@ -852,6 +913,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	if filtered && r.filter != nil {
 		filterBlock, frel, ferr := r.getFilterBlock(true)
 		if ferr == nil {
+			// 使用 filter 来提前判断 key 不存在，省去读取 block 的内容再查询
 			if !filterBlock.contains(r.filter, dataBH.offset, key) {
 				frel.Release()
 				return nil, nil, ErrNotFound
@@ -863,6 +925,7 @@ func (r *Reader) find(key []byte, filtered bool, ro *opt.ReadOptions, noValue bo
 	}
 
 	data := r.getDataIter(dataBH, nil, r.verifyChecksum, !ro.GetDontFillCache())
+	// 在具体的 block 中去找
 	if !data.Seek(key) {
 		data.Release()
 		if err = data.Error(); err != nil {

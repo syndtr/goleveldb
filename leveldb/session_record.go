@@ -39,29 +39,37 @@ type cpRecord struct {
 	ikey  internalKey
 }
 
+// add table record
+// add SSTable
 type atRecord struct {
-	level int
-	num   int64
+	level int   // 把 table 添加到第几个 level
+	num   int64 // fileDesc num
 	size  int64
 	imin  internalKey
 	imax  internalKey
 }
 
+// delete table record
 type dtRecord struct {
 	level int
 	num   int64
 }
 
 type sessionRecord struct {
-	hasRec         int
+	hasRec         int // bitsmap, addTable: 7
 	comparer       string
 	journalNum     int64
 	prevJournalNum int64
 	nextFileNum    int64
 	seqNum         uint64
-	compPtrs       []cpRecord
-	addedTables    []atRecord
-	deletedTables  []dtRecord
+
+	// compact pointers 指示每个层级下一次进行 compaction 操作时需要从哪个键开始
+	// 对每个层级 L，会记录该层上一次进行 compaction 时操作的最大值，于是当 L 层进行下一次 compaction 需要选取文件时，选取第一个 imax 大于 compPtr.ikey 的文件
+	// 于是，每一层的 compaction 操作在该层的键空间循环
+	compPtrs []cpRecord
+
+	addedTables   []atRecord
+	deletedTables []dtRecord
 
 	scratch [binary.MaxVarintLen64]byte
 	err     error

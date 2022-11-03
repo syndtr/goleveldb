@@ -264,6 +264,7 @@ func (s *session) tLen(level int) int {
 }
 
 // Set current version to v.
+// r: 包含下一个 version 相对于当前 stVersion 的 change
 func (s *session) setVersion(r *sessionRecord, v *version) {
 	s.vmu.Lock()
 	defer s.vmu.Unlock()
@@ -349,6 +350,7 @@ func (s *session) setCompPtr(level int, ik internalKey) {
 // Get compaction ptr at given level; need external synchronization.
 func (s *session) getCompPtr(level int) internalKey {
 	if level >= len(s.stCompPtrs) {
+		// 从最小的 ikey 开始
 		return nil
 	}
 	return s.stCompPtrs[level]
@@ -367,7 +369,7 @@ func (s *session) fillRecord(r *sessionRecord, snapshot bool) {
 		}
 
 		if !r.has(recSeqNum) {
-			r.setSeqNum(s.stSeqNum)
+			r.setSeqNum(s.stSeqNum) // mem compacted seq
 		}
 
 		for level, ik := range s.stCompPtrs {
@@ -403,7 +405,7 @@ func (s *session) recordCommited(rec *sessionRecord) {
 // Create a new manifest file; need external synchronization.
 func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	fd := storage.FileDesc{Type: storage.TypeManifest, Num: s.allocFileNum()}
-	writer, err := s.stor.Create(fd)
+	writer, err := s.stor.Create(fd) // 创建 manifest 文件
 	if err != nil {
 		return
 	}
@@ -455,17 +457,20 @@ func (s *session) newManifest(rec *sessionRecord, v *version) (err error) {
 	if err != nil {
 		return
 	}
+
+	// 默认对 manifest 文件用 sync，GetNoSync 默认返回 false
 	if !s.o.GetNoSync() {
 		err = writer.Sync()
 		if err != nil {
 			return
 		}
 	}
-	err = s.stor.SetMeta(fd)
+	err = s.stor.SetMeta(fd) // 设置 CURRENT 文件的内容
 	return
 }
 
 // Flush record to disk.
+// Manifest 的写入复用了 journal
 func (s *session) flushManifest(rec *sessionRecord) (err error) {
 	s.fillRecord(rec, false)
 	w, err := s.manifest.Next()

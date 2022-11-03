@@ -28,6 +28,7 @@ func (s *session) pickMemdbLevel(umin, umax []byte, maxLevel int) int {
 	return v.pickMemdbLevel(umin, umax, maxLevel)
 }
 
+// 创建 SST 并添加到 rec
 func (s *session) flushMemdb(rec *sessionRecord, mdb *memdb.DB, maxLevel int) (int, error) {
 	// Create sorted table.
 	iter := mdb.NewIterator(nil)
@@ -66,12 +67,14 @@ func (s *session) pickCompaction() *compaction {
 		if cptr != nil && sourceLevel > 0 {
 			n := len(tables)
 			if i := sort.Search(n, func(i int) bool {
+				// 选取第一个 imax 大于 cptr 的 SSTable
 				return s.icmp.Compare(tables[i].imax, cptr) > 0
 			}); i < n {
 				t0 = append(t0, tables[i])
 			}
 		}
 		if len(t0) == 0 {
+			// 如果 ctpr==nil 或 cptr已经到了最后一个 SSTable，则从头开始循环
 			t0 = append(t0, tables[0])
 		}
 		if sourceLevel == 0 {
@@ -80,6 +83,7 @@ func (s *session) pickCompaction() *compaction {
 			typ = nonLevel0Compaction
 		}
 	} else {
+		// 执行 seek compaction
 		if p := atomic.LoadPointer(&v.cSeek); p != nil {
 			ts := (*tSet)(p)
 			sourceLevel = ts.level
@@ -99,10 +103,15 @@ func (s *session) getCompactionRange(sourceLevel int, umin, umax []byte, noLimit
 	v := s.version()
 
 	if sourceLevel >= len(v.levels) {
+		// sourceLevel >= 7，没有这样的 level
 		v.release()
 		return nil
 	}
 
+	// 注意：sourceLevel==0 时，因为 L0 上的 SSTable 可能有交叠，所以需要拓展 umin, umax 的范围
+	// 比如在 L0 上，umax 涉及到了一个新的 SSTable，那么这个 SSTable 的 max 会拓宽一点，就可能会交叠上下一个新的 SSTable
+	// 所以需要拓展 umin, umax 的范围，直到不可以继续拓展
+	// 使用的是 ukey，完整的 ukey 要完整地被 dump，不能出现部分 ukey 被 dump 了，这样会出现查询的错误
 	t0 := v.levels[sourceLevel].getOverlaps(nil, s.icmp, umin, umax, sourceLevel == 0)
 	if len(t0) == 0 {
 		v.release()
@@ -153,17 +162,17 @@ type compaction struct {
 	s *session
 	v *version
 
-	typ           int
-	sourceLevel   int
-	levels        [2]tFiles
+	typ           int       // compaction 的 type: L0, non-L0, seek compaction
+	sourceLevel   int       // compaction 的 source level，发起 compaction 的 level
+	levels        [2]tFiles // 参与 compaction 的两个 level 上的文件
 	maxGPOverlaps int64
 
-	gp                tFiles
+	gp                tFiles // sourceLevel+2 上的、与某次 compaction expand 之后的 range 相重叠的文件，gp 的意思是 grad parent
 	gpi               int
 	seenKey           bool
 	gpOverlappedBytes int64
-	imin, imax        internalKey
-	tPtrs             []int
+	imin, imax        internalKey // 参与 compaction 的 sourceLevel 上的 internalKey range
+	tPtrs             []int       // tPtrs[level] 是 level 上的一个 SSTable 的 index，用于在 compaction 的时候快速判断 ukey 是否不会在 sourceLevel+2 及更深的 level 上出现
 	released          bool
 
 	snapGPI               int
@@ -225,6 +234,8 @@ func (c *compaction) expand() {
 			xmin, xmax := exp0.getRange(c.s.icmp)
 			exp1 := vt1.getOverlaps(nil, c.s.icmp, xmin.ukey(), xmax.ukey(), false)
 			if len(exp1) == len(t1) {
+				// 增选了 t0 上的 SSTable，并没有使的 t1 的 SSTable 被增选，即可以确定参与 compaction 的文件
+				// 为了避免这种 expand 变得无穷无尽
 				c.s.logf("table@compaction expanding L%d+L%d (F·%d S·%s)+(F·%d S·%s) -> (F·%d S·%s)+(F·%d S·%s)",
 					c.sourceLevel, c.sourceLevel+1, len(t0), shortenb(t0.size()), len(t1), shortenb(t1.size()),
 					len(exp0), shortenb(exp0.size()), len(exp1), shortenb(exp1.size()))
@@ -250,7 +261,12 @@ func (c *compaction) trivial() bool {
 	return len(c.levels[0]) == 1 && len(c.levels[1]) == 0 && c.gp.size() <= c.maxGPOverlaps
 }
 
+// 如果 ukey 只存在于 compaction 涉及到的两个 level，不在更高的 level 出现，返回 true，否则返回 false
+// "baseLevel" 的意思在此
+// 因为在 compaction 的过程中，从 iterator 出来的 ukey 必然是递增的，后面的 ukey 只会大于等于前面的 ukey
+// 所以这个函数内部用到的 c.tPtrs[level] 是可以单调向前移动的
 func (c *compaction) baseLevelForKey(ukey []byte) bool {
+	// 从 sourceLevel+2 开始搜索
 	for level := c.sourceLevel + 2; level < len(c.v.levels); level++ {
 		tables := c.v.levels[level]
 		for c.tPtrs[level] < len(tables) {
@@ -259,6 +275,8 @@ func (c *compaction) baseLevelForKey(ukey []byte) bool {
 				// We've advanced far enough.
 				if c.s.icmp.uCompare(ukey, t.imin.ukey()) >= 0 {
 					// Key falls in this file's range, so definitely not base level.
+					// ukey 只是在这个文件的 range 内，其实并不一定代表这个文件一定包含这个 ukey ?
+					// 感觉这里是为了判断的速度，于是保守一点，给出了 ukey 可能出现在更高层的结论
 					return false
 				}
 				break
@@ -283,6 +301,9 @@ func (c *compaction) shouldStopBefore(ikey internalKey) bool {
 
 	if c.gpOverlappedBytes > c.maxGPOverlaps {
 		// Too much overlap for current output; start new output.
+		// compaction 之后在 sourceLevel+1 之后产生的新文件 f 也不可以太大，如果过大了的话，f 会跟 sourceLevel+2 的文件有过多的交集
+		// 那么将来当 f 需要做 compcation 的时候，下一层就会涉及到过多的文件，那时的 compaction 就过于 heavy 了
+		// 所以这时要终止当前的 SSTable，开启下一个 SSTable
 		c.gpOverlappedBytes = 0
 		return true
 	}
@@ -301,7 +322,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 
 	// Options.
 	ro := &opt.ReadOptions{
-		DontFillCache: true,
+		DontFillCache: true, // 作 compaction 的时候读取的数据跟业务无关，不要填充 cache
 		Strict:        opt.StrictOverride,
 	}
 	strict := c.s.o.GetStrict(opt.StrictCompaction)
@@ -320,6 +341,7 @@ func (c *compaction) newIterator() iterator.Iterator {
 				its = append(its, c.s.tops.newIterator(t, nil, ro))
 			}
 		} else {
+			// tables 本身就是排好序的，所以 newIndexIterator 内部做二分是没问题的
 			it := iterator.NewIndexedIterator(tables.newIndexIterator(c.s.tops, c.s.icmp, nil, ro), strict)
 			its = append(its, it)
 		}

@@ -31,6 +31,8 @@ func sharedPrefixLen(a, b []byte) int {
 	return i
 }
 
+// 是 data block，就是存 k/v
+// 默认 blockSize = 4kb
 type blockWriter struct {
 	restartInterval int
 	buf             util.Buffer
@@ -158,7 +160,7 @@ type Writer struct {
 	dataBlock   blockWriter
 	indexBlock  blockWriter
 	filterBlock filterWriter
-	pendingBH   blockHandle
+	pendingBH   blockHandle // 上一个写入了的 dataBlock 的 block handle
 	offset      uint64
 	nEntries    int
 	// Scratch allocated enough for 5 uvarint. Block writer should not use
@@ -166,7 +168,7 @@ type Writer struct {
 	// then passed to the block writer itself.
 	scratch            [50]byte
 	comparerScratch    []byte
-	compressionScratch []byte
+	compressionScratch []byte // 写入 dataBlock 的时候保存 dataBlock 被 compression 之后的数据
 }
 
 func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh blockHandle, err error) {
@@ -182,6 +184,9 @@ func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh b
 		b = compressed[:n+blockTrailerLen]
 		b[n] = blockTypeSnappyCompression
 	} else {
+		// buf.Alloc 会原地增长 buf 本身，预留出来 blockTrailerLen 这么多的 bytes
+		// 所以这里的 else 会得到跟上面选择压缩的时候同样布局的 b:
+		// {b's data} | {CRC checksum, 4 bytes} | {compression type, 1 byte}
 		tmp := buf.Alloc(blockTrailerLen)
 		tmp[0] = blockTypeNoCompression
 		b = buf.Bytes()
@@ -193,12 +198,15 @@ func (w *Writer) writeBlock(buf *util.Buffer, compression opt.Compression) (bh b
 	binary.LittleEndian.PutUint32(b[n:], checksum)
 
 	// Write the buffer to the file.
+	// 此时的 b 保存了排布好的 entry 和 restart points，直接写进文件就可以了
 	_, err = w.writer.Write(b)
 	if err != nil {
 		return
 	}
+
+	// bh 保存的是当前写入的 b 的 blockHandle
 	bh = blockHandle{w.offset, uint64(len(b) - blockTrailerLen)}
-	w.offset += uint64(len(b))
+	w.offset += uint64(len(b)) // blockTrailer 在文件中肯定也是算长度的，所以这里 offset 增长的就是 + len(b)，包括了 blockTrailer 的长度
 	return
 }
 
@@ -206,6 +214,8 @@ func (w *Writer) flushPendingBH(key []byte) error {
 	if w.pendingBH.length == 0 {
 		return nil
 	}
+
+	// 前一个 block 的最后一个 key，与当前 block 的第一个 key，两者的最短分隔符
 	var separator []byte
 	if len(key) == 0 {
 		separator = w.cmp.Successor(w.comparerScratch[:0], w.dataBlock.prevKey)
@@ -213,15 +223,20 @@ func (w *Writer) flushPendingBH(key []byte) error {
 		separator = w.cmp.Separator(w.comparerScratch[:0], w.dataBlock.prevKey, key)
 	}
 	if separator == nil {
+		// 比如当 len(key) == 0 && w.dataBlock.prevKey 里面都是 0xff 时，separator 将会是 nil
+		// 或者 w.dataBlock.prevKey == key 时，separator 也会是 nil
+		// 总之，separator 得是大于等于 w.dataBlock 中的所有 key 的
 		separator = w.dataBlock.prevKey
 	} else {
 		w.comparerScratch = separator
 	}
-	n := encodeBlockHandle(w.scratch[:20], w.pendingBH)
+
+	n := encodeBlockHandle(w.scratch[:20], w.pendingBH) // pendingBH 是 prev dataBlock 的 handle
 	// Append the block handle to the index block.
 	if err := w.indexBlock.append(separator, w.scratch[:n]); err != nil {
 		return err
 	}
+
 	// Reset prev key of the data block.
 	w.dataBlock.prevKey = w.dataBlock.prevKey[:0]
 	// Clear pending block handle.
@@ -230,14 +245,16 @@ func (w *Writer) flushPendingBH(key []byte) error {
 }
 
 func (w *Writer) finishBlock() error {
+	// 写入 dataBlock 的 restart points
 	if err := w.dataBlock.finish(); err != nil {
 		return err
 	}
+
 	bh, err := w.writeBlock(&w.dataBlock.buf, w.compression)
 	if err != nil {
 		return err
 	}
-	w.pendingBH = bh
+	w.pendingBH = bh // pendingBH 记录下目前写入的 blockHandle，下一次再写入 key 的时候，会开启一个新的 dataBlock，那时 pendingBH 会被写入
 	// Reset the data block.
 	w.dataBlock.reset()
 	// Flush the filter block.
@@ -269,6 +286,8 @@ func (w *Writer) Append(key, value []byte) error {
 	w.filterBlock.add(key)
 
 	// Finish the data block if block size target reached.
+	// 那么一个 data block 的实际大小是可能超过 blockSize 的，因为不是预留空间然后保证不超
+	// 所以，一条很大的数据可能会占据一个超大的 block？允许吗？Why
 	if w.dataBlock.bytesLen() >= w.blockSize {
 		if err := w.finishBlock(); err != nil {
 			w.err = err
@@ -319,6 +338,7 @@ func (w *Writer) Close() error {
 
 	// Write the last data block. Or empty data block if there
 	// aren't any data blocks at all.
+	// 如果 data block 是空的，至少会写入一个 restart point
 	if w.dataBlock.nEntries > 0 || w.nEntries == 0 {
 		if err := w.finishBlock(); err != nil {
 			w.err = err
@@ -343,8 +363,11 @@ func (w *Writer) Close() error {
 
 	// Write the metaindex block.
 	if filterBH.length > 0 {
+		// key: "filter.{w.filter.Name()}"
+		// val: filter block handle
 		key := []byte("filter." + w.filter.Name())
 		n := encodeBlockHandle(w.scratch[:20], filterBH)
+		// 注意：这里写 k/v 也是用的 w.dataBlock，即 metaindex block 本身的格式也是 data block 的格式
 		if err := w.dataBlock.append(key, w.scratch[:n]); err != nil {
 			return err
 		}
@@ -375,7 +398,7 @@ func (w *Writer) Close() error {
 	}
 	n := encodeBlockHandle(footer, metaindexBH)
 	encodeBlockHandle(footer[n:], indexBH)
-	copy(footer[footerLen-len(magic):], magic)
+	copy(footer[footerLen-len(magic):], magic) // 文件的尾部是 magic number
 	if _, err := w.writer.Write(footer); err != nil {
 		w.err = err
 		return w.err
@@ -396,7 +419,7 @@ func NewWriter(f io.Writer, o *opt.Options, pool *util.BufferPool, size int) *Wr
 	} else {
 		bufBytes = pool.Get(size)
 	}
-	bufBytes = bufBytes[:0]
+	bufBytes = bufBytes[:0] // clear up bufBytes, in case it is fetched from pool
 
 	w := &Writer{
 		writer:          f,

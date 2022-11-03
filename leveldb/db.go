@@ -52,11 +52,11 @@ type DB struct {
 	memMu           sync.RWMutex
 	memPool         chan *memdb.DB
 	mem, frozenMem  *memDB
-	journal         *journal.Writer
+	journal         *journal.Writer // 写 WAL
 	journalWriter   storage.Writer
 	journalFd       storage.FileDesc
 	frozenJournalFd storage.FileDesc
-	frozenSeq       uint64
+	frozenSeq       uint64 // 哪一个 seq 的写操作导致了 memDB 的切换，或者说导致了当前的 memDB 被 freeze 成 immutable memDB
 
 	// Snapshot.
 	snapsMu   sync.Mutex
@@ -64,21 +64,21 @@ type DB struct {
 
 	// Write.
 	batchPool    sync.Pool
-	writeMergeC  chan writeMerge
-	writeMergedC chan bool
-	writeLockC   chan struct{}
-	writeAckC    chan error
-	writeDelay   time.Duration
-	writeDelayN  int
+	writeMergeC  chan writeMerge // 有 merge write 需求时 chan<-，执行 merge write 的一方会不断地 <-chan 合并可以合并过来的写请求
+	writeMergedC chan bool       // chan<- false 用来通知某个 write 它没有被 merge
+	writeLockC   chan struct{}   // write 的写锁，成功 chan<- 说明拿到了锁，用完了之后 <-chan 就是释放锁
+	writeAckC    chan error      // chan<- 通知等待 ACK 的一方；<-chan 等待的一方读取 Write 的结果
+	writeDelay   time.Duration   // 记录 Write 被 compaction 所 delay 的时长
+	writeDelayN  int             // 记录 Write 被 compaction 所 delay 的次数
 	tr           *Transaction
 
 	// Compaction.
 	compCommitLk     sync.Mutex
 	tcompCmdC        chan cCmd
-	tcompPauseC      chan chan<- struct{}
-	mcompCmdC        chan cCmd
-	compErrC         chan error
-	compPerErrC      chan error
+	tcompPauseC      chan chan<- struct{} // 从 tcompPauseC 读取 <-chan 读到了一个 chan<- struct{} 到了之后要 pause compaction，直到可以写入 chan<- struct{} 才恢复
+	mcompCmdC        chan cCmd            // 全称 memdb compaction command channel?
+	compErrC         chan error           // compaction error
+	compPerErrC      chan error           // 全称 compaction persistent error
 	compErrSetC      chan error
 	compWriteLocking bool
 	compStats        cStats
@@ -104,9 +104,9 @@ func openDB(s *session) (*DB, error) {
 		snapsList: list.New(),
 		// Write
 		batchPool:    sync.Pool{New: newBatch},
-		writeMergeC:  make(chan writeMerge),
+		writeMergeC:  make(chan writeMerge), // 用来合并 Write 操作
 		writeMergedC: make(chan bool),
-		writeLockC:   make(chan struct{}, 1),
+		writeLockC:   make(chan struct{}, 1), // 注意：channel 的 buffer 为 1，因为首个去获取 Write Lock 的 goroutine 必须得能通过 chan<- 拿到 Lock
 		writeAckC:    make(chan error),
 		// Compaction
 		tcompCmdC:   make(chan cCmd),
@@ -778,6 +778,8 @@ func memGet(mdb *memdb.DB, ikey internalKey, icmp *iComparer) (ok bool, mv []byt
 	return
 }
 
+// 正常的查询 auxm 和 auxt 都为 nil
+// 猜：auxm and auxt is only for testing?
 func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.ReadOptions) (value []byte, err error) {
 	ikey := makeInternalKey(nil, key, seq, keyTypeSeek)
 
@@ -794,6 +796,8 @@ func (db *DB) get(auxm *memdb.DB, auxt tFiles, key []byte, seq uint64, ro *opt.R
 		}
 		defer m.decref()
 
+		// 依次从 memtable 和 immutable memtable 获取
+		// 如果找到的话，可以返回结果，因为找到的这个必然是 seq number 小于等于 seq 且是最大的那个，小的 seq number 会被 compaction
 		if ok, mv, me := memGet(m.DB, ikey, db.s.icmp); ok {
 			return append([]byte(nil), mv...), me
 		}
