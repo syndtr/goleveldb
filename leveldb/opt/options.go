@@ -78,16 +78,16 @@ func (p *passthroughCacher) New(capacity int) cache.Cacher {
 //
 // Shared cache example:
 //
-//     fileCache := opt.NewLRU(500)
-//     blockCache := opt.NewLRU(8 * opt.MiB)
-// 	   options := &opt.Options{
-//         OpenFilesCacher: fileCache,
-//         BlockCacher: blockCache,
-//     }
-//     db1, err1 := leveldb.OpenFile("path/to/db1", options)
-//     ...
-//     db2, err2 := leveldb.OpenFile("path/to/db2", options)
-//     ...
+//	    fileCache := opt.NewLRU(500)
+//	    blockCache := opt.NewLRU(8 * opt.MiB)
+//		   options := &opt.Options{
+//	        OpenFilesCacher: fileCache,
+//	        BlockCacher: blockCache,
+//	    }
+//	    db1, err1 := leveldb.OpenFile("path/to/db1", options)
+//	    ...
+//	    db2, err2 := leveldb.OpenFile("path/to/db2", options)
+//	    ...
 func PassthroughCacher(x cache.Cacher) Cacher {
 	return &passthroughCacher{x}
 }
