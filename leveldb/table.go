@@ -7,7 +7,6 @@
 package leveldb
 
 import (
-	"bytes"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -208,7 +207,7 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 			index := tf.searchMinUkey(icmp, umin)
 			if index == 0 {
 				begin = 0
-			} else if bytes.Compare(tf[index-1].imax.ukey(), umin) >= 0 {
+			} else if icmp.uCompare(tf[index-1].imax.ukey(), umin) >= 0 {
 				// The min ukey overlaps with the index-1 file, expand it.
 				begin = index - 1
 			} else {
@@ -220,7 +219,7 @@ func (tf tFiles) getOverlaps(dst tFiles, icmp *iComparer, umin, umax []byte, ove
 			index := tf.searchMaxUkey(icmp, umax)
 			if index == len(tf) {
 				end = len(tf)
-			} else if bytes.Compare(tf[index].imin.ukey(), umax) <= 0 {
+			} else if icmp.uCompare(tf[index].imin.ukey(), umax) <= 0 {
 				// The max ukey overlaps with the index file, expand it.
 				end = index + 1
 			} else {
