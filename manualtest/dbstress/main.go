@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	mrand "math/rand"
 	"net/http"
@@ -162,7 +163,7 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 	}
 	defer r.Close()
 
-	size, err := r.Seek(0, os.SEEK_END)
+	size, err := r.Seek(0, io.SeekStart)
 	if err != nil {
 		return false, err
 	}
@@ -280,9 +281,9 @@ func (s *latencyStats) record(n int) {
 }
 
 func (s *latencyStats) ratePerSec() int {
-	durSec := s.dur / time.Second
-	if durSec > 0 {
-		return s.num / int(durSec)
+	dur := s.dur / time.Second
+	if dur > 0 {
+		return s.num / int(dur)
 	}
 	return s.num
 }
