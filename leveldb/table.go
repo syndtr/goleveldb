@@ -43,7 +43,7 @@ func (t *tFile) overlaps(icmp *iComparer, umin, umax []byte) bool {
 	return !t.after(icmp, umin) && !t.before(icmp, umax)
 }
 
-// Cosumes one seek and return current seeks left.
+// Consumes one seek and return current seeks left.
 func (t *tFile) consumeSeek() int32 {
 	return atomic.AddInt32(&t.seekLeft, -1)
 }
