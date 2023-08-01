@@ -19,7 +19,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/syndtr/goleveldb/leveldb/storage"
+	"github.com/gnolang/goleveldb/leveldb/storage"
 )
 
 var (
