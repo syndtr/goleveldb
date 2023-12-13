@@ -126,7 +126,7 @@ func OpenFile(path string, readOnly bool) (Storage, error) {
 		if err != nil {
 			return nil, err
 		}
-		logSize, err = logw.Seek(0, os.SEEK_END)
+		logSize, err = logw.Seek(0, io.SeekEnd)
 		if err != nil {
 			logw.Close()
 			return nil, err

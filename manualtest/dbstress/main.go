@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	mrand "math/rand"
 	"net/http"
@@ -162,7 +163,7 @@ func (ts *testingStorage) scanTable(fd storage.FileDesc, checksum bool) (corrupt
 	}
 	defer r.Close()
 
-	size, err := r.Seek(0, os.SEEK_END)
+	size, err := r.Seek(0, io.SeekEnd)
 	if err != nil {
 		return false, err
 	}
