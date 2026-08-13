@@ -315,13 +315,27 @@ func decodeBatch(data []byte, fn func(i int, index batchIndex) error) error {
 	return nil
 }
 
-func decodeBatchToMem(data []byte, expectSeq uint64, mdb *memdb.DB) (seq uint64, batchLen int, err error) {
+// decodeBatchToMem decodes one journal batch and applies it to mdb.
+//
+// A batch is applied whatever its sequence number, including one below the
+// sequence recovery has already reached. That used to be rejected as
+// "invalid sequence number", and since opt.StrictJournal is set by neither
+// DefaultStrict nor NoStrict, recoverJournal took its skip branch and carried
+// on, silently dropping committed records.
+//
+// Journals written by the reference C++ implementation contain such batches
+// routinely. VersionSet::LogAndApply stores last_sequence_, the live counter,
+// in every manifest edit, while DBImpl::CompactMemTable records log_number as
+// the journal still being written; that flush runs with the database lock
+// released, so concurrent writes advance the counter before the manifest is
+// written. The manifest therefore names a journal whose first batch is older
+// than the manifest's own last sequence. DBImpl::RecoverLogFile replays all of
+// them and only raises its running maximum, which is what the callers here do
+// too.
+func decodeBatchToMem(data []byte, mdb *memdb.DB) (seq uint64, batchLen int, err error) {
 	seq, batchLen, err = decodeBatchHeader(data)
 	if err != nil {
 		return 0, 0, err
-	}
-	if seq < expectSeq {
-		return 0, 0, newErrBatchCorrupted("invalid sequence number")
 	}
 	data = data[batchHeaderLen:]
 	var ik []byte

@@ -591,7 +591,7 @@ func (db *DB) recoverJournal() error {
 					fr.Close()
 					return errors.SetFd(err, fd)
 				}
-				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), db.seq, mdb)
+				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), mdb)
 				if err != nil {
 					if !strict && errors.IsCorrupted(err) {
 						db.s.logf("journal error: %v (skipped)", err)
@@ -603,8 +603,13 @@ func (db *DB) recoverJournal() error {
 					return errors.SetFd(err, fd)
 				}
 
-				// Save sequence number.
-				db.seq = batchSeq + uint64(batchLen)
+				// Save sequence number. Only ever raise it: a journal may hold
+				// batches below the sequence recovery has already reached, and
+				// the reference implementation likewise takes the maximum
+				// rather than the last one seen. See decodeBatchToMem.
+				if end := batchSeq + uint64(batchLen); end > db.seq {
+					db.seq = end
+				}
 
 				// Flush it if large enough.
 				if mdb.Size() >= writeBuffer {
@@ -731,7 +736,7 @@ func (db *DB) recoverJournalRO() error {
 					fr.Close()
 					return errors.SetFd(err, fd)
 				}
-				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), db.seq, mdb)
+				batchSeq, batchLen, err = decodeBatchToMem(buf.Bytes(), mdb)
 				if err != nil {
 					if !strict && errors.IsCorrupted(err) {
 						db.s.logf("journal error: %v (skipped)", err)
@@ -743,8 +748,13 @@ func (db *DB) recoverJournalRO() error {
 					return errors.SetFd(err, fd)
 				}
 
-				// Save sequence number.
-				db.seq = batchSeq + uint64(batchLen)
+				// Save sequence number. Only ever raise it: a journal may hold
+				// batches below the sequence recovery has already reached, and
+				// the reference implementation likewise takes the maximum
+				// rather than the last one seen. See decodeBatchToMem.
+				if end := batchSeq + uint64(batchLen); end > db.seq {
+					db.seq = end
+				}
 			}
 
 			fr.Close()
