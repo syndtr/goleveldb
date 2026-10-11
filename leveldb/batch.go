@@ -330,7 +330,12 @@ func decodeBatchToMem(data []byte, expectSeq uint64, mdb *memdb.DB) (seq uint64,
 		if i >= batchLen {
 			return newErrBatchCorrupted("invalid records length")
 		}
-		ik = makeInternalKey(ik, index.k(data), seq+uint64(i), index.keyType)
+		// Past the 56-bit internal key, makeInternalKey panics and recovery cannot skip the batch.
+		recSeq := seq + uint64(i)
+		if recSeq < seq || recSeq > keyMaxSeq {
+			return newErrBatchCorrupted("invalid sequence number")
+		}
+		ik = makeInternalKey(ik, index.k(data), recSeq, index.keyType)
 		if err := mdb.Put(ik, index.v(data)); err != nil {
 			return err
 		}

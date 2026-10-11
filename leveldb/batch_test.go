@@ -13,6 +13,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/syndtr/goleveldb/leveldb/errors"
+	"github.com/syndtr/goleveldb/leveldb/memdb"
 	"github.com/syndtr/goleveldb/leveldb/testutil"
 )
 
@@ -175,4 +177,33 @@ func benchmarkBatchWrite(b *testing.B, config *BatchConfig) {
 		}
 	}
 	b.ReportAllocs()
+}
+
+func TestDecodeBatchToMemRejectsSequencePastInternalKey(t *testing.T) {
+	put := func(seq uint64, keys ...string) []byte {
+		b := new(Batch)
+		for _, key := range keys {
+			b.Put([]byte(key), []byte("v"))
+		}
+		return append(encodeBatchHeader(nil, seq, b.Len()), b.data...)
+	}
+	decode := func(data []byte) error {
+		mdb := memdb.New(defaultIComparer, 1<<20)
+		_, _, err := decodeBatchToMem(data, 0, mdb)
+		return err
+	}
+
+	if err := decode(put(keyMaxSeq+1, "k")); !errors.IsCorrupted(err) {
+		t.Fatalf("header sequence: err = %v", err)
+	}
+	if err := decode(put(keyMaxSeq, "a", "b")); !errors.IsCorrupted(err) {
+		t.Fatalf("second record: err = %v", err)
+	}
+
+	data := put(7, "k")
+	mdb := memdb.New(defaultIComparer, 1<<20)
+	seq, n, err := decodeBatchToMem(data, 0, mdb)
+	if err != nil || seq != 7 || n != 1 {
+		t.Fatalf("seq=%d n=%d err=%v", seq, n, err)
+	}
 }
