@@ -58,6 +58,15 @@ func (p *BufferPool) Get(n int) []byte {
 		*b = (*b)[:n]
 		return *b
 	} else {
+		// The last pool contains all buffers larger than baseline*4, regardless
+		// of size. Reusing an oversized buffer for a small read can inflate block
+		// cache accounting, which charges by capacity rather than length. Drop
+		// buffers exceeding 2*n and allocate one sized for the requested read.
+		if poolNum == len(p.baseline) && cap(*b) > 2*n {
+			atomic.AddUint32(&p.miss, 1)
+			*b = make([]byte, n)
+			return *b
+		}
 		// If there is enough capacity in the bytes grabbed, resize the length
 		// to n and return.
 		if n < cap(*b) {
